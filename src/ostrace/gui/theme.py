@@ -42,10 +42,12 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
 
 __all__ = [
+    "MARK_TINT",
     "Scheme",
     "Severity",
     "apply_theme",
     "contrast_ratio",
+    "mark_tint",
     "palette_for",
     "resolve_scheme",
     "severity_for",
@@ -105,6 +107,15 @@ _ROLES: dict[Scheme, dict[QPalette.ColorRole, str]] = {
         QPalette.ColorRole.Shadow: "#000000",
     },
 }
+
+#: A row the user marked. Deliberately nowhere near `Highlight`: the first
+#: version borrowed an accent colour and produced a marked row identical to a
+#: selected one, so the user could not tell what they had marked from what they
+#: had clicked. Amber against the blue selection is unmistakable at a glance,
+#: and every severity foreground stays above WCAG AA on it -- asserted in
+#: `test_gui_theme.py`, because a mark that makes an Error unreadable is worse
+#: than no mark.
+MARK_TINT: dict[Scheme, str] = {Scheme.LIGHT: "#fff7d6", Scheme.DARK: "#332c1a"}
 
 #: Disabled text, per scheme. ``Disabled`` is not decorative: Fusion renders it
 #: for every disabled widget, and leaving it at the default produces a disabled
@@ -172,6 +183,11 @@ def palette_for(scheme: Scheme) -> QPalette:
     ):
         palette.setColor(QPalette.ColorGroup.Disabled, role, disabled)
     return palette
+
+
+def mark_tint(scheme: Scheme) -> QColor:
+    """The background of a marked row."""
+    return QColor(MARK_TINT[scheme])
 
 
 def severity_for(level: Level, scheme: Scheme) -> Severity:

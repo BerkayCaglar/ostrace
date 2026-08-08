@@ -285,19 +285,11 @@ find-next to `F3` *and* `n` *and* `Ctrl+G`, and jump-to-bottom to `Ctrl+End`
 *and* `Shift+G`, shipping on Windows and macOS — this project's exact target
 pair.
 
-| Action | Bindings |
-| --- | --- |
-| Search | `Ctrl+F`, `/` |
-| Next / previous match | `F3` / `Shift+F3`, `n` / `N` |
-| Top / bottom | `Ctrl+Home` / `Ctrl+End`, `g` / `Shift+G` |
-| Resume following | `Ctrl+End` again, at the bottom |
-| Mark a row | `Ctrl+M`, `m` |
-| Next / previous mark | `Ctrl+Shift+N` / `Ctrl+Shift+P`, `]` / `[` |
-| Next / previous gap | `Ctrl+Shift+G` / `Ctrl+Alt+Shift+G` |
-| Next / previous error | `e` / `Shift+E` |
-| Step row while the detail pane has focus | `F7` / `F8` |
-| Pause | `Ctrl+P` |
-| Copy | `Ctrl+C` |
+**The table is generated, not written.** `gui/shortcuts.py` holds one list of
+bindings; the window builds its actions from it and the `F1` sheet renders it.
+klogg's fourth trap is a key table in a manual that drifted from the code, and
+this makes drift impossible rather than discouraged. Run `F1` for the current
+list.
 
 Use `QKeySequence.StandardKey` wherever one exists: `Ctrl` maps to `⌘`
 automatically, but *bindings* differ per platform and the standard keys know
@@ -366,6 +358,13 @@ Derive from the palette roles rather than inventing colours: `Base` /
 `AlternateBase` for row backgrounds, `Text`, `Highlight` / `HighlightedText`,
 `PlaceholderText` for dimming — the theme's own grey is better than ours — and
 `Accent`.
+
+**A mark has its own colour, and it is not the accent.** The first attempt
+borrowed one and produced a marked row identical to a selected one — the user
+could not tell what they had marked from what they had merely clicked. Marks
+are amber against the blue selection, and every severity foreground is checked
+against the mark tint as well as against `Base`: a mark that makes an Error
+unreadable hides the line somebody cared enough to annotate.
 
 **Colour is never the only cue for severity.** The Level column is text and
 stays text. A background tint at 14% sits at roughly 1.12–1.22:1 against `Base`

@@ -27,6 +27,7 @@ from ostrace.gui.theme import (
     Scheme,
     apply_theme,
     contrast_ratio,
+    mark_tint,
     palette_for,
     severity_for,
 )
@@ -62,6 +63,27 @@ def test_selected_rows_stay_legible(scheme: Scheme) -> None:
     palette = palette_for(scheme)
     ratio = contrast_ratio(palette.highlightedText().color(), palette.highlight().color())
     assert ratio >= AA, f"{scheme}: {ratio:.2f}:1"
+
+
+@pytest.mark.parametrize("scheme", list(Scheme))
+@pytest.mark.parametrize("level", list(Level))
+def test_every_severity_stays_legible_on_a_marked_row(scheme: Scheme, level: Level) -> None:
+    """A mark replaces the row background, so it gets the same check.
+
+    A mark that makes an Error unreadable is worse than no mark: it hides the
+    line the user cared enough about to annotate.
+    """
+    ratio = contrast_ratio(severity_for(level, scheme).foreground, mark_tint(scheme))
+    assert ratio >= AA, f"{level.name} on a mark in {scheme}: {ratio:.2f}:1"
+
+
+@pytest.mark.parametrize("scheme", list(Scheme))
+def test_a_mark_cannot_be_mistaken_for_a_selection(scheme: Scheme) -> None:
+    """The first version borrowed an accent colour and produced a marked row
+    identical to a selected one -- so the user could not tell what they had
+    marked from what they had merely clicked."""
+    assert mark_tint(scheme) != palette_for(scheme).highlight().color()
+    assert contrast_ratio(mark_tint(scheme), palette_for(scheme).highlight().color()) > 2.0
 
 
 def test_the_two_schemes_are_actually_different() -> None:

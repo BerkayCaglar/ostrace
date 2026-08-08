@@ -98,6 +98,16 @@ class FilterBar(QWidget):
             and not self.search
         )
 
+    def focus_search(self) -> None:
+        """Put the cursor in the search box and select what is there.
+
+        Selecting rather than appending: the second press of Find is almost
+        always a different search, and a box that keeps the old text is one the
+        user has to clear before they can use it.
+        """
+        self._search.setFocus()
+        self._search.selectAll()
+
     def clear(self) -> None:
         """Reset to showing everything. Wired to the banner's way out."""
         blocked = [self._level, self._process, self._subsystem, self._search, self._regex]

@@ -31,20 +31,24 @@ from PySide6.QtCore import QModelIndex, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFileDialog,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
 from ostrace.errors import OstraceError
+from ostrace.exporters.base import escape
 from ostrace.gui.filters import Filter
 from ostrace.gui.live import CaptureThread
 from ostrace.gui.loader import CaptureLoader
-from ostrace.gui.models import RecordModel
+from ostrace.gui.models import Find, RecordModel
 from ostrace.gui.pump import Pump
+from ostrace.gui.shortcuts import BINDINGS, key_table, sequences
 from ostrace.gui.theme import Scheme
 from ostrace.gui.widgets.banner import Banner
 from ostrace.gui.widgets.detail_pane import DetailPane
@@ -94,6 +98,36 @@ def _submenu(action: QAction) -> QMenu | None:
 class MainWindow(QMainWindow):
     """Toolbar, filter bar, table, detail pane, status bar."""
 
+    # Declared, then filled from `gui.shortcuts.BINDINGS` in `_build_actions`.
+    # Assigning them through `setattr` alone would leave a type checker blind
+    # to twenty attributes -- and static checking is one of the few things
+    # standing in for the macOS testing this project cannot do. The list is
+    # asserted against the table in `test_gui_shortcuts.py`, so the two cannot
+    # drift.
+    action_capture: QAction
+    action_pause: QAction
+    action_disconnect: QAction
+    action_open: QAction
+    action_export: QAction
+    action_copy: QAction
+    action_find: QAction
+    action_mark: QAction
+    action_clear_marks: QAction
+    action_top: QAction
+    action_bottom: QAction
+    action_next_error: QAction
+    action_previous_error: QAction
+    action_next_marker: QAction
+    action_previous_marker: QAction
+    action_next_mark: QAction
+    action_previous_mark: QAction
+    action_step_down: QAction
+    action_step_up: QAction
+    action_keys: QAction
+    action_quit: QAction
+    action_about: QAction
+    action_settings: QAction
+
     def __init__(self, scheme: Scheme = Scheme.LIGHT, parent: QWidgetType | None = None) -> None:
         super().__init__(parent)
         self.scheme = scheme
@@ -130,6 +164,9 @@ class MainWindow(QMainWindow):
         self.capture: Capture | None = None
         self._loader: CaptureLoader | None = None
         self._showing_filter_notice = False
+        #: Auto-follow. Set when the user asks to resume it, cleared as soon as
+        #: they scroll away -- see `_follow`, which derives the rest.
+        self._following = True
         self._capture_thread: CaptureThread | None = None
         self._pump: Pump | None = None
         self.model = RecordModel(scheme, parent=self)
@@ -144,12 +181,53 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self._build_menus()
 
+        self._connect_actions()
+        self._set_capturing(capturing=False)
+
+    def _connect_actions(self) -> None:
+        """Wire every action to what it does.
+
+        Separate from ``__init__`` because there are twenty of them and a
+        constructor that also happens to be the wiring diagram is one nobody
+        reads.
+        """
         self.filter_bar.changed.connect(self._on_filter_changed)
         self.action_open.triggered.connect(self.choose_capture)
         self.action_capture.triggered.connect(self.capture_from_device)
         self.action_disconnect.triggered.connect(self.stop_capture)
         self.action_pause.toggled.connect(self.set_paused)
-        self._set_capturing(capturing=False)
+
+        self.action_copy.triggered.connect(self.copy_selection)
+        self.action_find.triggered.connect(self.filter_bar.focus_search)
+        self.action_mark.triggered.connect(self.toggle_mark)
+        self.action_clear_marks.triggered.connect(self.clear_marks)
+        self.action_top.triggered.connect(self.go_to_top)
+        self.action_bottom.triggered.connect(self.go_to_bottom)
+        self.action_next_error.triggered.connect(lambda: self.find_next(Find.ERROR))
+        self.action_previous_error.triggered.connect(
+            lambda: self.find_next(Find.ERROR, backwards=True)
+        )
+        self.action_next_marker.triggered.connect(lambda: self.find_next(Find.MARKER))
+        self.action_previous_marker.triggered.connect(
+            lambda: self.find_next(Find.MARKER, backwards=True)
+        )
+        self.action_next_mark.triggered.connect(lambda: self.find_next(Find.MARK))
+        self.action_previous_mark.triggered.connect(
+            lambda: self.find_next(Find.MARK, backwards=True)
+        )
+        self.action_step_down.triggered.connect(lambda: self.step_row(1))
+        self.action_step_up.triggered.connect(lambda: self.step_row(-1))
+        self.action_keys.triggered.connect(self.show_keys)
+
+    def clear_marks(self) -> None:
+        """Drop every mark.
+
+        A method rather than connecting ``self.model.clear_marks`` directly:
+        the model is *replaced* whenever a capture is opened or started, and a
+        direct connection would go on clearing the marks of a model nobody can
+        see any more.
+        """
+        self.model.clear_marks()
 
     def _connect_selection(self) -> None:
         """Re-attach to the selection model, which is replaced with the model."""
@@ -188,21 +266,32 @@ class MainWindow(QMainWindow):
     # -- actions ---------------------------------------------------------
 
     def _build_actions(self) -> None:
-        """Every action, each with an explicit menu role.
+        """Build every action from `gui.shortcuts.BINDINGS`.
 
-        ``_action`` refuses to create one without a role, which is the point:
-        a rule enforced by the only constructor is a rule that survives someone
-        adding a menu item in a hurry.
+        The bindings table is also the help sheet, so a key that changes here
+        changes the documentation in the same commit or not at all. klogg's
+        fourth trap is a key table in a manual that drifted from the code.
+
+        ``_action`` refuses to create one without a menu role, which is the
+        point: a rule enforced by the only constructor survives someone adding
+        a menu item in a hurry.
         """
-        self.action_capture = self._action("&Capture", QKeySequence("Ctrl+R"))
-        self.action_pause = self._action("&Pause", QKeySequence("Ctrl+P"), checkable=True)
-        self.action_disconnect = self._action("&Disconnect", QKeySequence("Ctrl+D"))
-        self.action_open = self._action("&Open Capture…", QKeySequence.StandardKey.Open)
-        self.action_export = self._action("&Export…", QKeySequence("Ctrl+E"))
+        self.actions_by_name: dict[str, QAction] = {}
+        for binding in BINDINGS:
+            keys = sequences(binding)
+            action = self._action(binding.text, keys[0], checkable=binding.checkable)
+            if len(keys) > 1:
+                # Aliases are real bindings, not documentation. A menu shows
+                # one; `setShortcuts` registers all of them.
+                action.setShortcuts(keys)
+            action.setToolTip(binding.description)
+            setattr(self, f"action_{binding.name}", action)
+            self.actions_by_name[binding.name] = action
 
-        # Qt would relocate these three on macOS by matching their text. Two of
-        # them we *want* relocated -- that is the native behaviour a Mac user
-        # expects -- so they get the real role rather than NoRole.
+        # Qt relocates these three on macOS by matching their text, and should:
+        # that is the native behaviour a Mac user expects. They get the real
+        # role rather than NoRole, and they are built here rather than in the
+        # table because their roles, not their keys, are the point.
         self.action_quit = self._action(
             "&Quit", QKeySequence.StandardKey.Quit, role=QAction.MenuRole.QuitRole
         )
@@ -212,12 +301,6 @@ class MainWindow(QMainWindow):
             QKeySequence.StandardKey.Preferences,
             role=QAction.MenuRole.PreferencesRole,
         )
-
-        self.action_copy = self._action("&Copy", QKeySequence.StandardKey.Copy)
-        self.action_find = self._action("&Find", QKeySequence.StandardKey.Find)
-        self.action_bottom = self._action("Go to &Bottom", QKeySequence("Ctrl+End"))
-        self.action_top = self._action("Go to &Top", QKeySequence("Ctrl+Home"))
-        self.action_next_gap = self._action("Next &Gap", QKeySequence("Ctrl+Shift+G"))
 
         self.action_quit.triggered.connect(self.close)
 
@@ -250,36 +333,27 @@ class MainWindow(QMainWindow):
         # failure surfaces nowhere near here: the menu bar keeps an action
         # whose `menu()` hands back a fresh wrapper around freed memory, which
         # reports itself valid right up until it is used.
-        capture = QMenu("&Capture", self)
-        bar.addMenu(capture)
-        capture.addAction(self.action_capture)
-        capture.addAction(self.action_pause)
-        capture.addAction(self.action_disconnect)
-        capture.addSeparator()
-        capture.addAction(self.action_open)
-        capture.addAction(self.action_export)
-        capture.addSeparator()
-        capture.addAction(self.action_quit)
+        self.menus = {
+            name: QMenu(title, self)
+            for name, title in (
+                ("capture", "&Capture"),
+                ("edit", "&Edit"),
+                ("view", "&View"),
+                ("help", "&Help"),
+            )
+        }
+        for menu in self.menus.values():
+            bar.addMenu(menu)
 
-        edit = QMenu("&Edit", self)
-        bar.addMenu(edit)
-        edit.addAction(self.action_copy)
-        edit.addAction(self.action_find)
-        edit.addSeparator()
-        edit.addAction(self.action_settings)
+        for binding in BINDINGS:
+            self.menus[binding.menu].addAction(self.actions_by_name[binding.name])
 
-        view = QMenu("&View", self)
-        bar.addMenu(view)
-        view.addAction(self.action_top)
-        view.addAction(self.action_bottom)
-        view.addSeparator()
-        view.addAction(self.action_next_gap)
-
-        help_menu = QMenu("&Help", self)
-        bar.addMenu(help_menu)
-        help_menu.addAction(self.action_about)
-
-        self.menus = {"capture": capture, "edit": edit, "view": view, "help": help_menu}
+        self.menus["capture"].addSeparator()
+        self.menus["capture"].addAction(self.action_quit)
+        self.menus["edit"].addSeparator()
+        self.menus["edit"].addAction(self.action_settings)
+        self.menus["help"].addSeparator()
+        self.menus["help"].addAction(self.action_about)
 
     def menu_items(self) -> list[QAction]:
         """Every clickable item in the menu bar, for the menu-role test.
@@ -519,6 +593,91 @@ class MainWindow(QMainWindow):
         if bar.value() >= bar.maximum() - _FOLLOW_SLACK:
             self.table.scrollToBottom()
 
+    # -- navigation, marks, copy -----------------------------------------
+
+    def go_to(self, row: int | None) -> None:
+        """Select and scroll to a row, if there is one."""
+        if row is None or not 0 <= row < self.model.rowCount():
+            return
+        index = self.model.index(row, 0)
+        self.table.setCurrentIndex(index)
+        self.table.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
+
+    def go_to_top(self) -> None:
+        self.go_to(0)
+
+    def go_to_bottom(self) -> None:
+        """Jump to the last row, and resume following if already there.
+
+        Two commands on one key, in the order klogg settled on: the first press
+        takes you to the bottom, the second says *stay* there. Conflating them
+        into one is what leaves Wireshark's users with "Ctrl End is close, but
+        doesn't resume auto scroll".
+        """
+        last = self.model.rowCount() - 1
+        if last < 0:
+            return
+        if self.table.currentIndex().row() == last:
+            self._following = True
+        self.go_to(last)
+
+    def find_next(self, kind: Find, *, backwards: bool = False) -> None:
+        current = self.table.currentIndex()
+        start = current.row() if current.isValid() else -1 if not backwards else 0
+        self.go_to(self.model.find(kind, start, backwards=backwards))
+
+    def toggle_mark(self) -> None:
+        current = self.table.currentIndex()
+        if current.isValid():
+            self.model.toggle_mark(current.row())
+
+    def step_row(self, delta: int) -> None:
+        """Move the selection without needing the table to have focus.
+
+        Wireshark documents exactly this and it is necessary rather than a
+        nicety once there is a detail pane: reading a record puts focus in the
+        pane, and the next thing anyone wants is the next record.
+        """
+        current = self.table.currentIndex()
+        row = current.row() + delta if current.isValid() else 0
+        self.go_to(max(0, min(row, self.model.rowCount() - 1)))
+
+    def copy_selection(self) -> None:
+        """Copy the selected rows as tab-separated text.
+
+        Rows rather than cells, and TSV rather than anything cleverer, because
+        the destination is a bug report or a spreadsheet. Two things the table
+        does for readability are undone on the way out:
+
+        - **a blanked repeat cell is filled back in.** What was elided to make
+          a long run scannable would be a hole in a pasted record, in exactly
+          the fields that identify it.
+        - **the message is folded onto one line**, by the exporters' own
+          `escape`. Device messages really do contain newlines and tabs, and a
+          record spilling across several lines breaks every consumer of a
+          tab-separated paste -- which is the whole audience for this. Reused
+          rather than reinvented: the folding rule is part of the bundle
+          contract, and two spellings of it would eventually disagree.
+        """
+        rows = sorted({index.row() for index in self.table.selectedIndexes()})
+        if not rows:
+            return
+        lines = [
+            "\t".join(
+                escape(self.model.cell_text(row, column))
+                for column in range(self.model.columnCount())
+            )
+            for row in rows
+        ]
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText("\n".join(lines))
+
+    def show_keys(self) -> None:
+        """The key sheet, rendered from the same table the bindings come from."""
+        rows = "\n".join(f"{keys:<28} {label} — {why}" for label, keys, why in key_table())
+        QMessageBox.information(self, "Keyboard shortcuts", rows)
+
     # -- filtering, selection, state -------------------------------------
 
     def _on_filter_changed(self) -> None:
@@ -606,3 +765,6 @@ class MainWindow(QMainWindow):
         elif self._showing_filter_notice:
             self.banner.hide()
             self._showing_filter_notice = False
+        #: Auto-follow. Set when the user asks to resume it, cleared as soon as
+        #: they scroll away -- see `_follow`, which derives the rest.
+        self._following = True

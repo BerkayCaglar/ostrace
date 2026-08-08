@@ -43,6 +43,7 @@ It is the right advice in C++ and the wrong advice here.
 from __future__ import annotations
 
 from bisect import bisect_left
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
@@ -50,18 +51,18 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelInd
 from ostrace.gui.columns import COLUMNS, Column
 from ostrace.gui.filters import Filter
 from ostrace.gui.markers import Eviction, is_record
-from ostrace.gui.theme import Scheme, Severity, severity_for
+from ostrace.gui.theme import Scheme, Severity, mark_tint, severity_for
 from ostrace.model import Gap, Level, Record
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
     from datetime import datetime
 
     from PySide6.QtCore import QObject
 
     from ostrace.gui.markers import Row
 
-__all__ = ["MARKER_LEVEL", "MAX_ROWS", "TRIM_MARGIN", "RecordModel"]
+__all__ = ["MARKER_LEVEL", "MAX_ROWS", "TRIM_MARGIN", "Find", "RecordModel"]
 
 #: Markers borrow a severity so their colour comes from the theme rather than
 #: from a literal here. NOTICE is plain body text in both schemes, which is
@@ -81,6 +82,29 @@ TRIM_MARGIN = 0.1
 ABSENT = "-"
 
 _Index = QModelIndex | QPersistentModelIndex
+
+
+class Find(StrEnum):
+    """What `RecordModel.find` looks for.
+
+    The three things worth jumping between in a log: what went wrong, where
+    data is missing, and where the reader left a note to themselves. Named
+    rather than passed as a predicate so the key bindings and the menu can
+    refer to them.
+    """
+
+    ERROR = "error"
+    MARKER = "marker"
+    MARK = "mark"
+
+
+_MATCHERS: dict[Find, Callable[[RecordModel, int], bool]] = {
+    Find.ERROR: lambda model, row: (
+        isinstance(record := model.row_at(row), Record) and record.is_error
+    ),
+    Find.MARKER: lambda model, row: not isinstance(model.row_at(row), Record),
+    Find.MARK: lambda model, row: model.is_marked(row),
+}
 
 
 def _field(record: Record, column: Column) -> str:
@@ -109,6 +133,10 @@ class RecordModel(QAbstractTableModel):
         self._filter = Filter()
         self._row_cap = row_cap
         self._evicted = 0
+        #: Source indices the user has marked. Held by source index for the
+        #: same reason selection anchors on one: a filter change must move a
+        #: mark with its record, not leave it on a row number.
+        self._marks: set[int] = set()
         self.scheme = scheme
 
         # Prebuilt once. Measured at 800k calls, `Qt.ItemFlag.A | Qt.ItemFlag.B`
@@ -126,6 +154,7 @@ class RecordModel(QAbstractTableModel):
         every cell of every repaint. Colours are built here and handed out.
         """
         self._severity = {level: severity_for(level, self.scheme) for level in Level}
+        self._mark_tint = mark_tint(self.scheme)
 
     # -- Qt interface ----------------------------------------------------
 
@@ -160,7 +189,7 @@ class RecordModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.ForegroundRole:
             return self._foreground(row)
         if role == Qt.ItemDataRole.BackgroundRole:
-            return self._background(row)
+            return self._background(index.row(), row)
         if role == Qt.ItemDataRole.ToolTipRole and column is Column.MESSAGE:
             # The one column that is routinely elided, so the one that needs a
             # way to read the rest without opening the detail pane.
@@ -172,6 +201,77 @@ class RecordModel(QAbstractTableModel):
     def row_at(self, view_row: int) -> Row:
         """The item behind a view row, filter and all."""
         return self._rows[self._visible[view_row]]
+
+    # -- marks -----------------------------------------------------------
+
+    def toggle_mark(self, view_row: int) -> bool:
+        """Mark or unmark a row. Returns whether it is now marked.
+
+        Marks are held as *source* indices, the same handle selection anchors
+        on, so a filter change moves them with the records rather than leaving
+        them pointing at whatever now occupies that row number.
+        """
+        source = self._visible[view_row]
+        if source in self._marks:
+            self._marks.discard(source)
+            marked = False
+        else:
+            self._marks.add(source)
+            marked = True
+        cell = self.index(view_row, 0)
+        self.dataChanged.emit(cell, self.index(view_row, len(COLUMNS) - 1))
+        return marked
+
+    def is_marked(self, view_row: int) -> bool:
+        return self._visible[view_row] in self._marks
+
+    @property
+    def marks(self) -> int:
+        return len(self._marks)
+
+    def clear_marks(self) -> None:
+        if not self._marks:
+            return
+        self._marks.clear()
+        if self._visible:
+            self.dataChanged.emit(
+                self.index(0, 0), self.index(len(self._visible) - 1, len(COLUMNS) - 1)
+            )
+
+    # -- navigation ------------------------------------------------------
+
+    def find(self, kind: Find, start: int, *, backwards: bool = False) -> int | None:
+        """The next row of ``kind`` after ``start``, wrapping around.
+
+        Wrapping rather than stopping: a log is read in a loop, and a "next
+        error" that goes quiet at the end of the buffer looks broken rather
+        than finished. The caller can tell it wrapped because the answer is
+        behind where it started.
+        """
+        total = len(self._visible)
+        if total == 0:
+            return None
+        step = -1 if backwards else 1
+        matches = _MATCHERS[kind]
+        for offset in range(1, total + 1):
+            row = (start + step * offset) % total
+            if matches(self, row):
+                return row
+        return None
+
+    def cell_text(self, view_row: int, column: int) -> str:
+        """What a cell holds, with a blanked repeat filled back in.
+
+        The table blanks a cell that repeats the row above to make a long run
+        scannable. That is a reading aid, and carrying it into the clipboard
+        would paste a record with holes where the most identifying fields
+        should be.
+        """
+        row = self.row_at(view_row)
+        which = Column(column)
+        if isinstance(row, Record) and COLUMNS[which].collapse_repeats:
+            return _field(row, which)
+        return self._display(row, which, view_row)
 
     def source_index(self, view_row: int) -> int:
         """A handle on a row that survives a filter change.
@@ -265,7 +365,16 @@ class RecordModel(QAbstractTableModel):
         level = row.level if isinstance(row, Record) else MARKER_LEVEL
         return self._severity[level].foreground
 
-    def _background(self, row: Row) -> object:
+    def _background(self, view_row: int, row: Row) -> object:
+        """Marks outrank every colour rule.
+
+        A mark is the user's own annotation and a severity tint is the
+        program's; when they disagree the user's wins, or marking a Fault
+        would do nothing visible and the feature would appear broken exactly
+        where it matters most.
+        """
+        if self._visible[view_row] in self._marks:
+            return self._mark_tint
         level = row.level if isinstance(row, Record) else MARKER_LEVEL
         return self._severity[level].tint
 
@@ -352,6 +461,10 @@ class RecordModel(QAbstractTableModel):
             self.beginRemoveRows(QModelIndex(), 0, gone - 1)
         self._rows = self._rows[drop:]
         self._visible = [index - drop for index in self._visible[gone:]]
+        # A mark on an evicted record goes with it. Keeping one that points at
+        # nothing is worse than losing it: the user would jump to a row that is
+        # not the one they marked.
+        self._marks = {mark - drop for mark in self._marks if mark >= drop}
         if gone:
             self.endRemoveRows()
 
@@ -383,6 +496,7 @@ class RecordModel(QAbstractTableModel):
         self.beginInsertRows(QModelIndex(), 0, 0)
         self._rows.insert(0, notice)
         self._visible = [0, *(index + 1 for index in self._visible)]
+        self._marks = {mark + 1 for mark in self._marks}
         self.endInsertRows()
 
     # -- filtering -------------------------------------------------------

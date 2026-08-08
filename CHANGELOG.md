@@ -199,6 +199,53 @@ fixed 200 records however large the capture is.
   nothing. Everything else is a summary, and a default that quietly discards
   data is the wrong default.
 
+### Added (phase 4, navigation)
+
+- **Keyboard navigation, marks and copy.** Jump to the next or previous error,
+  gap or mark; mark a row and come back to it; step rows while the detail pane
+  has focus; copy the selection.
+
+- **One binding table that is also the documentation.** `gui/shortcuts.py`
+  holds the list; the window builds its actions from it and `F1` renders it, so
+  a key that changes changes the help in the same commit or not at all. klogg's
+  fourth trap is a key table in a manual that drifted from the code.
+
+  Both traditions are aliased rather than chosen between — `Ctrl+End` *and*
+  `Shift+G`, `Ctrl+Shift+E` *and* `E` — because this ships on Windows and macOS
+  desktops and is also a log viewer, and picking one would be right for half
+  the users at no saving. Tests assert that every action has a key, that no
+  destructive verb sits on an editing chord (klogg's `Ctrl+X` truncates the
+  file on disk), and that aliases are really registered rather than merely
+  documented.
+
+- **Marks are held by source index**, the same handle selection anchors on, so
+  a filter change moves them with their records instead of leaving them
+  pointing at whatever now occupies that row. A mark on an evicted record goes
+  with it: a bookmark pointing at nothing is worse than none.
+
+- `Ctrl+End` twice resumes following, in klogg's order. Conflating "go to the
+  bottom" with "stay there" is what leaves Wireshark's users with *"Ctrl End is
+  close, but doesn't resume auto scroll"*.
+
+### Fixed (phase 4, navigation)
+
+- **Copying a record could produce several lines.** Device messages contain
+  newlines and tabs, and a record spilling across lines breaks every consumer
+  of a tab-separated paste — which is the whole audience for the feature. The
+  clipboard now uses the exporters' own folding rule rather than a second
+  spelling of it, and fills back in the repeated cells the table blanks for
+  readability.
+
+- **A marked row looked exactly like a selected one.** The mark borrowed an
+  accent colour that turned out to be the selection colour. Marks have their
+  own amber tint now, checked against every severity foreground for legibility.
+
+- **`gui/shortcuts` segfaulted the interpreter if imported without a
+  `QApplication`.** Constructing a `QKeySequence` without one is not an
+  exception, it is a crash — so a check that ran at import time turned a
+  mistake in the table into a dead test run with no traceback. The module holds
+  data at import and touches Qt only inside functions.
+
 ### Added (phase 4, live capture)
 
 - **The viewer captures from a device.** `Capture` streams from an attached
