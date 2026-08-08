@@ -4,10 +4,25 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from ostrace.model import Gap, Level, Platform, Record
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(text: str) -> str:
+    """Strip ANSI styling.
+
+    Python 3.14's argparse colourises help output and CI sets FORCE_COLOR, so
+    ``usage: ostrace`` arrives with escape sequences between the two words.
+    Assertions are about what the CLI says, not how a terminal was asked to
+    paint it.
+    """
+    return _ANSI.sub("", text)
+
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MIXED = FIXTURES / "ios26-mixed.jsonl.gz"

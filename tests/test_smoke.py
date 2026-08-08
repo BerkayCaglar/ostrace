@@ -10,7 +10,6 @@ mistake fails here in CI rather than in a user's install.
 
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
 
@@ -18,18 +17,7 @@ import pytest
 
 import ostrace
 from ostrace.cli import EXIT_NOT_IMPLEMENTED, EXIT_OK, build_parser, main
-
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def plain(text: str) -> str:
-    """Strip ANSI styling.
-
-    Python 3.14's argparse colourises help output, and CI sets FORCE_COLOR, so
-    ``usage: ostrace`` arrives with escape sequences between the two words.
-    Assertions are about the text, not how a terminal was asked to paint it.
-    """
-    return _ANSI.sub("", text)
+from tests.helpers import plain
 
 
 def test_package_exposes_a_version() -> None:
