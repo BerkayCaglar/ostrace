@@ -42,6 +42,7 @@ It is the right advice in C++ and the wrong advice here.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
@@ -170,6 +171,36 @@ class RecordModel(QAbstractTableModel):
     def row_at(self, view_row: int) -> Row:
         """The item behind a view row, filter and all."""
         return self._rows[self._visible[view_row]]
+
+    def source_index(self, view_row: int) -> int:
+        """A handle on a row that survives a filter change.
+
+        View rows are renumbered by every rescan; the position in the retained
+        list is not, so this is what an anchor holds. See `nearest_view_row`.
+        """
+        return self._visible[view_row]
+
+    def nearest_view_row(self, source: int) -> int | None:
+        """Where a retained item is now, or where it would have been.
+
+        This is the anchoring half of the rule in `docs/design/gui.md` §5: a
+        filter change re-attaches selection and viewport to a *record*, not to
+        a row number. If the anchored record did not survive the new filter,
+        the nearest survivor after it is the answer -- the user was reading at
+        that point in the log, and that point still exists even when the record
+        they clicked does not.
+
+        Nobody surveyed does this: Wireshark has had it open since 3.0.7, lnav
+        clamps row ordinals and teleports, and Logcat re-appends its whole
+        document so every keystroke in the filter field jumps to the bottom.
+
+        ``_visible`` is ascending by construction, so this is a binary search
+        rather than the scan the rescan just did.
+        """
+        if not self._visible:
+            return None
+        position = bisect_left(self._visible, source)
+        return min(position, len(self._visible) - 1)
 
     def _display(self, row: Row, column: Column, view_row: int) -> str:
         if not isinstance(row, Record):

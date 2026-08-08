@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from ostrace.storage.capture import Capture, open_capture
 from ostrace.storage.session import (
     FORMAT_VERSION,
     SessionMeta,
@@ -14,9 +15,11 @@ from ostrace.storage.spool import SpoolReader, SpoolWriter
 
 __all__ = [
     "FORMAT_VERSION",
+    "Capture",
     "SessionMeta",
     "SessionReader",
     "SessionWriter",
     "SpoolReader",
     "SpoolWriter",
+    "open_capture",
 ]

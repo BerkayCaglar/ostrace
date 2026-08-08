@@ -22,7 +22,7 @@ pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QHeaderView, QTableView
+from PySide6.QtWidgets import QHeaderView, QStyleOptionHeader, QTableView
 
 from ostrace.gui.widgets.log_table import FastHeader, LogTable
 from ostrace.gui.windows.main import MainWindow
@@ -122,7 +122,31 @@ def test_the_table_never_wraps_or_autosizes(window: MainWindow) -> None:
 
 def test_the_table_uses_the_fast_header(window: MainWindow) -> None:
     assert isinstance(window.table.horizontalHeader(), FastHeader)
-    assert window.table.horizontalHeader().isVisible() or True  # visible once shown
+
+
+def test_the_fast_header_still_shows_the_column_titles(qt_app: QApplication) -> None:
+    """A regression test for a bug this file's optimisation caused.
+
+    ``FastHeader`` skips ``super().initStyleOptionForIndex`` because the
+    selection query in it is quadratic — but the base method is also what fills
+    in the section's *text*. The first version skipped the lot and painted a
+    header with no titles at all: faster still, and a direct loss of the thing
+    the class was chosen to preserve over simply hiding the header.
+
+    Nothing failed. The suite passed, the benchmark improved, and only a
+    screenshot showed the empty strip.
+    """
+    del qt_app
+    table = LogTable()
+    table.setModel(_CountingModel(rows=5))
+    header = table.horizontalHeader()
+    assert isinstance(header, FastHeader)
+
+    option = QStyleOptionHeader()
+    header.initStyleOptionForIndex(option, 0)
+
+    assert option.text == "col 0"
+    assert option.section == 0
 
 
 class _CountingModel(QAbstractTableModel):
@@ -144,6 +168,12 @@ class _CountingModel(QAbstractTableModel):
     def data(self, index: _Index, role: int = Qt.ItemDataRole.DisplayRole) -> str | None:
         del index
         return "x" if role == Qt.ItemDataRole.DisplayRole else None
+
+    def headerData(  # noqa: N802
+        self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole
+    ) -> str | None:
+        del orientation
+        return f"col {section}" if role == Qt.ItemDataRole.DisplayRole else None
 
     def flags(self, index: _Index) -> Qt.ItemFlag:
         del index

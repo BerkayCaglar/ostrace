@@ -6,11 +6,16 @@ The table shows six of `Record`'s thirteen fields. This shows all of them, and
 it is where two of this project's less obvious invariants finally become
 visible to a human:
 
-- **Both clocks, and their difference.** A timestamp carries the *device's* UTC
-  offset, because the host is a different clock in a frequently different zone.
-  That rule is invisible until the two are on screen together, so this pane
-  shows the device time, the host time and the delta -- lnav's overlay content
-  model, applied to the field this project actually has.
+- **The device's clock, and its offset.** A timestamp carries the *device's*
+  UTC offset, because the host is a different clock in a frequently different
+  zone, and the offset is shown as a field of its own so the rule is visible
+  rather than implied.
+
+  The host clock joins it only for a *live* capture, where the two are
+  readings of the same moment -- lnav's overlay content model. Reading a file,
+  there is no second reading: a record captured this morning is not "36,000
+  seconds out", it is from this morning, and calling that a clock difference
+  would invent a problem the device does not have.
 - **`process_path` and `image_path` are different things.** `filename` is the
   process executable and `image_name` is the library loaded into it; they read
   backwards and differ in about nine records in ten.
@@ -23,16 +28,36 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFormLayout, QLabel, QScrollArea, QWidget
 
+from ostrace.gui.markers import Eviction
 from ostrace.model import Gap, Record
 
 if TYPE_CHECKING:
     from datetime import datetime
+
+    from PySide6.QtGui import QResizeEvent
 
 __all__ = ["DetailPane"]
 
 #: What an absent optional field reads as. The same spelling the exporters use,
 #: so a value copied out of here matches what a bundle would contain.
 ABSENT = "-"
+
+
+def _offset(moment: datetime) -> str:
+    """The UTC offset a timestamp carries, spelled out.
+
+    A naive timestamp is rejected on read rather than guessed at, so this
+    should never be ``ABSENT`` -- but it says so rather than crashing if one
+    ever gets through, because a detail pane that raises is worse than one
+    that admits it does not know.
+    """
+    delta = moment.utcoffset()
+    if delta is None:
+        return ABSENT
+    total = int(delta.total_seconds())
+    sign = "+" if total >= 0 else "-"
+    hours, remainder = divmod(abs(total), 3600)
+    return f"UTC{sign}{hours:02d}:{remainder // 60:02d}"
 
 
 class DetailPane(QScrollArea):
@@ -61,14 +86,52 @@ class DetailPane(QScrollArea):
             label.setWordWrap(True)
             self._form.addRow(f"{name}:", label)
             self._rows[name] = label
+        self._fit_body()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._fit_body()
+
+    def _fit_body(self) -> None:
+        """Give the form the height its wrapped text actually needs.
+
+        A word-wrapped `QLabel` reports a minimum height of about one line,
+        because it can always wrap harder. Inside a scroll area that is taken
+        as permission to compress: the pane squeezes the form below the height
+        its text needs and the rows overlap and clip, instead of the scroll
+        area doing what a scroll area is for.
+
+        Asking the layout for its ``heightForWidth`` at the viewport's width
+        turns "how short could this be" into "how tall is this actually", which
+        is the question a scrollable pane needs answered.
+        """
+        width = self.viewport().width()
+        if width <= 0:
+            return
+        needed = self._form.heightForWidth(width)
+        if needed > 0:
+            self._body.setMinimumHeight(needed)
 
     def clear(self) -> None:
         self._set([("Nothing selected", "Select a record to see every field of it.")])
 
     def show_record(self, record: Record, host_now: datetime | None = None) -> None:
-        """Display one record."""
+        """Display one record.
+
+        ``host_now`` is for a *live* capture, where the host's clock and the
+        device's are two readings of the same moment and the difference between
+        them is worth seeing. It is deliberately not supplied when reading a
+        file: a record captured this morning is not "36,000 seconds out", it is
+        simply from this morning, and presenting that as a clock difference
+        would invent a problem the device does not have.
+
+        The device's UTC offset is shown either way, because that is the fact
+        this project's timestamp rule turns on and it is true of a saved
+        capture as much as of a live one.
+        """
         fields: list[tuple[str, str]] = [
             ("Device time", f"{record.timestamp:%Y-%m-%d %H:%M:%S.%f%z}"),
+            ("Device UTC offset", _offset(record.timestamp)),
         ]
         if host_now is not None:
             delta = record.timestamp - host_now
@@ -112,10 +175,35 @@ class DetailPane(QScrollArea):
             ]
         )
 
-    def show_item(self, item: Record | Gap, host_now: datetime | None = None) -> None:
-        """Display whichever of the two kinds this is."""
+    def show_eviction(self, eviction: Eviction) -> None:
+        """Display the view's own trimming.
+
+        Deliberately worded against `show_gap`. The two look alike in a table
+        and mean opposite things, and this is the pane where the difference has
+        room to be stated rather than implied: the records are still in the
+        capture, and there is somewhere to go and read them.
+        """
+        self._set(
+            [
+                ("Records not shown", f"{eviction.count:,}"),
+                ("Visible log starts after", f"{eviction.through:%Y-%m-%d %H:%M:%S.%f%z}"),
+                (
+                    "Recoverable",
+                    (
+                        "Yes. These records are in the capture on disk; the view "
+                        "holds a bounded number of rows and dropped its oldest. "
+                        "Export the capture, or open it again, to read them."
+                    ),
+                ),
+            ]
+        )
+
+    def show_item(self, item: Record | Gap | Eviction, host_now: datetime | None = None) -> None:
+        """Display whichever kind of row this is."""
         if isinstance(item, Gap):
             self.show_gap(item)
+        elif isinstance(item, Eviction):
+            self.show_eviction(item)
         else:
             self.show_record(item, host_now)
 

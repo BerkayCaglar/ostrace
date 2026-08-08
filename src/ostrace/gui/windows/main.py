@@ -24,19 +24,33 @@ consequence.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QModelIndex, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence, QShowEvent
-from PySide6.QtWidgets import QMainWindow, QMenu, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QFileDialog,
+    QMainWindow,
+    QMenu,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
 
-from PySide6.QtCore import Qt  # isort: skip -- grouped with the Qt namespace uses below
-
+from ostrace.errors import OstraceError
+from ostrace.gui.filters import Filter
+from ostrace.gui.loader import CaptureLoader
+from ostrace.gui.models import RecordModel
 from ostrace.gui.theme import Scheme
 from ostrace.gui.widgets.banner import Banner
 from ostrace.gui.widgets.detail_pane import DetailPane
 from ostrace.gui.widgets.filter_bar import FilterBar
 from ostrace.gui.widgets.log_table import LogTable
 from ostrace.gui.widgets.status_bar import StatusBar
+from ostrace.paths import sessions_dir
+from ostrace.storage.capture import Capture, open_capture
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget as QWidgetType
@@ -51,6 +65,11 @@ _TITLE = "ostrace"
 #: Windows' is fractional.
 _TABLE_STRETCH = 3
 _DETAIL_STRETCH = 1
+
+#: How long the filter waits for the typing to stop. Long enough that a word is
+#: one rescan rather than five, short enough that the table does not feel
+#: detached from the keyboard.
+_FILTER_DEBOUNCE_MS = 200
 
 
 def _submenu(action: QAction) -> QMenu | None:
@@ -95,11 +114,25 @@ class MainWindow(QMainWindow):
         self.status = StatusBar(self)
         self.setStatusBar(self.status)
 
+        self.capture: Capture | None = None
+        self._loader: CaptureLoader | None = None
+        self.model = RecordModel(scheme, parent=self)
+        self.table.setModel(self.model)
+        selection = self.table.selectionModel()
+        if selection is not None:
+            selection.currentRowChanged.connect(self._on_current_row_changed)
+
+        self._filter_debounce = QTimer(self)
+        self._filter_debounce.setSingleShot(True)
+        self._filter_debounce.setInterval(_FILTER_DEBOUNCE_MS)
+        self._filter_debounce.timeout.connect(self._apply_filter)
+
         self._build_actions()
         self._build_menus()
 
         self.filter_bar.changed.connect(self._on_filter_changed)
-        self.banner.dismissed.connect(self.filter_bar.clear)
+        self.banner.dismissed.connect(self._on_banner_dismissed)
+        self.action_open.triggered.connect(self.choose_capture)
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
         """Split the panes on first show, when there is a height to divide.
@@ -240,15 +273,173 @@ class MainWindow(QMainWindow):
                     items.append(action)
         return items
 
-    # -- state -----------------------------------------------------------
+    # -- opening a capture -----------------------------------------------
+
+    def choose_capture(self) -> None:
+        """Ask for a capture and open it."""
+        chosen, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open capture",
+            str(sessions_dir()),
+            "Captures (*.jsonl.gz *.jsonl);;All files (*)",
+            # The native macOS dialog ignores the filter argument outright, so
+            # the filters above would silently do nothing there. Qt's own
+            # dialog honours them and looks the same on every platform, which
+            # is the same reason this project chose Qt in the first place.
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if chosen:
+            self.open_capture(Path(chosen))
+
+    def open_capture(self, path: Path) -> None:
+        """Load a capture into the table.
+
+        Read in batches from the event loop rather than in one pass -- see
+        `gui.loader`. Replacing the contents rather than appending to them: two
+        captures interleaved by arrival order would be a timeline that never
+        happened.
+        """
+        if self._loader is not None:
+            self._loader.cancel()
+
+        try:
+            capture = open_capture(path)
+        except OstraceError as exc:
+            self.banner.show_message(f"Could not open {path.name}: {exc}", "Dismiss")
+            return
+
+        self.capture = capture
+        self.model = RecordModel(self.scheme, parent=self)
+        self.table.setModel(self.model)
+        selection = self.table.selectionModel()
+        if selection is not None:
+            selection.currentRowChanged.connect(self._on_current_row_changed)
+        self.detail.clear()
+        self.status.set_device(capture.device)
+
+        self._loader = CaptureLoader(capture, self.model, parent=self)
+        self._loader.progressed.connect(self._on_progress)
+        self._loader.finished.connect(self._on_loaded)
+        self._loader.failed.connect(self._on_load_failed)
+        self._loader.start()
+
+        self.setWindowTitle(f"{path.name} — {_TITLE}")
+
+    def _on_progress(self, loaded: int) -> None:
+        self.status.set_volume(loaded)
+        self.status.set_gap_count(self.model.gaps)
+
+    def _on_loaded(self) -> None:
+        self._on_progress(self._loader.loaded if self._loader else 0)
+        if self.capture is not None and self.capture.truncated:
+            # Worth saying out loud: the end of a truncated capture is missing,
+            # and its absence says nothing about the device.
+            self.banner.show_message(
+                "This capture has no gzip trailer, so it was still being written "
+                "or the writer was killed. Its last records are missing.",
+                "Dismiss",
+            )
+        self._update_banner()
+
+    def _on_load_failed(self, message: str) -> None:
+        self._on_progress(self._loader.loaded if self._loader else 0)
+        self.banner.show_message(
+            f"Stopped reading: {message}. Everything read before that point is shown.",
+            "Dismiss",
+        )
+
+    # -- filtering, selection, state -------------------------------------
 
     def _on_filter_changed(self) -> None:
-        """Keep the invisible-state banner honest.
+        """Coalesce keystrokes into one rescan.
 
-        There is no model yet, so this only handles the case the filter bar can
-        answer on its own. Once rows exist, "the filter matched nothing" joins
-        it -- that is the pairing that stops an over-narrow filter looking like
-        a dead device.
+        Rescanning per character is what makes Android Studio's Logcat throw
+        the user to the bottom of the buffer on every key they press.
         """
-        if self.filter_bar.is_empty:
+        self._filter_debounce.start()
+
+    def _apply_filter(self) -> None:
+        try:
+            wanted = Filter(
+                minimum_level=self.filter_bar.minimum_level,
+                process=self.filter_bar.process,
+                subsystem=self.filter_bar.subsystem,
+                search=self.filter_bar.search,
+                regex=self.filter_bar.regex,
+            )
+        except ValueError as exc:
+            # Half a pattern is not an empty log. The previous filter stays
+            # applied and the user is told why, rather than watching the view
+            # empty itself as they type.
+            self.banner.show_message(str(exc), "Dismiss")
+            return
+
+        anchor = self._anchor()
+        self.model.set_filter(wanted)
+        self._restore(anchor)
+        self._update_banner()
+
+    def _anchor(self) -> int | None:
+        """Which retained item the user is currently reading.
+
+        A position in the retained list, not a view row: view rows are
+        renumbered by the rescan that is about to happen.
+        """
+        current = self.table.currentIndex()
+        if not current.isValid() or self.model.rowCount() == 0:
+            return None
+        return self.model.source_index(current.row())
+
+    def _restore(self, anchor: int | None) -> None:
+        """Put the user back where they were reading.
+
+        The record they had selected may not have survived the new filter, in
+        which case the nearest survivor after it is where they were. Nobody
+        surveyed does this -- see `RecordModel.nearest_view_row`.
+        """
+        if anchor is None:
+            return
+        row = self.model.nearest_view_row(anchor)
+        if row is None:
+            return
+        index = self.model.index(row, 0)
+        self.table.setCurrentIndex(index)
+        self.table.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
+
+    def _on_current_row_changed(self, current: QModelIndex, previous: QModelIndex) -> None:
+        del previous
+        if not current.isValid():
+            self.detail.clear()
+            return
+        # No host clock: these records came out of a file. Comparing one
+        # against the present moment measures how long ago it was captured, not
+        # how far apart the two clocks are, and labelling that "difference"
+        # would invent a problem the device does not have. The live path, which
+        # does have two readings of one moment, will pass it.
+        self.detail.show_item(self.model.row_at(current.row()))
+
+    def _on_banner_dismissed(self) -> None:
+        """The banner's one button, which means different things by context.
+
+        When a filter is hiding everything the way out *is* clearing it. For a
+        notice about the capture itself there is nothing to undo, so the button
+        only dismisses.
+        """
+        if self.banner.text.startswith("All "):
+            self.filter_bar.clear()
+        self.banner.hide()
+
+    def _update_banner(self) -> None:
+        """The two states that look exactly like a quiet device.
+
+        A filter that matches nothing and a device that is saying nothing
+        produce the same empty table. Only one of them is the user's own doing,
+        and only one has a way out.
+        """
+        if self.model.rowCount() == 0 and self.model.retained > 0:
+            self.banner.show_message(
+                f"All {self.model.retained:,} records are hidden by the filter.",
+                "Clear filter",
+            )
+        elif self.banner.text.startswith("All "):
             self.banner.hide()

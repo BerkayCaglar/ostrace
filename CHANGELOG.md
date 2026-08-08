@@ -199,6 +199,56 @@ fixed 200 records however large the capture is.
   nothing. Everything else is a summary, and a default that quietly discards
   data is the wrong default.
 
+### Added (phase 4, the viewer opens a capture)
+
+- **`ostrace-gui` now shows a log.** `Open Capture…` reads a session directory
+  or a bare `.jsonl.gz` into the table, with severity colouring, repeated cells
+  blanked, a filter row, and every field of the selected record in the detail
+  pane below.
+
+- **Selection and viewport anchor to a *record* across a filter change**, not
+  to a row number. If the anchored record does not survive the new filter, the
+  nearest survivor after it is where the user lands, because that is still the
+  point in the log they were reading.
+
+  Nobody surveyed does this: Wireshark #16318 has been open since 3.0.7, lnav
+  clamps row ordinals and teleports, and Android Studio's Logcat clears and
+  re-appends its whole document, so every keystroke in the filter field throws
+  the user to the bottom.
+
+- `storage.open_capture()`, shared by the CLI and the viewer. Whether a path is
+  a session directory or a bare spool is one decision, and it was previously
+  made inline by `export` — where the viewer would have had to make it again,
+  and eventually differently.
+
+- A batched loader. A capture is read from a zero-delay timer that hands
+  control back to the event loop between batches, so a large file does not
+  hold the GUI thread for the whole read. No thread and no lock: that is the
+  right shape for a file, which is fast and finite.
+
+### Fixed (phase 4, found by looking at the screen)
+
+- **`FastHeader` had silently removed the column titles.** Skipping
+  `super().initStyleOptionForIndex` avoids the quadratic selection query — and
+  also skips the part that fills in the section's *text*, so the header painted
+  empty. Nothing failed: the suite passed and the benchmark improved. Only a
+  screenshot showed it. The cheap half is reimplemented now, the titles are
+  back, and the measured gain is 541× rather than the 584× of the broken
+  version.
+
+- **The detail pane clipped and overlapped its rows.** A word-wrapped `QLabel`
+  reports a minimum height of about one line, which a scroll area takes as
+  permission to compress; the form was squeezed below the height its text
+  needed instead of scrolling. It is sized from the layout's `heightForWidth`
+  at the viewport width now.
+
+- **The detail pane compared a saved record against the current wall clock**
+  and labelled the result a clock difference. A record captured this morning is
+  not "36,000 seconds out"; it is from this morning. The host clock is shown
+  only for a live capture, where the two really are readings of one moment. The
+  device's UTC offset — the fact this project's timestamp rule turns on — is
+  now a field of its own, true either way.
+
 ### Added (phase 4, the model)
 
 - **`RecordModel`** — the table model: a plain list of retained items, its own
@@ -277,10 +327,10 @@ fixed 200 records however large the capture is.
 
   | header | time | `flags()` calls |
   | --- | ---: | ---: |
-  | stock `QHeaderView` | 3.896 s | 1,200,689 |
-  | `FastHeader` | 0.007 s | 683 |
+  | stock `QHeaderView` | 4.064 s | 1,200,689 |
+  | `FastHeader` | 0.008 s | 683 |
 
-  584×, with the column titles still on screen. Hiding the header is the cruder
+  541×, with the column titles still on screen. Hiding the header is the cruder
   version of the same fix. Asserted in CI on call counts rather than elapsed
   time, because a wall-clock threshold on a shared runner is a flaky test in a
   performance test's clothes.

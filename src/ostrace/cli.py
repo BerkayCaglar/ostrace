@@ -190,31 +190,19 @@ async def _capture(args: argparse.Namespace) -> int:
 def _export(args: argparse.Namespace) -> int:
     from pathlib import Path  # noqa: PLC0415
 
-    from ostrace.errors import StorageError  # noqa: PLC0415
     from ostrace.exporters import EXPORTERS  # noqa: PLC0415
     from ostrace.exporters.ai_report import AiReportExporter  # noqa: PLC0415
     from ostrace.paths import export_path  # noqa: PLC0415
-    from ostrace.storage.session import SessionReader  # noqa: PLC0415
-    from ostrace.storage.spool import SpoolReader  # noqa: PLC0415
-
-    session = Path(args.session)
-    if not session.exists():
-        msg = f"no capture at {session}"
-        raise StorageError(msg, hint="Pass a session directory or a .jsonl.gz capture file.")
+    from ostrace.storage.capture import open_capture  # noqa: PLC0415
 
     # A session directory carries device metadata and a bare spool does not.
-    # Exports must render sensibly without it rather than requiring it: the
-    # offline path exists precisely for files that arrived without a sidecar.
-    if session.is_dir():
-        reader = SessionReader(session)
-        items = reader.items()
-        device = reader.meta.device if reader.meta is not None else None
-        truncated = reader.truncated
-    else:
-        spool = SpoolReader(session)
-        items = spool.items()
-        device = None
-        truncated = spool.truncated
+    # Exports render sensibly without it rather than requiring it: the offline
+    # path exists precisely for files that arrived without a sidecar.
+    session = Path(args.session)
+    capture = open_capture(session)
+    items = capture.items()
+    device = capture.device
+    truncated = capture.truncated
 
     exporter = EXPORTERS[args.format]
     if args.budget_tokens is not None:
