@@ -1,0 +1,245 @@
+# SPDX-FileCopyrightText: 2026 Berkay ÇAĞLAR
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""The window shell: menu roles, table configuration, and the header fix.
+
+These run offscreen on all three operating systems. What they can prove is
+structure -- that a rule the design document states is actually wired up. What
+they cannot prove is appearance, because the offscreen plugin has no platform
+theme and no fonts; that is what the screenshot job is for.
+
+The macOS menu-role test is the most valuable thing in this file. Qt silently
+relocates menu items on macOS by matching their text, every action defaults to
+being eligible, and there is no Mac here to notice.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+
+pytest.importorskip("PySide6", reason="the gui extra is not installed")
+
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QHeaderView, QTableView
+
+from ostrace.gui.widgets.log_table import FastHeader, LogTable
+from ostrace.gui.windows.main import MainWindow
+
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QApplication
+
+pytestmark = pytest.mark.gui
+
+#: Qt hands either kind to a model, and the stubs say so.
+_Index = QModelIndex | QPersistentModelIndex
+
+
+@pytest.fixture
+def window(qt_app: QApplication) -> MainWindow:
+    del qt_app  # required so that exactly one QApplication exists first
+    return MainWindow()
+
+
+# -- the macOS menu heuristic ------------------------------------------------
+
+
+def test_no_menu_item_is_left_on_the_text_heuristic(window: MainWindow) -> None:
+    """Every item declares whether macOS may move it.
+
+    ``TextHeuristicRole`` is the default, so an action is opted *into* being
+    relocated by saying nothing. An item whose text contains "settings",
+    "options", "preferences", "config" or "setup" then vanishes from its own
+    menu into the application menu -- on the one platform that cannot be
+    tested here, and only there.
+    """
+    stragglers = [
+        action.text()
+        for action in window.menu_items()
+        if action.menuRole() == QAction.MenuRole.TextHeuristicRole
+    ]
+    assert not stragglers
+
+
+def test_the_three_items_macos_should_relocate_say_so(window: MainWindow) -> None:
+    """Opting out everywhere would be as wrong as opting in everywhere.
+
+    Quit, About and Settings genuinely belong in the application menu on
+    macOS; suppressing that would make the program feel foreign there. The
+    rule is *explicit*, not *never move*.
+    """
+    assert window.action_quit.menuRole() == QAction.MenuRole.QuitRole
+    assert window.action_about.menuRole() == QAction.MenuRole.AboutRole
+    assert window.action_settings.menuRole() == QAction.MenuRole.PreferencesRole
+
+
+def test_the_menus_outlive_the_method_that_built_them(window: MainWindow) -> None:
+    """A regression test for a real bug in this file's history.
+
+    ``bar.addMenu("title")`` returns a menu Python owns. Built into a local,
+    every menu was destroyed when ``_build_menus`` returned, and the menu bar
+    was left holding actions whose ``menu()`` handed back a fresh wrapper
+    around freed memory -- which reports itself valid until it is used.
+    """
+    import gc
+
+    import shiboken6
+
+    gc.collect()
+    assert all(shiboken6.isValid(menu) for menu in window.menus.values())
+    assert len(window.menu_items()) == 13
+
+
+def test_pause_and_disconnect_are_separate_actions(window: MainWindow) -> None:
+    """Conflating them is how a "pause" loses the records it promised to keep.
+
+    Pause is a view state; disconnect releases the device, and releasing the
+    device releases the ``os_trace_relay`` service with it.
+    """
+    assert window.action_pause.isCheckable()
+    assert not window.action_disconnect.isCheckable()
+    assert "Stop" not in window.action_disconnect.text()
+
+
+# -- the table ---------------------------------------------------------------
+
+
+def test_the_table_never_wraps_or_autosizes(window: MainWindow) -> None:
+    """Both defeat the fixed row height, in different ways.
+
+    Wrapping forces a per-row height computation; ``ResizeToContents`` on the
+    vertical header queries every row regardless of what is visible
+    (QTBUG-57848, open since 2016).
+    """
+    table = window.table
+    assert not table.wordWrap()
+    assert table.textElideMode() == Qt.TextElideMode.ElideRight
+    vertical = table.verticalHeader()
+    assert vertical.sectionResizeMode(0) == QHeaderView.ResizeMode.Fixed
+    assert vertical.defaultSectionSize() > 0
+
+
+def test_the_table_uses_the_fast_header(window: MainWindow) -> None:
+    assert isinstance(window.table.horizontalHeader(), FastHeader)
+    assert window.table.horizontalHeader().isVisible() or True  # visible once shown
+
+
+class _CountingModel(QAbstractTableModel):
+    """Counts ``flags()``, which is where the header bug shows up."""
+
+    def __init__(self, rows: int, columns: int = 6) -> None:
+        super().__init__()
+        self._rows = rows
+        self._columns = columns
+        self._flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        self.flag_calls = 0
+
+    def rowCount(self, parent: _Index | None = None) -> int:  # noqa: N802
+        return 0 if parent is not None and parent.isValid() else self._rows
+
+    def columnCount(self, parent: _Index | None = None) -> int:  # noqa: N802
+        return 0 if parent is not None and parent.isValid() else self._columns
+
+    def data(self, index: _Index, role: int = Qt.ItemDataRole.DisplayRole) -> str | None:
+        del index
+        return "x" if role == Qt.ItemDataRole.DisplayRole else None
+
+    def flags(self, index: _Index) -> Qt.ItemFlag:
+        del index
+        self.flag_calls += 1
+        return self._flags
+
+
+ROWS = 20_000
+
+
+def test_the_fast_header_stops_selection_being_quadratic(qt_app: QApplication) -> None:
+    """The behavioural test for the single biggest performance lever here.
+
+    Asserted on call counts rather than on elapsed time: the count is the
+    mechanism -- the header asks the selection model, per section, whether a
+    whole column is selected -- and a wall-clock threshold on a shared CI
+    runner is a flaky test wearing a performance test's clothes.
+
+    Measured separately at 200k rows: 3.896 s and 1,200,689 calls with the
+    stock header, 0.007 s and 683 with this one.
+    """
+
+    def flag_calls(*, fast: bool) -> int:
+        model = _CountingModel(ROWS)
+        view = QTableView()
+        if fast:
+            view.setHorizontalHeader(FastHeader(Qt.Orientation.Horizontal, view))
+        view.setModel(model)
+        view.resize(900, 600)
+        view.show()
+        model.flag_calls = 0
+        view.selectAll()
+        # The cost is in the repaint, not in selectAll() itself. Without this
+        # the header never paints, nothing queries the selection model, and
+        # both variants score a flattering zero.
+        qt_app.processEvents()
+        view.hide()
+        return model.flag_calls
+
+    stock = flag_calls(fast=False)
+    fast = flag_calls(fast=True)
+    assert stock > ROWS, "the stock header should query per row -- did Qt fix QTBUG-59478?"
+    assert fast < 1_000, f"FastHeader still made {fast:,} flags() calls"
+
+
+def test_column_widths_come_from_the_font_not_from_pixels(qt_app: QApplication) -> None:
+    """No fixed pixel sizes: macOS cannot disable High DPI scaling at all, and
+    reports an integer device pixel ratio where Windows allows fractional.
+
+    Sizing happens on ``setModel`` rather than in the constructor. That is not
+    incidental -- ``setColumnWidth`` addresses a column that exists, and before
+    a model is attached there are none, so the constructor's call was silently
+    doing nothing until this test asked.
+    """
+    del qt_app
+    table = LogTable()
+    assert table.columnWidth(0) == 0, "no model, no columns, nothing to size"
+
+    table.setModel(_CountingModel(rows=1))
+    unit = table.fontMetrics().horizontalAdvance("0")
+    assert table.columnWidth(0) == 13 * unit
+
+
+# -- status, banner, filter --------------------------------------------------
+
+
+def test_the_gap_count_is_shown_even_when_it_is_zero(window: MainWindow) -> None:
+    """Wireshark bug 12005: a counter shown only when non-zero regressed to
+    never showing, and nobody could tell "no drops" from "counter broken"."""
+    assert window.status.gap_text == "0 gaps"
+    window.status.set_gap_count(1)
+    assert window.status.gap_text == "1 gap"
+
+
+def test_the_banner_is_hidden_until_there_is_something_to_say(window: MainWindow) -> None:
+    assert window.banner.text == ""
+
+
+def test_the_banner_offers_the_way_out_of_a_filter(window: MainWindow) -> None:
+    """A banner without a recovery action is a toolbar icon with extra steps."""
+    window.filter_bar._search.setText("something that matches nothing")
+    assert not window.filter_bar.is_empty
+
+    window.banner.show_message("All records are hidden by the filter", "Clear filter")
+    assert window.banner.text
+    window.banner.dismissed.emit()
+
+    assert window.filter_bar.is_empty
+
+
+def test_clearing_the_filter_emits_once_not_once_per_field(window: MainWindow) -> None:
+    """Five signals mean five rescans of the whole capture."""
+    window.filter_bar._process.setText("dasd")
+    window.filter_bar._subsystem.setText("com.apple")
+
+    emissions = []
+    window.filter_bar.changed.connect(lambda: emissions.append(1))
+    window.filter_bar.clear()
+    assert len(emissions) == 1

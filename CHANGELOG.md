@@ -199,6 +199,56 @@ fixed 200 records however large the capture is.
   nothing. Everything else is a summary, and a default that quietly discards
   data is the wrong default.
 
+### Added (phase 4)
+
+- **The GUI shell**, behind the optional `gui` extra: `pip install 'ostrace[gui]'`,
+  then `ostrace-gui`. Menu bar, filter row, record table, detail pane and status
+  bar, themed and running — with no data in it yet. The CLI is unaffected and
+  Qt is never imported unless the viewer is launched, so a missing extra
+  produces one sentence naming the command to run rather than a traceback.
+
+- **A screenshot workflow**, `workflow_dispatch` only, rendering the window on
+  macOS and Windows in both colour schemes and uploading the images. This is
+  the answer to the constraint that runs through the whole project: there is no
+  Mac here, Qt silently relocates macOS menu items by matching their text, and
+  a passing test suite says nothing about either.
+
+  Two measurements shaped it. `QWidget.render()` produces real pixels under the
+  `offscreen` platform plugin on a widget that was never shown, so macOS needs
+  no display, no window manager and no xvfb. But that plugin's font database is
+  **empty on Windows** — every glyph renders as a tofu box while `QFontMetrics`
+  keeps returning plausible numbers — so Windows uses the native plugin, and no
+  test may assert a font metric offscreen. The capture tool refuses to write a
+  picture it knows is unreadable, because an unreadable screenshot still looks
+  like evidence.
+
+- **`FastHeader`**, a `QHeaderView` that does not ask the selection model which
+  columns are selected. QTBUG-59478 has been open since 2017 and its fix was
+  abandoned the same year. Measured at 200,000 rows × 6, `selectAll()`:
+
+  | header | time | `flags()` calls |
+  | --- | ---: | ---: |
+  | stock `QHeaderView` | 3.896 s | 1,200,689 |
+  | `FastHeader` | 0.007 s | 683 |
+
+  584×, with the column titles still on screen. Hiding the header is the cruder
+  version of the same fix. Asserted in CI on call counts rather than elapsed
+  time, because a wall-clock threshold on a shared runner is a flaky test in a
+  performance test's clothes.
+
+- **A theme that is a function from a colour scheme to a `QPalette`**, rather
+  than colours read out of the platform. `QStyleHints.setColorScheme()` is a
+  no-op under the offscreen plugin, so the naive approach cannot be tested or
+  screenshotted at all. As a function it can: CI asserts every severity colour
+  against WCAG AA in both schemes, and the screenshot job forces either scheme
+  on any platform. Colour is never the only cue — the Level column stays text
+  and the two urgent levels carry a glyph.
+
+- A `gui` pytest marker and a CI job that runs those tests on Linux, Windows
+  and macOS under one interpreter — the opposite shape to the existing sweep,
+  because what they verify is portability across operating systems rather than
+  across Python versions.
+
 ### Added (phase 4 groundwork)
 
 - [`docs/design/gui.md`](docs/design/gui.md) — the GUI behaviour contract,
