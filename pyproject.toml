@@ -151,7 +151,7 @@ ignore = [
 # with an upstream library is worth asserting about directly -- and import inside
 # test bodies so that a heavy or device-only dependency is not imported by the
 # whole suite.
-"tests/**" = ["ANN", "PLC0415", "PLC2701", "PLR2004", "SLF"]
+"tests/**" = ["ANN", "ARG", "PLC0415", "PLC2701", "PLR2004", "SLF"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "parents"

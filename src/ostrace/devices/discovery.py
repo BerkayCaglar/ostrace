@@ -102,13 +102,17 @@ async def read_device_info(
     """
     values = await _values(lockdown, _WANTED)
 
-    offset_raw = values.get("TimeZoneOffsetFromUTC")
-    utc_offset = timedelta(seconds=int(offset_raw)) if offset_raw is not None else None
+    # Lockdown values are plists and the same key can come back as a number on
+    # one iOS version and a string on another. A malformed clock is a reason to
+    # fall back, never a reason to abort a capture with a bare ValueError that
+    # carries none of the guidance the rest of this layer provides.
+    offset_seconds = _as_float(values.get("TimeZoneOffsetFromUTC"))
+    utc_offset = timedelta(seconds=offset_seconds) if offset_seconds is not None else None
 
-    device_epoch = values.get("TimeIntervalSince1970")
+    device_epoch = _as_float(values.get("TimeIntervalSince1970"))
     clock_skew = None
     if device_epoch is not None:
-        device_now = datetime.fromtimestamp(float(device_epoch), tz=UTC)
+        device_now = datetime.fromtimestamp(device_epoch, tz=UTC)
         clock_skew = device_now - datetime.now(tz=UTC)
 
     return DeviceInfo(
@@ -171,7 +175,10 @@ async def _values(lockdown: LockdownClient, keys: tuple[str, ...]) -> dict[str, 
     them is worth failing a capture over.
     """
     cached = getattr(lockdown, "all_values", None)
-    bulk: dict[str, Any] = dict(cached) if isinstance(cached, dict) else {}
+    # Read through, never copied: this is the device's whole root plist, over a
+    # hundred keys including binary blobs, and seven membership tests do not
+    # justify duplicating it.
+    bulk: dict[str, Any] = cached if isinstance(cached, dict) else {}
 
     values: dict[str, Any] = {}
     for key in keys:
@@ -183,3 +190,13 @@ async def _values(lockdown: LockdownClient, keys: tuple[str, ...]) -> dict[str, 
         except Exception:
             values[key] = None
     return values
+
+
+def _as_float(value: object) -> float | None:
+    """Coerce a lockdown value to a float, or report that it is unusable."""
+    if value is None:
+        return None
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None

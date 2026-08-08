@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -32,7 +32,6 @@ from ostrace.storage.spool import SpoolReader, SpoolWriter
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from datetime import datetime
     from types import TracebackType
     from typing import Self
 
@@ -169,11 +168,19 @@ class SessionWriter:
         self._spool.flush()
 
     def close(self, *, ended_at: datetime | None = None) -> None:
+        """Finalise the session, stamping when it ended.
+
+        ``ended_at`` defaults to now rather than to ``None``. A session closed
+        through the context manager passes nothing, and leaving the field null
+        there would make every cleanly finished capture indistinguishable on
+        disk from one whose process was killed -- which is one of the two things
+        the sidecar exists to record.
+        """
         if self._closed:
             return
         self._closed = True
         self._spool.close()
-        self.meta.ended_at = ended_at
+        self.meta.ended_at = ended_at if ended_at is not None else datetime.now(tz=UTC)
         self.meta.record_count = self._spool.record_count
         self.meta.gap_count = self._spool.gap_count
         self._write_meta()
@@ -213,7 +220,6 @@ class SessionReader:
         #: Public so that a consumer can hold one reader rather than a session
         #: and a spool that alias each other.
         self.spool = SpoolReader(self.path / SPOOL_NAME)
-        self.spool.meta = self.meta
 
     @property
     def truncated(self) -> bool:

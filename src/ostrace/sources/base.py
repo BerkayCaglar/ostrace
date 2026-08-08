@@ -93,8 +93,15 @@ class SourceCloseMixin:
     then gets the behaviour by construction rather than by remembering.
     """
 
-    async def aclose(self) -> None:  # pragma: no cover - overridden
-        """Release whatever the source holds."""
+    async def aclose(self) -> None:
+        """Release whatever the source holds.
+
+        Abstract on purpose. A default that quietly did nothing would give a
+        future source a working ``async with`` that releases nothing, and the
+        failure would only show up as sockets accumulating under load. A source
+        with genuinely nothing to release says so explicitly.
+        """
+        raise NotImplementedError
 
     async def __aenter__(self) -> Self:
         return self

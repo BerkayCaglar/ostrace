@@ -150,6 +150,29 @@ class TestReadableWhileWriting:
         assert messages[-1] == "line 19"
         assert len(messages) == 20
 
+    def test_truncated_answers_correctly_before_anything_is_read(self, tmp_path: Path) -> None:
+        """Asking "is this capture still being written?" is a question you ask
+        *before* reading it. It used to be a plain attribute assigned at the end
+        of a full pass, so the natural order always got False."""
+        path = tmp_path / "s.jsonl.gz"
+        writer = SpoolWriter(path, flush_every=1)
+        try:
+            writer.write(make_record(0))
+            assert SpoolReader(path).truncated is True
+        finally:
+            writer.close()
+
+        assert SpoolReader(path).truncated is False
+
+    def test_truncated_is_correct_when_iteration_stops_early(self, tmp_path: Path) -> None:
+        path = tmp_path / "s.jsonl.gz"
+        with SpoolWriter(path, flush_every=1) as writer:
+            writer.write_many([make_record(i) for i in range(10)])
+
+        reader = SpoolReader(path)
+        next(iter(reader.records()))
+        assert reader.truncated is False
+
     def test_unflushed_records_are_simply_absent(self, tmp_path: Path) -> None:
         """Not an error: they are still in the compressor, not on disk."""
         path = tmp_path / "s.jsonl.gz"
@@ -186,6 +209,21 @@ class TestDamagedFiles:
         reader = SpoolReader(path)
         assert len(list(reader.records())) == 2
         assert reader.malformed == 1
+
+    def test_the_malformed_count_describes_the_file_not_the_reader(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """It used to accumulate, so a second scan reported twice the damage."""
+        path = tmp_path / "s.jsonl.gz"
+        with gzip.open(path, "wb") as raw:
+            raw.write(b"{ not json\n")
+            raw.write(json.dumps(encode_record(make_record(0))).encode() + b"\n")
+
+        reader = SpoolReader(path)
+        for _ in range(3):
+            list(reader.records())
+            assert reader.malformed == 1
 
     def test_a_line_that_is_not_an_object_is_skipped(self, tmp_path: Path) -> None:
         path = tmp_path / "s.jsonl.gz"

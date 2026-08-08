@@ -143,13 +143,35 @@ class SpoolReader:
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        self.truncated = False
         self.malformed = 0
-        #: Set by :class:`~ostrace.storage.session.SessionReader` when a sidecar
-        #: describes this spool. ``None`` for a bare spool file, so that a
-        #: consumer has one attribute to ask rather than two shapes to tell
-        #: apart.
-        self.meta: object | None = None
+        self._truncated: bool | None = None
+
+    @property
+    def truncated(self) -> bool:
+        """True when the spool has no gzip trailer -- still open, or killed.
+
+        Answered on demand rather than only as a side effect of iterating. It
+        used to be a plain attribute set at the end of a full pass, which meant
+        that asking "is this capture still being written?" *before* reading it
+        -- the natural order -- always got ``False``, and a consumer that
+        stopped iterating early got the same wrong answer.
+
+        The probe decompresses but does not parse, so it is far cheaper than a
+        full pass, and any pass that does complete fills the value in for free.
+        """
+        if self._truncated is None:
+            self._truncated = self._probe()
+        return self._truncated
+
+    def _probe(self) -> bool:
+        decompressor = zlib.decompressobj(wbits=31)
+        with self.path.open("rb") as raw:
+            while chunk := raw.read(_CHUNK):
+                try:
+                    decompressor.decompress(chunk)
+                except zlib.error:
+                    return True
+        return not decompressor.eof
 
     def __iter__(self) -> Iterator[Record | Gap]:
         return self.items()
@@ -186,6 +208,9 @@ class SpoolReader:
                 self.malformed += 1
 
     def _objects(self) -> Iterator[dict[str, object]]:
+        # Reset per pass. The counter describes the file, not the reader, and
+        # accumulating across passes made a second scan report twice the damage.
+        self.malformed = 0
         for line in self.lines():
             try:
                 obj = json.loads(line)
@@ -225,8 +250,9 @@ class SpoolReader:
                 yield from complete
 
         # No gzip trailer means the writer never closed the file -- a capture
-        # still running, or one whose process was killed.
-        self.truncated = damaged or not decompressor.eof
+        # still running, or one whose process was killed. A completed pass
+        # already knows the answer, so record it and save the probe.
+        self._truncated = damaged or not decompressor.eof
 
         # Whatever is left after the last newline. The writer emits the line and
         # its newline in one call and flushes on a line boundary, so this is

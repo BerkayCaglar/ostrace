@@ -73,6 +73,46 @@ class TestWriter:
         finally:
             writer.close()
 
+    def test_the_context_manager_stamps_when_the_session_ended(
+        self,
+        tmp_path: Path,
+        device: DeviceInfo,
+    ) -> None:
+        """`ended_at` used to stay null for every session closed with `with`,
+        which is how the sidecar tells a finished capture from a killed one."""
+        with SessionWriter(
+            tmp_path / "c",
+            device=device,
+            source="os_trace_relay",
+            started_at=STARTED,
+        ) as writer:
+            writer.write(make_record(0))
+            path = writer.path
+
+        meta = json.loads((path / META_NAME).read_text(encoding="utf-8"))
+        assert meta["ended_at"] is not None
+        assert SessionReader(path).meta is not None
+
+    def test_a_session_killed_before_close_has_no_end(
+        self,
+        tmp_path: Path,
+        device: DeviceInfo,
+    ) -> None:
+        """The other half of the distinction: the sidecar written at open must
+        stay null until close, or the two cases are indistinguishable."""
+        writer = SessionWriter(
+            tmp_path / "c",
+            device=device,
+            source="os_trace_relay",
+            started_at=STARTED,
+        )
+        try:
+            writer.write(make_record(0))
+            meta = json.loads((writer.path / META_NAME).read_text(encoding="utf-8"))
+            assert meta["ended_at"] is None
+        finally:
+            writer.close()
+
     def test_closing_records_the_final_counts(self, tmp_path: Path, device: DeviceInfo) -> None:
         ended = STARTED + timedelta(minutes=5)
         with SessionWriter(

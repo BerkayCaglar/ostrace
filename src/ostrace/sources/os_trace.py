@@ -153,14 +153,20 @@ class OsTraceSource(SourceCloseMixin):
         self._active = lockdown
         return lockdown
 
-    async def _release(self) -> None:
-        active, self._active = self._active, None
-        if active is not None:
-            # LockdownClient.close() is the async one; there is no aclose().
-            # Suppressed because a socket that has already gone away is not a
-            # reason to fail whatever we were doing with it.
-            with contextlib.suppress(Exception):
-                await active.close()
+    async def _close(self, lockdown: Any) -> None:  # noqa: ANN401 - LockdownClient
+        """Close one session, clearing ``_active`` only if it is that one.
+
+        Closing by identity rather than by clearing the field wholesale: a
+        short-lived session opened to read the device's identity must not
+        deregister -- or close -- a streaming session opened elsewhere.
+        """
+        if self._active is lockdown:
+            self._active = None
+        # LockdownClient.close() is the async one; there is no aclose().
+        # Suppressed because a socket that has already gone away is not a
+        # reason to fail whatever we were doing with it.
+        with contextlib.suppress(Exception):
+            await lockdown.close()
 
     async def aclose(self) -> None:
         """Close the live session, if one is open.
@@ -178,16 +184,35 @@ class OsTraceSource(SourceCloseMixin):
         here, so this covers all of them. Use the source as an async context
         manager whenever iteration might stop early.
         """
-        await self._release()
+        active = self._active
+        if active is not None:
+            await self._close(active)
 
     async def device_info(self) -> DeviceInfo:
         """Identify the device, opening a short-lived session if needed."""
-        if self._device is None:
+        device = self._device
+        if device is None:
             lockdown = await self._open()
             try:
-                self._device = await read_device_info(lockdown)
+                device = await self._identify(lockdown)
             finally:
-                await self._release()
+                await self._close(lockdown)
+        return device
+
+    async def _identify(self, lockdown: Any) -> DeviceInfo:  # noqa: ANN401 - LockdownClient
+        """Read device identity from a session we already hold.
+
+        Called with the streaming session rather than opening a second one: the
+        values come from the dictionary the client already fetched during the
+        handshake, so this costs nothing, and opening a second session used to
+        deregister the first.
+
+        Refreshed on every connect rather than cached once. A capture that
+        reconnects may be reconnecting to a device whose UTC offset has moved --
+        daylight saving, or a phone that travelled -- and stamping later records
+        with the original offset makes them plausible and an hour wrong.
+        """
+        self._device = await read_device_info(lockdown)
         return self._device
 
     # ------------------------------------------------------------------
@@ -203,28 +228,23 @@ class OsTraceSource(SourceCloseMixin):
         """
         pending_gap: tuple[datetime, str] | None = None
         connected_once = False
-        retries = 0
 
         while True:
             try:
-                lockdown = await self._open()
+                lockdown = await self._connect(resuming=connected_once)
             except OstraceError as exc:
-                # The first connect never retries. There is no capture to
-                # resume, and a device that was never trusted will not become
-                # trusted by waiting -- the hint is the whole answer, and
-                # sitting on it for a minute helps nobody.
-                if not (connected_once and self.reconnect.enabled and exc.recoverable):
-                    raise
-                retries += 1
-                if retries > self.reconnect.max_retries:
-                    raise
                 if pending_gap is None:
-                    pending_gap = (self._last_seen or _now(), exc.message)
-                await asyncio.sleep(self.reconnect.delay)
-                continue
+                    raise
+                # Reconnection was attempted and abandoned. The outage is the
+                # more useful thing to report than the last attempt's error.
+                raise StreamInterruptedError(pending_gap[1]) from exc
 
             connected_once = True
-            retries = 0
+
+            # Identity comes from the session we just opened, and is refreshed
+            # on every connect: free, because the values are already in hand,
+            # and it keeps the UTC offset current across a long capture.
+            device = await self._identify(lockdown)
 
             if pending_gap is not None:
                 start, reason = pending_gap
@@ -232,14 +252,26 @@ class OsTraceSource(SourceCloseMixin):
                 # The device replays its backlog on every connect, so the first
                 # stretch after an outage overlaps what we already have.
                 self._suppressing = _DEDUPE_WINDOW
-                yield Gap(start=start, end=_now(), reason=reason)
+                yield Gap(start=start, end=self._device_now(), reason=reason)
 
-            tzinfo = (await self.device_info()).tzinfo
             try:
-                async for record in self._stream_once(lockdown, tzinfo):
+                async for record in self._stream_once(lockdown, device.tzinfo):
+                    # Backlog suppression lives here rather than inside
+                    # _stream_once: it is reconnect policy, and _stream_once is
+                    # only "what this one connection produced".
+                    if self._suppressing:
+                        self._suppressing -= 1
+                        if self._key(record) in self._recent:
+                            continue
+                    self._remember(record)
+                    self._last_seen = record.timestamp
                     yield record
-            except StreamInterruptedError as exc:
-                if not self.reconnect.enabled:
+            except OstraceError as exc:
+                # One question, asked the same way here as at connect time:
+                # is waiting going to help? Matching on a specific exception
+                # type instead would miss a recoverable outage that arrives
+                # wearing a different class.
+                if not (self.reconnect.enabled and exc.recoverable):
                     raise
                 reason = exc.message
             else:
@@ -249,8 +281,27 @@ class OsTraceSource(SourceCloseMixin):
                     return
                 reason = "stream ended"
 
-            pending_gap = (self._last_seen or _now(), reason)
+            pending_gap = (self._last_seen or self._device_now(), reason)
             await asyncio.sleep(self.reconnect.delay)
+
+    async def _connect(self, *, resuming: bool) -> Any:  # noqa: ANN401 - LockdownClient
+        """Open a session, retrying only when retrying could plausibly work.
+
+        The first connect never retries: there is no capture to resume, and a
+        device that was never trusted will not become trusted by waiting. The
+        hint is the whole answer, and sitting on it for a minute helps nobody.
+        """
+        retries = 0
+        while True:
+            try:
+                return await self._open()
+            except OstraceError as exc:
+                if not (resuming and self.reconnect.enabled and exc.recoverable):
+                    raise
+                retries += 1
+                if retries > self.reconnect.max_retries:
+                    raise
+                await asyncio.sleep(self.reconnect.delay)
 
     async def _stream_once(
         self,
@@ -266,14 +317,7 @@ class OsTraceSource(SourceCloseMixin):
                     pid=self.pid,
                     stream_flags=self.stream_flags,
                 ):
-                    record = self._to_record(entry, tz)
-                    if self._suppressing:
-                        self._suppressing -= 1
-                        if self._key(record) in self._recent:
-                            continue
-                    self._remember(record)
-                    self._last_seen = record.timestamp
-                    yield record
+                    yield self._to_record(entry, tz)
         except asyncio.CancelledError:
             raise
         except OstraceError:
@@ -301,8 +345,16 @@ class OsTraceSource(SourceCloseMixin):
         process_path = entry.filename or ""
         process = self._process_names.get(process_path)
         if process is None:
-            process = sys.intern(basename(process_path) or str(entry.pid))
-            self._process_names[process_path] = process
+            name = basename(process_path)
+            if name:
+                process = sys.intern(name)
+                self._process_names[process_path] = process
+            else:
+                # A path that yields no name -- the kernel and a few others
+                # arrive with an empty one. The fallback depends on the pid, so
+                # it must NOT be cached against the path: doing so made the
+                # first such pid name every later one.
+                process = str(entry.pid)
 
         label = entry.label
         timestamp = entry.timestamp
@@ -338,6 +390,20 @@ class OsTraceSource(SourceCloseMixin):
         if len(recent) > _DEDUPE_WINDOW:
             del recent[next(iter(recent))]
 
+    def _device_now(self) -> datetime:
+        """The current time on the *device's* clock, in its own offset.
 
-def _now() -> datetime:
-    return datetime.now(tz=UTC)
+        Gap boundaries must come from one clock. The start of a gap is the
+        timestamp of the last record, which the device stamped; taking the end
+        from the host produces a duration that is wrong by the clock skew and,
+        when the device runs ahead, negative. The skew is already measured when
+        the device is identified, so applying it costs nothing and keeps both
+        ends on the same clock.
+        """
+        device = self._device
+        now = datetime.now(tz=UTC)
+        if device is None:
+            return now
+        if device.clock_skew is not None:
+            now += device.clock_skew
+        return now.astimezone(device.tzinfo)

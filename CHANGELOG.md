@@ -51,6 +51,39 @@ because the obvious assumption is wrong in each case.
 
 The CLI subcommands are still declared but unimplemented; they land in phase 3.
 
+### Fixed
+
+A correctness review of phases 0 and 1 found twelve defects, all fixed before
+anything depends on them:
+
+- `aclose()` could not close the streaming session. Reading device identity
+  opened a second lockdown and, on releasing it, deregistered the first — so
+  every start/stop cycle leaked a socket, which is the one thing `aclose()`
+  exists to prevent. It also doubled the most expensive operation at capture
+  start.
+- Every session closed through its context manager recorded `ended_at: null`,
+  making a finished capture indistinguishable from a killed one.
+- A record with no process path was named after the *first* such pid seen,
+  because the pid-dependent fallback was cached against the path. The kernel
+  arrives this way.
+- Mid-stream outages were matched by exception type while connect-time outages
+  asked `recoverable`, so a recoverable outage arriving as a different class
+  ended the capture instead of reconnecting.
+- Gap start came from the device clock and gap end from the host's, making the
+  duration wrong by the clock skew and negative when the device ran ahead.
+- `truncated` answered `False` until a full pass completed — including for the
+  natural case of asking before reading.
+- A non-numeric clock value from lockdown escaped as a bare `ValueError`.
+- The device timezone was read once and reused across reconnects.
+
+Plus a dead attribute, a redundant dictionary copy, a counter that
+double-counted across passes, and a mixin whose default teardown silently did
+nothing.
+
+Test coverage of the live source went from 22% to 80%: the reconnect loop, gap
+bookkeeping and session lifecycle are now driven in CI against stubbed device
+seams, with no hardware.
+
 ### Changed
 
 A review pass over phases 0 and 1 tightened several things before they had
