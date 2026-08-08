@@ -105,6 +105,33 @@ Test coverage of the live source went from 22% to 80%: the reconnect loop, gap
 bookkeeping and session lifecycle are now driven in CI against stubbed device
 seams, with no hardware.
 
+### Added (phase 2)
+
+- `analysis/` — message normalisation and a single-pass fold of a capture into
+  the numbers worth reporting: counts per level, process, subsystem and minute,
+  and distinct message templates with the line each first appears on.
+- `exporters/` — the exporter protocol, a registry, and the **agent bundle**:
+  seven files of tab-separated text designed to be investigated with `grep` and
+  bounded line reads rather than loaded into a context window. Implements
+  [docs/formats/agent-bundle.md](docs/formats/agent-bundle.md).
+
+`session.log` gained the two columns this rewrite existed for. A query like
+"every record from `com.apple.network`, across every process" is not
+expressible in the predecessor's four columns; on the committed fixture it
+returns 473 records spanning six processes.
+
+Normalisation was extended past the predecessor's rules after measuring what
+survived them. The dominant leak was hex with no `0x` prefix — operation
+identifiers, content references, protection tags, which iOS emits constantly
+and which are pure identity. Recognising them folds the fixture's 1,677
+templates to 1,431. A second candidate, loosening the word boundary so that
+`1.25s` normalises, was measured and rejected: worth 4 templates out of 1,677.
+
+The generated `CLAUDE.md` is bounded by construction — a bundle of two million
+records must not produce a longer one than a bundle of six thousand — and it
+declares what it cannot show: gaps in the capture, and any records whose
+template was dropped at the cap.
+
 ### Fixed (found on hardware)
 
 - **`aclose()` did not stop a running stream.** It closed the lockdown session,

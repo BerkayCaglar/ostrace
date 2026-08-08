@@ -1,8 +1,10 @@
 # ostrace
 
-Cross-platform iOS log viewer. Done: phases 0 and 1 (model, sources, storage)
-and phase 3a (`devices`, `capture`, `doctor`). Not built: phase 2 (analysis,
-exporters), the `export` subcommand that depends on it, and the GUI.
+Cross-platform iOS log viewer. Done: phases 0 and 1 (model, sources, storage),
+phase 3a (`devices`, `capture`, `doctor`) and phase 2 (`analysis/`, and
+`exporters/` with the agent bundle). Not built: the remaining exporters
+(markdown, jsonl, plaintext, AI report, trace), the `export` subcommand, and
+the GUI.
 
 Read when relevant, rather than up front: `docs/adr/` for why decisions were
 taken, `docs/formats/` for the on-disk contracts, `CONTRIBUTING.md` for setup,
@@ -58,7 +60,13 @@ Each of these has cost real time at least once.
 - **Mark unverified macOS assumptions `# UNVERIFIED-MACOS`** so they can be
   grepped and confirmed. There is no Mac here; that code is written blind.
 - **Only `paths.py` decides where files go.** Building a path from a literal is
-  how the predecessor ended up unable to run anywhere but Windows.
+  how the predecessor ended up unable to run anywhere but Windows. File *names
+  inside* an export are the format contract, not a location decision, and
+  belong to the exporter.
+- **`docs/formats/` wins over the code.** A column's position, a header row, a
+  placeholder spelling — if the implementation and the document disagree, the
+  document is right and the code is the bug. Bundles already written to disk
+  stay valid forever.
 - **Timestamps are timezone-aware, carrying the *device's* offset.** The host is
   a different clock in a frequently different zone. A naive timestamp is
   rejected on read rather than guessed at.

@@ -1,7 +1,8 @@
 # Format: agent bundle
 
-**Version:** 1 (draft — the exporter lands in phase 2)
+**Version:** 1
 **Rationale:** [ADR 0005](../adr/0005-agent-bundle-export-format.md)
+**Implemented by:** `ostrace.exporters.agent_bundle`
 
 This document is the contract. Once the format ships, changing anything marked
 **contract** below is a breaking change: bundles already written to disk stay
@@ -84,6 +85,9 @@ Records at `Error` or `Fault`. Seven columns — the six from
 line <TAB> timestamp <TAB> level <TAB> process[pid] <TAB> subsystem <TAB> category <TAB> message
 ```
 
+No header row, for the same reason `session.log` has none: this is data, and a
+header would be a line that looks like a record and is not one.
+
 The pointer is the point: it turns "what was happening around this error" into a
 bounded read of a known range rather than another search.
 
@@ -98,6 +102,16 @@ count <TAB> level <TAB> process <TAB> subsystem <TAB> first_line <TAB> template
 A template is the message with variable parts normalised: numbers to `<N>`,
 floats to `<F>`, hex to `<HEX>`, UUIDs to `<UUID>`, paths to `<PATH>`. Messages
 that normalise identically are collapsed into one row.
+
+`<HEX>` also covers hex with no `0x` to announce it — operation identifiers,
+content references, protection tags. iOS emits those constantly and they are
+pure identity; measured on this project's own fixture, recognising them folds
+1,677 templates down to 1,431.
+
+A capture with an implausible number of distinct templates stops learning new
+ones at a cap. When that happens the generated `CLAUDE.md` says so and gives the
+number affected — every other file still counts those records, and only their
+template is missing. Silence there would read as "this is everything".
 
 This file answers the question that decides whether a finding is real: *is this
 error unusual, or does it fire fourteen times a minute normally?* iOS logs a
@@ -123,6 +137,11 @@ Per-minute activity with a line-number pointer. Header row present.
 ```
 minute <TAB> records <TAB> errors <TAB> first_line
 ```
+
+`minute` is `YYYY-MM-DDTHH:MM` — the `session.log` timestamp without its
+seconds, so a row can be matched against the log by prefix. It carries the date
+because a capture that runs past midnight would otherwise sort its second hour
+before its first.
 
 Reading a range around a spike is how an investigation gets from "something
 happened at 00:05" to a cause.
