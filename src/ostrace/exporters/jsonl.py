@@ -39,6 +39,7 @@ class JsonLinesExporter:
 
     name = "jsonl"
     description = "JSON Lines, one object per record -- the session format, uncompressed"
+    suffix = ".jsonl"
 
     def export(
         self,

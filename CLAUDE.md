@@ -1,8 +1,8 @@
 # ostrace
 
 Cross-platform iOS log viewer. Done: phases 0 and 1 (model, sources, storage),
-phase 3a (`devices`, `capture`, `doctor`) and phase 2 (`analysis/` plus all six
-exporters). Not built: the `export` subcommand and the GUI.
+phase 2 (`analysis/` plus all six exporters) and phase 3 (`devices`, `capture`,
+`doctor`, `export`). Not built: the GUI (phase 4) and the release (phase 5).
 
 Read when relevant, rather than up front: `docs/adr/` for why decisions were
 taken, `docs/formats/` for the on-disk contracts, `CONTRIBUTING.md` for setup,

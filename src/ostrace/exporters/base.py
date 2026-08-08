@@ -79,6 +79,11 @@ class Exporter(Protocol):
     name: str
     #: One line, for ``--help``.
     description: str
+    #: Appended to the capture's name when the caller does not choose a
+    #: destination -- ``-bundle`` for a directory, ``.md`` for a document. What
+    #: an export is called is a property of the format; where it goes is
+    #: ``paths.export_path``'s decision.
+    suffix: str
 
     def export(
         self,

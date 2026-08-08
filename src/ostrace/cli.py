@@ -2,9 +2,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Command line entry point.
 
-``export`` is declared but not implemented: it needs the exporters, which land
-in phase 2. The other three are real.
-
 Every command funnels its failures through one handler so that an
 :class:`~ostrace.errors.OstraceError` prints its message *and its hint* and
 exits non-zero, instead of showing a traceback for what is almost always an
@@ -24,12 +21,18 @@ from ostrace.errors import OstraceError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ostrace.exporters.base import ExportResult
+
 __all__ = ["build_parser", "main"]
 
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_INTERRUPTED = 130  # what a shell reports for SIGINT
-EXIT_NOT_IMPLEMENTED = 69  # EX_UNAVAILABLE
+
+#: What `export` writes when asked for nothing in particular. The bundle,
+#: because it is the only format that loses nothing: everything else is a
+#: summary, and a default that quietly discards data is the wrong default.
+DEFAULT_FORMAT = "agent-bundle"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -68,7 +71,40 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = subcommands.add_parser("doctor", help="diagnose why a device cannot be reached")
     doctor.add_argument("--udid", help="check this device specifically")
 
-    subcommands.add_parser("export", help="turn a session file into a report (phase 2)")
+    # Imported here rather than at module scope so that `ostrace devices` does
+    # not pay for the analysis and export machinery it never touches.
+    from ostrace.exporters import EXPORTERS  # noqa: PLC0415
+
+    export = subcommands.add_parser(
+        "export",
+        help="turn a capture into a report",
+        description="Turn a capture into a report, a bundle or another file format.",
+        epilog="formats:\n"
+        + "\n".join(f"  {name:<14} {e.description}" for name, e in sorted(EXPORTERS.items())),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    export.add_argument("session", help="a session directory or a capture file")
+    export.add_argument(
+        "--format",
+        "-f",
+        # The registry is the source of truth: registering an exporter is all
+        # it takes for it to appear here.
+        choices=sorted(EXPORTERS),
+        default=DEFAULT_FORMAT,
+        help=f"output format (default: {DEFAULT_FORMAT})",
+    )
+    export.add_argument(
+        "--output",
+        "-o",
+        help="where to write (default: beside the capture, named after it)",
+    )
+    export.add_argument(
+        "--budget-tokens",
+        type=int,
+        metavar="N",
+        help="token budget for 'ai-report'; 0 means no limit",
+    )
+    export.add_argument("--quiet", "-q", action="store_true", help="print only the destination")
     return parser
 
 
@@ -79,12 +115,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return EXIT_OK
-    if args.command == "export":
-        print("'export' is not implemented yet; it arrives with the exporters in phase 2.")
-        return EXIT_NOT_IMPLEMENTED
 
-    handler = {"devices": _devices, "capture": _capture, "doctor": _doctor}[args.command]
     try:
+        # `export` reads a file and writes files. Wrapping it in an event loop
+        # to match the shape of the device commands would buy nothing and
+        # obscure that it is the one command needing no device at all.
+        if args.command == "export":
+            return _export(args)
+        handler = {"devices": _devices, "capture": _capture, "doctor": _doctor}[args.command]
         return asyncio.run(handler(args))
     except OstraceError as exc:
         # The hint is the actionable half, and __str__ carries it.
@@ -147,6 +185,89 @@ async def _capture(args: argparse.Namespace) -> int:
         print(f"{result.gaps} gap(s): the device was unreachable for part of the capture")
     print(result.path)
     return EXIT_OK
+
+
+def _export(args: argparse.Namespace) -> int:
+    from pathlib import Path  # noqa: PLC0415
+
+    from ostrace.errors import StorageError  # noqa: PLC0415
+    from ostrace.exporters import EXPORTERS  # noqa: PLC0415
+    from ostrace.exporters.ai_report import AiReportExporter  # noqa: PLC0415
+    from ostrace.paths import export_path  # noqa: PLC0415
+    from ostrace.storage.session import SessionReader  # noqa: PLC0415
+    from ostrace.storage.spool import SpoolReader  # noqa: PLC0415
+
+    session = Path(args.session)
+    if not session.exists():
+        msg = f"no capture at {session}"
+        raise StorageError(msg, hint="Pass a session directory or a .jsonl.gz capture file.")
+
+    # A session directory carries device metadata and a bare spool does not.
+    # Exports must render sensibly without it rather than requiring it: the
+    # offline path exists precisely for files that arrived without a sidecar.
+    if session.is_dir():
+        reader = SessionReader(session)
+        items = reader.items()
+        device = reader.meta.device if reader.meta is not None else None
+        truncated = reader.truncated
+    else:
+        spool = SpoolReader(session)
+        items = spool.items()
+        device = None
+        truncated = spool.truncated
+
+    exporter = EXPORTERS[args.format]
+    if args.budget_tokens is not None:
+        if args.format != "ai-report":
+            print(
+                f"note: --budget-tokens does not apply to '{args.format}'; ignoring it.",
+                file=sys.stderr,
+            )
+        else:
+            # 0 spells "no limit" because argparse has no natural way to say it
+            # and `--budget-tokens 0` reads better than a magic word.
+            exporter = AiReportExporter(budget_tokens=args.budget_tokens or None)
+
+    destination = Path(args.output) if args.output else export_path(session, exporter.suffix)
+    result = exporter.export(items, destination, device=device)
+
+    if not args.quiet:
+        print(f"{result.records:,} records -> {exporter.name}")
+        for warning in _export_warnings(result, truncated=truncated):
+            print(f"note: {warning}", file=sys.stderr)
+    print(result.destination)
+    return EXIT_OK
+
+
+def _export_warnings(result: ExportResult, *, truncated: bool) -> list[str]:
+    """Everything about this export a reader would otherwise assume away.
+
+    Each of these makes an absence in the output mean something other than "the
+    device did not do that", which is the conclusion a reader reaches by
+    default.
+    """
+    notes: list[str] = []
+    if truncated:
+        notes.append(
+            "the capture has no gzip trailer -- it was still being written, or the "
+            "process was killed. Whatever decoded is complete; the tail may not be."
+        )
+    scan = result.scan
+    if scan is None:
+        return notes
+    if scan.gaps:
+        notes.append(
+            f"{len(scan.gaps)} gap(s) in the capture: the device was unreachable for "
+            f"part of it, and nothing follows from an absence across one."
+        )
+    if scan.templates_dropped:
+        notes.append(
+            f"{scan.templates_dropped:,} records exceeded the distinct-pattern limit "
+            f"and are not represented in the pattern statistics."
+        )
+    if scan.records == 0:
+        notes.append("the capture contains no records.")
+    return notes
 
 
 async def _doctor(args: argparse.Namespace) -> int:

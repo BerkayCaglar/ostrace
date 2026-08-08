@@ -176,6 +176,29 @@ than cause. Templating is what makes a large capture describable and also what
 hides the one value that mattered; the window is the antidote, and it costs a
 fixed 200 records however large the capture is.
 
+### Added (phase 3b)
+
+- `ostrace export` — turns a capture into any of the six formats. It needs no
+  device, reads either a session directory or a bare capture file, and writes
+  beside it named after it. `--format` choices come from the exporter registry,
+  so registering an exporter is all it takes to expose it.
+
+  ```bash
+  ostrace export capture.ostrace                  # a bundle beside it
+  ostrace export capture.ostrace -f trace         # what led to each error
+  ostrace export capture.ostrace -f ai-report --budget-tokens 20000
+  ```
+
+  Anything that would make an absence in the output mean something other than
+  "the device did not do that" is reported to stderr: gaps in the capture,
+  records dropped at the pattern limit, a capture with no gzip trailer because
+  it was still being written, and an empty capture. `--quiet` prints only the
+  destination, so the command composes with a shell.
+
+  The default is the agent bundle, because it is the only format that loses
+  nothing. Everything else is a summary, and a default that quietly discards
+  data is the wrong default.
+
 ### Fixed (found on hardware)
 
 - **`aclose()` did not stop a running stream.** It closed the lockdown session,

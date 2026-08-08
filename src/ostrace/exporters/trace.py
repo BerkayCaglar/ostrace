@@ -42,6 +42,7 @@ class TraceExporter:
 
     name = "trace"
     description = "Verbatim windows around each error, for following what led to it"
+    suffix = "-trace.md"
 
     def __init__(
         self,

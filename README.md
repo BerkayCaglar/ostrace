@@ -80,6 +80,7 @@ see [docs/adr/0002](docs/adr/0002-use-pymobiledevice3-over-libimobiledevice-cli.
 ostrace doctor                    # why can't I see my device?
 ostrace devices --verbose         # list what is attached
 ostrace capture --duration 60     # stream to a session file
+ostrace export CAPTURE            # turn it into something readable
 ```
 
 `ostrace capture` writes a session directory under your data directory and
@@ -87,8 +88,31 @@ prints the path. `--max-records` and `--duration` both stop it; so does Ctrl-C,
 cleanly. If the device disconnects mid-capture it reconnects and records a gap
 rather than pretending the log is continuous.
 
-`ostrace export` is declared but not implemented — it needs the exporters, which
-arrive in phase 2. See [CHANGELOG.md](CHANGELOG.md).
+### Exporting
+
+`ostrace export` needs no device. It reads a session directory or a bare
+capture file and writes beside it, named after it.
+
+| `--format` | What it is for |
+| --- | --- |
+| `agent-bundle` *(default)* | A directory of tab-separated text to investigate with `grep` and bounded line reads. The only format that loses nothing — see [docs/formats/agent-bundle.md](docs/formats/agent-bundle.md). |
+| `text` | Aligned columns, one record per line, for reading in a terminal. |
+| `markdown` | A document with a summary and the records verbatim, to paste into an issue. |
+| `jsonl` | One JSON object per record — the session format without the gzip. |
+| `ai-report` | A summary that shrinks to a token budget, for handing to a model. |
+| `trace` | Verbatim windows around each error, for following what led to one. |
+
+```bash
+ostrace export capture.ostrace                         # a bundle beside it
+ostrace export capture.ostrace -f trace                # what led to each error
+ostrace export capture.ostrace -f ai-report --budget-tokens 20000
+```
+
+Everything except the bundle is a summary, and **each one states what it left
+out** — the gaps in the capture, the patterns that did not fit, the anchors it
+could not reach. An export that quietly stops reads as complete, and a reader
+then draws conclusions from an absence that is an artefact of the export rather
+than a fact about the device.
 
 Start with `doctor` if anything is not working. Almost every problem here is
 environmental rather than a bug, and it checks the causes in the order they

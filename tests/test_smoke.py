@@ -16,7 +16,7 @@ import sys
 import pytest
 
 import ostrace
-from ostrace.cli import EXIT_NOT_IMPLEMENTED, EXIT_OK, build_parser, main
+from ostrace.cli import EXIT_OK, build_parser, main
 from tests.helpers import plain
 
 
@@ -31,9 +31,12 @@ def test_package_is_installed_not_merely_on_the_path() -> None:
     assert "site-packages" in ostrace.__file__ or "src" in ostrace.__file__
 
 
-@pytest.mark.parametrize("command", ["devices", "capture", "doctor", "export"])
-def test_parser_accepts_every_subcommand(command: str) -> None:
-    assert build_parser().parse_args([command]).command == command
+@pytest.mark.parametrize(
+    "argv",
+    [["devices"], ["capture"], ["doctor"], ["export", "somewhere.ostrace"]],
+)
+def test_parser_accepts_every_subcommand(argv: list[str]) -> None:
+    assert build_parser().parse_args(argv).command == argv[0]
 
 
 def test_bare_invocation_prints_help_and_succeeds(
@@ -43,11 +46,12 @@ def test_bare_invocation_prints_help_and_succeeds(
     assert "usage: ostrace" in plain(capsys.readouterr().out)
 
 
-def test_export_reports_a_distinct_exit_code_until_phase_two(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    assert main(["export"]) == EXIT_NOT_IMPLEMENTED
-    assert "not implemented" in plain(capsys.readouterr().out)
+def test_export_needs_something_to_export() -> None:
+    """It takes a capture rather than defaulting to the most recent one:
+    guessing which capture a user meant is how the wrong one gets exported."""
+    with pytest.raises(SystemExit) as excinfo:
+        main(["export"])
+    assert excinfo.value.code == 2
 
 
 def test_unknown_subcommand_is_rejected() -> None:

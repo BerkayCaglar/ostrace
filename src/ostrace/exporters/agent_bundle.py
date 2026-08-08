@@ -69,6 +69,7 @@ class AgentBundleExporter:
 
     name = "agent-bundle"
     description = "A directory of tab-separated text for grep-based investigation"
+    suffix = "-bundle"
 
     def export(
         self,

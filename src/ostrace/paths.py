@@ -34,6 +34,7 @@ __all__ = [
     "cache_dir",
     "config_dir",
     "data_dir",
+    "export_path",
     "log_dir",
     "session_name",
     "session_path",
@@ -143,3 +144,38 @@ def session_path(device_name: str, stamp: str, *, root: Path | None = None) -> P
 def with_session_suffix(path: Path) -> Path:
     """Ensure a caller-supplied path carries the session suffix."""
     return path if path.suffix == SESSION_SUFFIX else path.with_name(path.name + SESSION_SUFFIX)
+
+
+#: Endings a capture can arrive with, longest first so that ``.jsonl.gz`` is not
+#: mistaken for ``.gz`` and left as ``…jsonl``.
+_CAPTURE_ENDINGS = (SESSION_SUFFIX, ".jsonl.gz", ".jsonl", ".gz")
+
+
+def export_stem(session: Path) -> str:
+    """The capture's name with whatever marks it as a capture removed.
+
+    ``Berkay-iPhone-20260808-135325.ostrace`` and a bare
+    ``ios26-mixed.jsonl.gz`` both reduce to something an export can be named
+    after. Done by suffix list rather than ``Path.stem``, which would take
+    ``ios26-mixed.jsonl.gz`` down to ``ios26-mixed.jsonl``.
+    """
+    name = session.name
+    for ending in _CAPTURE_ENDINGS:
+        if name.endswith(ending):
+            return name[: -len(ending)]
+    return name
+
+
+def export_path(session: Path, suffix: str, *, root: Path | None = None) -> Path:
+    """Where an export of ``session`` goes when the caller did not say.
+
+    Beside the capture, named after it. An export that lands in a directory
+    the user has to go looking for gets regenerated rather than found.
+
+    ``suffix`` belongs to the format -- ``-bundle`` for a directory, ``.md``
+    for a document -- because what an export is called is a property of the
+    format. Where it goes is this module's decision, which is why the two are
+    combined here and nowhere else.
+    """
+    base = root if root is not None else session.parent
+    return base / f"{export_stem(session)}{suffix}"

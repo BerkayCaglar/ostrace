@@ -88,6 +88,7 @@ class PlaintextExporter:
 
     name = "text"
     description = "Aligned plain text, one record per line -- for reading in a terminal"
+    suffix = ".log"
 
     def export(
         self,

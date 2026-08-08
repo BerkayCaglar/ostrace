@@ -41,6 +41,7 @@ class MarkdownExporter:
 
     name = "markdown"
     description = "A document with a summary and the records verbatim"
+    suffix = ".md"
 
     def export(
         self,

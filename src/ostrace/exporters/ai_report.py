@@ -59,6 +59,7 @@ class AiReportExporter:
 
     name = "ai-report"
     description = "A summary that shrinks to a token budget and states what it dropped"
+    suffix = "-report.md"
 
     def __init__(self, budget_tokens: int | None = DEFAULT_BUDGET_TOKENS) -> None:
         self.budget_tokens = budget_tokens
