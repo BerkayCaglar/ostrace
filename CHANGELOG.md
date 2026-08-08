@@ -133,6 +133,12 @@ seams, with no hardware.
     artefact of truncation rather than a fact about the device. Asked for
     30,000 tokens it produces about 29,700; asked for 3,000, about 2,970, and
     says it omitted 720 of 744 error patterns to get there.
+  - **trace** — verbatim, chronological windows around each error, for
+    following causality rather than counting. The exact counterpart to
+    templating: nothing is normalised or reordered, so the identifiers that let
+    one object be followed across a sequence survive. Overlapping windows merge
+    rather than duplicate, and the report declares both the anchors it could
+    not reach and any window that ends mid-sequence.
 
 `session.log` gained the two columns this rewrite existed for. A query like
 "every record from `com.apple.network`, across every process" is not
@@ -155,6 +161,14 @@ The markdown and AI-report exports state the level set iOS actually emits. The
 predecessor documented `Warning` and `Critical`, which it had inherited from the
 legacy text stream; a reader who trusted that would filter for a level that
 never appears.
+
+Bounding a trace by the *number* of windows turns out not to bound it at all.
+An anchor arriving inside an open window extends that window, so where anchors
+are dense the extensions never stop: on the error-heavy fixture — 2,250 errors
+in 3,000 records — the window-count limit alone produced exactly one window
+containing the entire capture, which is not a trace of anything. Windows are
+capped by size as well, and one closed that way says it ends mid-sequence
+rather than where the interesting records stopped.
 
 A scan now also keeps a bounded verbatim window around the *first* error — the
 first, not the most frequent, since what follows it may be consequence rather

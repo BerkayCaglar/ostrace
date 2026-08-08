@@ -10,7 +10,7 @@ discovered.
 
 from __future__ import annotations
 
-from ostrace.exporters import agent_bundle, ai_report, jsonl, markdown, plaintext
+from ostrace.exporters import agent_bundle, ai_report, jsonl, markdown, plaintext, trace
 from ostrace.exporters.base import EXPORTERS, Exporter, ExportResult, escape
 
 __all__ = [
@@ -23,4 +23,5 @@ __all__ = [
     "jsonl",
     "markdown",
     "plaintext",
+    "trace",
 ]

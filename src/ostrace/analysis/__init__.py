@@ -6,10 +6,11 @@ from __future__ import annotations
 
 from ostrace.analysis.scan import ScanResult
 from ostrace.analysis.templates import normalise
+from ostrace.analysis.trace import TraceResult, Window
 
-#: ``scan`` itself is deliberately not re-exported. The module is
-#: ``analysis.scan`` and the function inside it is ``scan()``; lifting the
-#: function to the package would shadow the module, so that
-#: ``from ostrace.analysis import scan`` and ``import ostrace.analysis.scan``
-#: would hand back two different objects. Import it from its module.
-__all__ = ["ScanResult", "normalise"]
+#: ``scan`` and ``trace`` themselves are deliberately not re-exported. Each is a
+#: module containing a function of the same name; lifting the function to the
+#: package would shadow the module, so that ``from ostrace.analysis import scan``
+#: and ``import ostrace.analysis.scan`` would hand back two different objects.
+#: Import them from their modules.
+__all__ = ["ScanResult", "TraceResult", "Window", "normalise"]
