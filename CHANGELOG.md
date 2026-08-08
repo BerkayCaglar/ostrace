@@ -126,6 +126,13 @@ seams, with no hardware.
     the field most needed to tell eight instances of a process apart.
   - **markdown** — a document to paste into an issue: which device, what span,
     how much, what the columns mean, then the records verbatim.
+  - **ai-report** — a summary that shrinks to a token budget and **states what
+    it dropped**. Every section counts what it could not fit and the last
+    section lists it, because a report that quietly stops at the budget reads
+    as complete: a reader then draws conclusions from an absence that is an
+    artefact of truncation rather than a fact about the device. Asked for
+    30,000 tokens it produces about 29,700; asked for 3,000, about 2,970, and
+    says it omitted 720 of 744 error patterns to get there.
 
 `session.log` gained the two columns this rewrite existed for. A query like
 "every record from `com.apple.network`, across every process" is not
@@ -144,10 +151,16 @@ records must not produce a longer one than a bundle of six thousand — and it
 declares what it cannot show: gaps in the capture, and any records whose
 template was dropped at the cap.
 
-The markdown export states the level set iOS actually emits. The predecessor
-documented `Warning` and `Critical`, which it had inherited from the legacy
-text stream; a reader who trusted that would filter for a level that never
-appears.
+The markdown and AI-report exports state the level set iOS actually emits. The
+predecessor documented `Warning` and `Critical`, which it had inherited from the
+legacy text stream; a reader who trusted that would filter for a level that
+never appears.
+
+A scan now also keeps a bounded verbatim window around the *first* error — the
+first, not the most frequent, since what follows it may be consequence rather
+than cause. Templating is what makes a large capture describable and also what
+hides the one value that mattered; the window is the antidote, and it costs a
+fixed 200 records however large the capture is.
 
 ### Fixed (found on hardware)
 

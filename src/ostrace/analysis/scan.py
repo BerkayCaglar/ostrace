@@ -16,7 +16,7 @@ summary, because it reads as complete.
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -33,6 +33,13 @@ __all__ = ["MAX_TEMPLATES", "MinuteStats", "ScanResult", "TemplateKey", "Templat
 #: by a capture that is either enormous or pathological -- the fixture produces
 #: 1,431 -- and at roughly 200 bytes a template this bounds the scan at ~10 MB.
 MAX_TEMPLATES = 50_000
+
+#: Records kept verbatim on either side of the first error. Templating is what
+#: makes a large capture describable, and it is also what hides the one value
+#: that mattered; a window of untouched records is the antidote. Both numbers
+#: are small and fixed, so the memory this costs does not grow with the capture.
+EXCERPT_BEFORE = 60
+EXCERPT_AFTER = 140
 
 #: Written wherever a record carries no value. An empty field between two tabs
 #: is ambiguous to read and easy to mis-split; a literal dash is not. Part of
@@ -107,6 +114,17 @@ class ScanResult:
     sample: Record | None = None
     sample_line: int = 0
 
+    #: Untouched records around the first error, in order, and the
+    #: ``session.log`` line the window starts at. Empty when the capture has no
+    #: errors -- there is nothing to centre a window on, and an arbitrary window
+    #: would imply one.
+    excerpt: list[Record] = field(default_factory=list)
+    excerpt_line: int = 0
+    _preceding: deque[Record] = field(
+        default_factory=lambda: deque(maxlen=EXCERPT_BEFORE), repr=False
+    )
+    _excerpt_remaining: int = field(default=0, repr=False)
+
     def add(self, record: Record, line: int) -> None:
         """Fold one record in, at its 1-based line number in ``session.log``."""
         self.records += 1
@@ -150,6 +168,27 @@ class ScanResult:
         if self.sample is None or (is_error and not self.sample.is_error):
             self.sample = record
             self.sample_line = line
+
+        self._collect_excerpt(record, line, is_error=is_error)
+
+    def _collect_excerpt(self, record: Record, line: int, *, is_error: bool) -> None:
+        """Keep a verbatim window around the *first* error.
+
+        The first, not the worst or the most frequent: an investigation starts
+        at the earliest point something went wrong, and everything after it may
+        be consequence rather than cause.
+        """
+        if self._excerpt_remaining:
+            self.excerpt.append(record)
+            self._excerpt_remaining -= 1
+        elif not self.excerpt and is_error:
+            self.excerpt = [*self._preceding, record]
+            self.excerpt_line = line - len(self._preceding)
+            self._excerpt_remaining = EXCERPT_AFTER
+            self._preceding.clear()
+        elif not self.excerpt:
+            # Only worth paying for until a window has been taken.
+            self._preceding.append(record)
 
     def add_gap(self, gap: Gap) -> None:
         self.gaps.append(gap)

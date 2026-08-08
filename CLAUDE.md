@@ -2,8 +2,8 @@
 
 Cross-platform iOS log viewer. Done: phases 0 and 1 (model, sources, storage),
 phase 3a (`devices`, `capture`, `doctor`) and phase 2 (`analysis/`, and
-`exporters/` with the agent bundle, jsonl, text and markdown). Not built: the
-AI report and trace exporters, the `export` subcommand, and the GUI.
+`exporters/` with the agent bundle, jsonl, text, markdown and the AI report).
+Not built: the trace exporter, the `export` subcommand, and the GUI.
 
 Read when relevant, rather than up front: `docs/adr/` for why decisions were
 taken, `docs/formats/` for the on-disk contracts, `CONTRIBUTING.md` for setup,
