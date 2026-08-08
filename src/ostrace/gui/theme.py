@@ -42,11 +42,13 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
 
 __all__ = [
+    "MARK_ACCENT",
     "MARK_TINT",
     "Scheme",
     "Severity",
     "apply_theme",
     "contrast_ratio",
+    "mark_accent",
     "mark_tint",
     "palette_for",
     "resolve_scheme",
@@ -185,9 +187,20 @@ def palette_for(scheme: Scheme) -> QPalette:
     return palette
 
 
+#: The same idea as `MARK_TINT`, saturated enough to read as a two-pixel stripe
+#: on the minimap. A tint chosen to sit comfortably behind a wall of text is by
+#: construction too faint to see on its own.
+MARK_ACCENT: dict[Scheme, str] = {Scheme.LIGHT: "#b8860b", Scheme.DARK: "#e0a83c"}
+
+
 def mark_tint(scheme: Scheme) -> QColor:
     """The background of a marked row."""
     return QColor(MARK_TINT[scheme])
+
+
+def mark_accent(scheme: Scheme) -> QColor:
+    """The mark, where it has to be visible as a thin line rather than a wash."""
+    return QColor(MARK_ACCENT[scheme])
 
 
 def severity_for(level: Level, scheme: Scheme) -> Severity:

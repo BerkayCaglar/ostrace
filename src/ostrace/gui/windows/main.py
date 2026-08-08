@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QFileDialog,
+    QHBoxLayout,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -55,6 +56,7 @@ from ostrace.gui.widgets.detail_pane import DetailPane
 from ostrace.gui.widgets.export_dialog import ExportDialog
 from ostrace.gui.widgets.filter_bar import FilterBar
 from ostrace.gui.widgets.log_table import LogTable
+from ostrace.gui.widgets.minimap import Minimap
 from ostrace.gui.widgets.status_bar import StatusBar
 from ostrace.model import DeviceInfo
 from ostrace.paths import sessions_dir
@@ -139,8 +141,18 @@ class MainWindow(QMainWindow):
         self.table = LogTable(self)
         self.detail = DetailPane(self)
 
+        # The table and its overview strip travel together, so the splitter
+        # sees one widget rather than two that could drift apart.
+        table_area = QWidget(self)
+        beside = QHBoxLayout(table_area)
+        beside.setContentsMargins(0, 0, 0, 0)
+        beside.setSpacing(0)
+        beside.addWidget(self.table, stretch=1)
+        self.minimap = Minimap(scheme, table_area)
+        beside.addWidget(self.minimap)
+
         self._split = QSplitter(Qt.Orientation.Vertical, self)
-        self._split.addWidget(self.table)
+        self._split.addWidget(table_area)
         self._split.addWidget(self.detail)
         self._split.setStretchFactor(0, _TABLE_STRETCH)
         self._split.setStretchFactor(1, _DETAIL_STRETCH)
@@ -172,6 +184,8 @@ class MainWindow(QMainWindow):
         self._pump: Pump | None = None
         self.model = RecordModel(scheme, parent=self)
         self.table.setModel(self.model)
+        self.minimap.set_model(self.model)
+        self.minimap.row_requested.connect(self.go_to)
         self._connect_selection()
 
         self._filter_debounce = QTimer(self)
@@ -421,6 +435,7 @@ class MainWindow(QMainWindow):
         self.capture = capture
         self.model = RecordModel(self.scheme, parent=self)
         self.table.setModel(self.model)
+        self.minimap.set_model(self.model)
         self._connect_selection()
         self.detail.clear()
         self.status.set_device(capture.device)
@@ -439,6 +454,7 @@ class MainWindow(QMainWindow):
 
     def _on_loaded(self) -> None:
         self._on_progress(self._loader.loaded if self._loader else 0)
+        self.minimap.rebuild()
         if self.capture is not None and self.capture.truncated:
             # Worth saying out loud: the end of a truncated capture is missing,
             # and its absence says nothing about the device.
@@ -498,6 +514,7 @@ class MainWindow(QMainWindow):
 
         self.model = RecordModel(self.scheme, parent=self)
         self.table.setModel(self.model)
+        self.minimap.set_model(self.model)
         self._connect_selection()
         self.detail.clear()
         self.capture = None
@@ -513,6 +530,7 @@ class MainWindow(QMainWindow):
 
         self._capture_thread.start()
         self._pump.start()
+        self.minimap.start()
         self._set_capturing(capturing=True)
 
     def stop_capture(self) -> None:
@@ -532,6 +550,7 @@ class MainWindow(QMainWindow):
         self._capture_thread.wait(_STOP_TIMEOUT_MS)
         if self._pump is not None:
             self._pump.stop()
+        self.minimap.stop()
         self._capture_thread = None
         self._set_capturing(capturing=False)
 
@@ -650,6 +669,7 @@ class MainWindow(QMainWindow):
         current = self.table.currentIndex()
         if current.isValid():
             self.model.toggle_mark(current.row())
+            self.minimap.rebuild()
 
     def step_row(self, delta: int) -> None:
         """Move the selection without needing the table to have focus.

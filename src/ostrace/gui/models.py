@@ -43,7 +43,7 @@ It is the right advice in C++ and the wrong advice here.
 from __future__ import annotations
 
 from bisect import bisect_left
-from enum import StrEnum
+from enum import IntFlag, StrEnum
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
@@ -62,7 +62,7 @@ if TYPE_CHECKING:
 
     from ostrace.gui.markers import Row
 
-__all__ = ["MARKER_LEVEL", "MAX_ROWS", "TRIM_MARGIN", "Find", "RecordModel"]
+__all__ = ["BUCKET_ROWS", "MARKER_LEVEL", "MAX_ROWS", "TRIM_MARGIN", "Band", "Find", "RecordModel"]
 
 #: Markers borrow a severity so their colour comes from the theme rather than
 #: from a literal here. NOTICE is plain body text in both schemes, which is
@@ -77,11 +77,28 @@ MAX_ROWS = 200_000
 #: sitting exactly at the limit does not trigger a removal on every batch.
 TRIM_MARGIN = 0.1
 
+#: Rows per minimap bucket. Anchored to row numbers rather than to pixels so
+#: that an append touches only the last bucket; see `_rebuild_buckets`.
+BUCKET_ROWS = 256
+
 #: What an absent optional field reads as -- the exporters' spelling, so a value
 #: copied out of the table matches what a bundle would contain.
 ABSENT = "-"
 
 _Index = QModelIndex | QPersistentModelIndex
+
+
+class Band(IntFlag):
+    """What one stripe of the minimap has in it.
+
+    A flag set rather than a count: the strip is a few hundred pixels tall, and
+    a number it has no room to draw is a number nobody asked for.
+    """
+
+    NONE = 0
+    ERROR = 1
+    MARKER = 2
+    MARK = 4
 
 
 class Find(StrEnum):
@@ -137,6 +154,11 @@ class RecordModel(QAbstractTableModel):
         #: same reason selection anchors on one: a filter change must move a
         #: mark with its record, not leave it on a row number.
         self._marks: set[int] = set()
+        #: Minimap summary of the *dense* kind, one entry per `BUCKET_ROWS`
+        #: visible rows. Gaps and evictions are rare and are kept exactly
+        #: instead -- see `overview`.
+        self._buckets: list[Band] = []
+        self._marker_sources: list[int] = []
         self.scheme = scheme
 
         # Prebuilt once. Measured at 800k calls, `Qt.ItemFlag.A | Qt.ItemFlag.B`
@@ -273,6 +295,84 @@ class RecordModel(QAbstractTableModel):
             return _field(row, which)
         return self._display(row, which, view_row)
 
+    def overview(self, bands: int) -> list[Band]:
+        """What is worth knowing about, summarised into ``bands`` stripes.
+
+        The input to the scrollbar minimap, and the only mechanism in the
+        program that reveals a gap outside the viewport. Without one, a
+        discontinuity forty thousand rows above where the user is reading is
+        something they simply never learn about.
+
+        A band says *whether* it holds an error, a marker or a mark, not how
+        many: the strip is a few hundred pixels tall and a count it cannot draw
+        is a count nobody asked for. One pass over the visible rows, which is
+        why it is throttled by its caller rather than run per repaint.
+        """
+        total = len(self._visible)
+        if bands <= 0 or total == 0:
+            return []
+
+        summary = [Band.NONE] * bands
+
+        # Errors are dense -- three quarters of the error-heavy capture -- so a
+        # bucket's worth of smear costs nothing and saves the O(n) walk. Every
+        # band the bucket spans is lit, because either may be the coarser of
+        # the two: lighting only the band a bucket starts in collapsed a short
+        # capture to five lit bands out of a hundred and eighty.
+        for index, flags in enumerate(self._buckets):
+            if not flags & Band.ERROR:
+                continue
+            first = index * BUCKET_ROWS * bands // total
+            last = min(bands - 1, ((index + 1) * BUCKET_ROWS - 1) * bands // total)
+            for band in range(first, last + 1):
+                summary[band] |= Band.ERROR
+
+        # Gaps and marks are rare and are the whole reason this strip exists,
+        # so they are placed exactly rather than smeared across their bucket.
+        # Bucketed, two gaps in a short capture lit seventy-nine bands out of a
+        # hundred and eighty -- a picture saying that two fifths of the log was
+        # missing. There are a handful of them, so the bisect costs nothing.
+        for source in self._marker_sources:
+            summary[self._band_of(source, bands, total)] |= Band.MARKER
+        for source in self._marks:
+            summary[self._band_of(source, bands, total)] |= Band.MARK
+        return summary
+
+    def _band_of(self, source: int, bands: int, total: int) -> int:
+        """Which stripe a retained row falls in, after filtering."""
+        view_row = bisect_left(self._visible, source)
+        return min(view_row * bands // total, bands - 1)
+
+    def _rebuild_buckets(self) -> None:
+        """Summarise every visible row into fixed-size buckets.
+
+        The whole point of a *fixed* bucket rather than a pixel band: bands
+        move as rows arrive, so a summary in band units has to be recomputed
+        from scratch on every batch -- measured at 282 ms over 200,000 rows,
+        which is a third of a second of frozen window, twenty times a second.
+        Buckets are anchored to row numbers instead, so an append touches only
+        the last one or two of them and this full pass runs only when the whole
+        index is rebuilt anyway.
+        """
+        self._buckets = []
+        self._marker_sources = []
+        self._extend_buckets(0)
+
+    def _extend_buckets(self, from_row: int) -> None:
+        """Fold visible rows from ``from_row`` onward into the buckets."""
+        buckets = self._buckets
+        for view_row in range(from_row, len(self._visible)):
+            bucket = view_row // BUCKET_ROWS
+            if bucket >= len(buckets):
+                buckets.append(Band.NONE)
+            source = self._visible[view_row]
+            row = self._rows[source]
+            if isinstance(row, Record):
+                if row.is_error:
+                    buckets[bucket] |= Band.ERROR
+            else:
+                self._marker_sources.append(source)
+
     def source_index(self, view_row: int) -> int:
         """A handle on a row that survives a filter change.
 
@@ -398,6 +498,7 @@ class RecordModel(QAbstractTableModel):
             self.beginInsertRows(QModelIndex(), start, start + len(newly_visible) - 1)
             self._rows.extend(batch)
             self._visible.extend(newly_visible)
+            self._extend_buckets(start)
             self.endInsertRows()
         else:
             # Nothing to show, but the items are still retained: a filter hides
@@ -465,6 +566,7 @@ class RecordModel(QAbstractTableModel):
         # nothing is worse than losing it: the user would jump to a row that is
         # not the one they marked.
         self._marks = {mark - drop for mark in self._marks if mark >= drop}
+        self._rebuild_buckets()  # rebases the bucket and marker positions too
         if gone:
             self.endRemoveRows()
 
@@ -497,6 +599,7 @@ class RecordModel(QAbstractTableModel):
         self._rows.insert(0, notice)
         self._visible = [0, *(index + 1 for index in self._visible)]
         self._marks = {mark + 1 for mark in self._marks}
+        self._rebuild_buckets()
         self.endInsertRows()
 
     # -- filtering -------------------------------------------------------
@@ -521,6 +624,7 @@ class RecordModel(QAbstractTableModel):
 
     def _rescan(self) -> None:
         self._visible = [index for index, row in enumerate(self._rows) if self._passes(row)]
+        self._rebuild_buckets()
 
     def set_scheme(self, scheme: Scheme) -> None:
         """Recolour in place after a theme switch. No row changes."""

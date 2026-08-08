@@ -145,10 +145,21 @@ It is deliberately not decided here: `docs/formats/session-file.md` fixes the
 answer for every capture already written. The GUI's marker kinds are a view
 concept and cost the format nothing.
 
-Gaps and errors also belong in a **scrollbar minimap** (Wireshark's Intelligent
+Gaps and errors also belong in a **minimap** (Wireshark's Intelligent
 Scrollbar, klogg's overview strip). It is the only mechanism found that reveals
 a discontinuity outside the viewport, and the alternative is a user who never
 learns the hole exists.
+
+Built as a strip rather than a `QScrollBar` subclass: a scrollbar is drawn by
+the platform style, and painting into its groove means fighting a different set
+of metrics on each platform — blind, on the one that cannot be tested here.
+
+Its resolution has to be right in *both* directions, and getting either wrong
+produces a confident lie. Errors are dense, so they are summarised into buckets
+anchored to row numbers — pixel bands move as rows arrive, which forced a full
+rescan measured at 282 ms over 200,000 rows against 0.59 ms for buckets. Gaps
+and marks are rare and are the whole point, so they are placed exactly: by
+bucket, two gaps in a short capture lit 79 bands out of 180.
 
 ---
 

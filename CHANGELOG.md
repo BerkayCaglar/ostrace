@@ -199,6 +199,39 @@ fixed 200 records however large the capture is.
   nothing. Everything else is a summary, and a default that quietly discards
   data is the wrong default.
 
+### Added (phase 4, the overview strip)
+
+- **A minimap beside the table**, marking every error, gap and mark across the
+  whole capture. Clicking jumps there. It is the only mechanism in the program
+  that reveals a discontinuity *outside* the viewport — a gap forty thousand
+  rows above where somebody is reading is otherwise something they never learn
+  about, which would undo the reason a gap is a first-class row at all.
+
+  Deliberately not a `QScrollBar` subclass. A scrollbar is drawn by the
+  platform style, and painting into its groove means fighting different metrics
+  on each platform — on the one platform that cannot be tested here, blind.
+
+- **Row-anchored buckets in the model.** Summarising into pixel bands has to be
+  recomputed from scratch whenever a row arrives, because the bands move:
+  measured at **282 ms** over 200,000 rows, a third of a second of frozen
+  window, twenty times a second. Buckets anchored to row numbers make an append
+  touch only the last bucket, and the summary itself now costs **0.59 ms** —
+  about 480× faster.
+
+  Errors go through the buckets, because they are dense enough that a bucket of
+  smear is invisible. Gaps and marks are placed exactly, because they are rare
+  and they are the whole point.
+
+### Fixed (phase 4, the overview strip)
+
+- **A single gap smeared across two fifths of the strip.** Summarised by
+  bucket, two gaps in a short capture lit 79 bands out of 180 — a picture
+  saying that most of the log was missing.
+
+- **A short capture collapsed to five stripes.** Lighting only the band a
+  bucket *starts* in is right when there are more buckets than bands and wrong
+  in the other direction; every band a bucket spans gets its flags now.
+
 ### Added (phase 4, export)
 
 - **An export dialog that says what it left out.** Any of the six formats,
