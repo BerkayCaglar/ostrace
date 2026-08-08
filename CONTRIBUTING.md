@@ -31,13 +31,22 @@ shallow clone builds as `0.0.0`.
 ```bash
 ruff check .
 ruff format --check .
+zizmor --persona=regular .github/workflows
 mypy
 pytest -m "not device"
 ```
 
-`ruff` and `mypy` are pinned to exact versions in `[dependency-groups]`. New
-releases of either regularly add diagnostics, and an unpinned linter turns
-"someone released a new ruff" into "the build is red on an unrelated PR".
+`ruff`, `mypy` and `zizmor` are pinned to exact versions in
+`[dependency-groups]`. New releases of any of them regularly add diagnostics,
+and an unpinned linter turns "someone released a new ruff" into "the build is
+red on an unrelated PR".
+
+`zizmor` audits the workflow files. They are worth a linter of their own because
+they are the only thing in this repository that runs with privilege: `ci.yml`
+holds the repository token and `release.yml` holds an OIDC identity that can
+publish to PyPI. If you change a workflow, note that actions are referenced by
+full commit SHA rather than by tag — the repository rejects tag references, and
+Dependabot updates the SHA and its trailing version comment together.
 
 ### Tests that need a device
 

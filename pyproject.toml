@@ -26,7 +26,6 @@ keywords = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
-    "Environment :: X11 Applications :: Qt",
     "Intended Audience :: Developers",
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: Microsoft :: Windows",
@@ -72,6 +71,11 @@ dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "ruff==0.16.1",
+    # Static analysis for the workflows themselves. Worth having because the
+    # CI configuration is the part of this repository with real privilege: it
+    # holds an OIDC identity that can publish to PyPI, which no Python file here
+    # can do.
+    "zizmor==1.29.0",
 ]
 
 # ---------------------------------------------------------------------------

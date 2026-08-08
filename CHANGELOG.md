@@ -136,5 +136,38 @@ callers to break:
 - Dropped from `compat.py`: the subprocess helpers, which supported an
   architecture ADR 0002 rejected, and the platform constants, which the module's
   own rules left with no legal caller.
+- `Environment :: X11 Applications :: Qt` is no longer declared. It advertised a
+  graphical interface that does not exist until phase 4; the `gui` extra stays,
+  because installing Qt on purpose is a different claim from shipping a GUI.
+
+### Security
+
+The repository's own configuration is now what a public project is expected to
+have. Most of it is invisible until it is missing:
+
+- **`SECURITY.md` pointed at a page that did not exist.** It asks reporters to
+  use GitHub Private Vulnerability Reporting, which was never enabled, so the
+  link returned 404 and no fallback address was published. Anyone following the
+  documented process reached a dead end. Enabled.
+- **Actions are pinned to full-length commit SHAs**, and the repository now
+  rejects a tag reintroduced by hand. A tag is mutable by whoever owns the
+  action's repository; a SHA is not. Dependabot runs weekly for actions rather
+  than monthly, because a pin is only as good as the bumps that get merged.
+- **`actions/checkout` no longer persists `GITHUB_TOKEN` into `.git/config`.**
+  Neither workflow pushes anything, so the credential existed only for a later
+  step -- including whatever `pip install -e .` chooses to execute -- to find.
+- **The GitHub release is cut with `gh` rather than a third-party action.** That
+  was the only step running non-GitHub code, and the only one holding
+  `contents: write`.
+- **`zizmor` lints the workflows**, in CI and in pre-commit. The workflows are
+  the part of this repository with real privilege: one holds an OIDC identity
+  that can publish to PyPI, which no Python file here can do.
+- **A release cannot be cancelled halfway.** `release.yml` queues instead;
+  cancelling between "published to PyPI" and "attached to the GitHub release"
+  would leave a version that exists in one place and not the other.
+- Dependabot alerts and security updates, CodeQL default setup over both Python
+  and the workflows, immutable releases, and a ruleset that blocks force-pushing
+  or deleting `main` -- with no bypass, since an admin exemption set to "always"
+  is the same as not having the rule.
 
 [Unreleased]: https://github.com/BerkayCaglar/ostrace/commits/main

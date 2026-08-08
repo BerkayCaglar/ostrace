@@ -41,3 +41,12 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+      # Also from the project environment, and for the same reason the ruff
+      # revision above has to be kept in step by hand: there is one pinned
+      # version in pyproject.toml and no second place for it to drift.
+      - id: zizmor
+        name: zizmor
+        entry: zizmor --persona=regular
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$

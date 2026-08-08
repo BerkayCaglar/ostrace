@@ -1,3 +1,9 @@
+# Actions are pinned to a full-length commit SHA, not a tag. A tag is mutable:
+# whoever controls the action's repository can repoint it at different code
+# without anything here changing. The trailing comment records which release the
+# SHA is, and Dependabot keeps both in step -- so the pin costs nothing to
+# maintain. `sha_pinning_required` is enforced on the repository as well, which
+# means a tag reintroduced by hand is rejected rather than silently accepted.
 name: CI
 
 on:
@@ -23,12 +29,17 @@ jobs:
     name: Lint and types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # hatch-vcs derives the version from tags; a shallow clone has none.
           fetch-depth: 0
+          # checkout leaves GITHUB_TOKEN in .git/config unless told not to.
+          # Nothing here pushes, so every later step -- including whatever
+          # `pip install -e .` decides to execute -- would be able to read a
+          # credential it has no use for.
+          persist-credentials: false
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
 
@@ -42,6 +53,11 @@ jobs:
 
       - name: ruff format
         run: ruff format --check --diff .
+
+      # The workflows are the only thing here that runs with privilege, so they
+      # get a linter of their own.
+      - name: zizmor
+        run: zizmor --persona=regular .github/workflows
 
       # Type-check every target platform, not just the runner's. Windows-only
       # and macOS-only branches are otherwise never checked at all: this job
@@ -77,11 +93,12 @@ jobs:
             python-version: "3.13"
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: true
@@ -103,11 +120,12 @@ jobs:
     name: Build distributions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
 
@@ -119,7 +137,7 @@ jobs:
       - name: Check metadata
         run: twine check --strict dist/*
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: distributions
           path: dist/

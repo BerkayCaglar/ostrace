@@ -5,8 +5,12 @@ updates:
   # publish to PyPI.
   - package-ecosystem: github-actions
     directory: /
+    # Weekly rather than monthly, and deliberately more often than the rest:
+    # the actions are pinned to commit SHAs, so an upstream security fix only
+    # reaches this repository when Dependabot opens the pull request. Grouping
+    # keeps that to one pull request a week at worst.
     schedule:
-      interval: monthly
+      interval: weekly
     groups:
       actions:
         patterns: ["*"]
@@ -19,4 +23,14 @@ updates:
       # ruff and mypy are pinned exactly on purpose; batching their bumps keeps
       # "the linter has new opinions" out of unrelated pull requests.
       dev-tooling:
-        patterns: ["ruff", "mypy", "pytest*"]
+        patterns: ["ruff", "mypy", "pytest*", "zizmor"]
+
+  # The hook revisions and the pinned versions in pyproject.toml have to move
+  # together; this is what stops that from being a manual chore nobody does.
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      hooks:
+        patterns: ["*"]

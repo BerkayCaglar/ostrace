@@ -1,7 +1,8 @@
 # ostrace
 
-Cross-platform iOS log viewer. Phases 0 and 1 are done — model, sources,
-storage. Phases 2–5 (analysis, exporters, CLI, GUI, release) are not built yet.
+Cross-platform iOS log viewer. Done: phases 0 and 1 (model, sources, storage)
+and phase 3a (`devices`, `capture`, `doctor`). Not built: phase 2 (analysis,
+exporters), the `export` subcommand that depends on it, and the GUI.
 
 Read when relevant, rather than up front: `docs/adr/` for why decisions were
 taken, `docs/formats/` for the on-disk contracts, `CONTRIBUTING.md` for setup,
@@ -17,11 +18,12 @@ taken, `docs/formats/` for the on-disk contracts, `CONTRIBUTING.md` for setup,
 ```bash
 pip install -e . --group dev     # PEP 735, needs pip >= 25.1 -- not .[dev]
 ruff check . && ruff format --check .
+zizmor --persona=regular .github/workflows
 mypy --platform linux && mypy --platform win32 && mypy --platform darwin
 pytest -m "not device"
 ```
 
-All four run in CI. mypy runs three times on purpose: it narrows `sys.platform`
+All of these run in CI. mypy runs three times on purpose: it narrows `sys.platform`
 to whatever it runs on, so a single pass leaves the other platforms' branches
 unchecked — which is where the bugs would be, since only Windows can be tested
 here.
@@ -54,6 +56,10 @@ Each of these has cost real time at least once.
   a different clock in a frequently different zone. A naive timestamp is
   rejected on read rather than guessed at.
 - **Do not bump the exact `ruff` / `mypy` pins to make an error go away.**
+- **Actions are referenced by full commit SHA, never by tag**, with the release
+  in a trailing comment. A tag can be repointed by whoever owns the action; the
+  repository enforces this, so a tag ref fails the run rather than the review.
+  Let Dependabot do the bumping — it rewrites the SHA and the comment together.
 - Two SPDX lines at the top of every new source file, matching the existing ones.
 
 ## Architecture

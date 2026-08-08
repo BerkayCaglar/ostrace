@@ -1,3 +1,4 @@
+# Actions are pinned to a full-length commit SHA; see the note in ci.yml.
 name: Release
 
 on:
@@ -8,17 +9,27 @@ on:
 permissions:
   contents: read
 
+# Unlike CI, this must not cancel: killing a release between "published to PyPI"
+# and "attached to the GitHub release" leaves a version that exists in one place
+# and not the other. Queue instead.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build distributions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The tag itself is the version source; a shallow clone yields 0.0.0.
           fetch-depth: 0
+          # This job builds; it never pushes. Do not leave GITHUB_TOKEN in
+          # .git/config for the build to trip over.
+          persist-credentials: false
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
 
@@ -30,7 +41,7 @@ jobs:
       - name: Check metadata
         run: twine check --strict dist/*
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: distributions
           path: dist/
@@ -49,12 +60,18 @@ jobs:
       # if the repository is ever transferred.
       id-token: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: distributions
           path: dist/
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      # PyPA publish their own guide with `@release/v1`, a branch, so that they
+      # can ship security fixes without waiting on a pull request here. Pinning
+      # trades that away for reproducibility: this is the step holding the OIDC
+      # identity, and a moving reference is exactly what should not be trusted
+      # at that point. The trade is only sound while the Dependabot bumps get
+      # merged -- a stale pin here is worse than the branch was.
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
   github-release:
     name: Attach distributions to the GitHub release
@@ -63,12 +80,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: distributions
           path: dist/
 
-      - uses: softprops/action-gh-release@v3
-        with:
-          files: dist/*
-          generate_release_notes: true
+      # `gh` is preinstalled on the runner and does this job, so a third-party
+      # action is a supply-chain dependency bought for nothing -- and it would
+      # have been the only one here holding `contents: write`. The tag name and
+      # repository come through the environment rather than `${{ }}`, which
+      # keeps a crafted ref out of the shell.
+      - name: Create the release and attach the distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --repo "$GITHUB_REPOSITORY"
