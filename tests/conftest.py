@@ -27,8 +27,6 @@ from tests.helpers import DEVICE_TZ, ERRORS, MIXED
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from PySide6.QtWidgets import QApplication
-
 
 @pytest.fixture
 def mixed_fixture() -> Path:
@@ -38,25 +36,6 @@ def mixed_fixture() -> Path:
 @pytest.fixture
 def errors_fixture() -> Path:
     return ERRORS
-
-
-@pytest.fixture(scope="session")
-def qt_app() -> QApplication:
-    """One themed ``QApplication`` for the whole session.
-
-    Qt permits exactly one per process and constructing a second is a hard
-    failure, so this is session-scoped rather than per-test. It is the same
-    application a user gets -- ``build_application`` does the style and palette
-    work -- because a test against a differently configured application proves
-    something about a program nobody runs.
-
-    ``importorskip`` rather than a hard import: Qt is an optional extra, and
-    the interpreter sweep in CI installs the package without it.
-    """
-    pytest.importorskip("PySide6", reason="the gui extra is not installed")
-    from ostrace.gui.app import build_application
-
-    return build_application([])
 
 
 @pytest.fixture

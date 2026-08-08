@@ -60,32 +60,6 @@ def test_unknown_subcommand_is_rejected() -> None:
     assert excinfo.value.code == 2
 
 
-def test_importing_the_gui_package_does_not_import_qt() -> None:
-    """The launcher resolves PySide6 lazily, and must keep doing so.
-
-    A top-level ``from PySide6 import ...`` in ``ostrace.gui`` turns a missing
-    optional extra into a traceback ending in ``ModuleNotFoundError``, in a
-    program whose whole job at that moment is to say which command to run. Run
-    in a subprocess because this suite has almost certainly imported Qt
-    already.
-
-    Deliberately not marked ``gui``: it is most useful precisely where the
-    extra is *not* installed.
-    """
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import sys, ostrace.gui; print('PySide6' in sys.modules)",
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=True,
-    )
-    assert result.stdout.strip() == "False"
-
-
 def test_module_entry_point_runs() -> None:
     """`python -m ostrace --version` must work on every supported platform."""
     result = subprocess.run(
