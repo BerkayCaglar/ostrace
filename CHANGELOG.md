@@ -199,6 +199,32 @@ fixed 200 records however large the capture is.
   nothing. Everything else is a summary, and a default that quietly discards
   data is the wrong default.
 
+### Added (phase 4, export)
+
+- **An export dialog that says what it left out.** Any of the six formats,
+  written beside the capture and named after it, with the token budget offered
+  only for the one format that has one.
+
+  It does not close on success. An export button that reports "done" and
+  nothing else is easy to write and quietly wrong: a summary that stopped at a
+  budget reads as complete, and the reader then draws conclusions from an
+  absence that is an artefact of truncation rather than a fact about the
+  device. The dialog stays open and lists the omissions — and says nothing when
+  there is nothing to say, because a warning that always appears is one nobody
+  reads.
+
+- `exporters.notes.export_notes()`, shared with the CLI. Those sentences were
+  private to `ostrace export`; two spellings of "this capture has a gap in it"
+  would eventually disagree about which one mattered, and the reader should be
+  told the same truth whichever way they asked.
+
+### Fixed (phase 4, export)
+
+- **Exporting to an impossible path escaped the button handler.** Only
+  `OstraceError` was caught, and writing into something that is not a directory
+  raises `OSError` — an ordinary mistake, and an exception out of a slot takes
+  the window with it.
+
 ### Added (phase 4, navigation)
 
 - **Keyboard navigation, marks and copy.** Jump to the next or previous error,

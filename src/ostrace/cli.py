@@ -21,7 +21,6 @@ from ostrace.errors import OstraceError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from ostrace.exporters.base import ExportResult
 
 __all__ = ["build_parser", "main"]
 
@@ -192,6 +191,7 @@ def _export(args: argparse.Namespace) -> int:
 
     from ostrace.exporters import EXPORTERS  # noqa: PLC0415
     from ostrace.exporters.ai_report import AiReportExporter  # noqa: PLC0415
+    from ostrace.exporters.notes import export_notes  # noqa: PLC0415
     from ostrace.paths import export_path  # noqa: PLC0415
     from ostrace.storage.capture import open_capture  # noqa: PLC0415
 
@@ -221,41 +221,10 @@ def _export(args: argparse.Namespace) -> int:
 
     if not args.quiet:
         print(f"{result.records:,} records -> {exporter.name}")
-        for warning in _export_warnings(result, truncated=truncated):
+        for warning in export_notes(result, truncated=truncated):
             print(f"note: {warning}", file=sys.stderr)
     print(result.destination)
     return EXIT_OK
-
-
-def _export_warnings(result: ExportResult, *, truncated: bool) -> list[str]:
-    """Everything about this export a reader would otherwise assume away.
-
-    Each of these makes an absence in the output mean something other than "the
-    device did not do that", which is the conclusion a reader reaches by
-    default.
-    """
-    notes: list[str] = []
-    if truncated:
-        notes.append(
-            "the capture has no gzip trailer -- it was still being written, or the "
-            "process was killed. Whatever decoded is complete; the tail may not be."
-        )
-    scan = result.scan
-    if scan is None:
-        return notes
-    if scan.gaps:
-        notes.append(
-            f"{len(scan.gaps)} gap(s) in the capture: the device was unreachable for "
-            f"part of it, and nothing follows from an absence across one."
-        )
-    if scan.templates_dropped:
-        notes.append(
-            f"{scan.templates_dropped:,} records exceeded the distinct-pattern limit "
-            f"and are not represented in the pattern statistics."
-        )
-    if scan.records == 0:
-        notes.append("the capture contains no records.")
-    return notes
 
 
 async def _doctor(args: argparse.Namespace) -> int:

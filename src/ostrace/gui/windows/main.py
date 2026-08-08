@@ -52,6 +52,7 @@ from ostrace.gui.shortcuts import BINDINGS, key_table, sequences
 from ostrace.gui.theme import Scheme
 from ostrace.gui.widgets.banner import Banner
 from ostrace.gui.widgets.detail_pane import DetailPane
+from ostrace.gui.widgets.export_dialog import ExportDialog
 from ostrace.gui.widgets.filter_bar import FilterBar
 from ostrace.gui.widgets.log_table import LogTable
 from ostrace.gui.widgets.status_bar import StatusBar
@@ -217,6 +218,7 @@ class MainWindow(QMainWindow):
         )
         self.action_step_down.triggered.connect(lambda: self.step_row(1))
         self.action_step_up.triggered.connect(lambda: self.step_row(-1))
+        self.action_export.triggered.connect(self.export_capture)
         self.action_keys.triggered.connect(self.show_keys)
 
     def clear_marks(self) -> None:
@@ -592,6 +594,24 @@ class MainWindow(QMainWindow):
         bar = self.table.verticalScrollBar()
         if bar.value() >= bar.maximum() - _FOLLOW_SLACK:
             self.table.scrollToBottom()
+
+    def export_capture(self) -> None:
+        """Offer to write the open capture out.
+
+        Only a capture read from disk can be exported: a live one is still
+        being written, and exporting a file that is growing under the exporter
+        produces a report whose end is arbitrary. Disconnect first -- which is
+        also when the sidecar is finalised.
+        """
+        if self.capture is None:
+            self.banner.show_message(
+                "There is nothing to export yet. Open a capture, or disconnect "
+                "to finish the one being recorded.",
+                "Open capture…",
+                on_action=self.choose_capture,
+            )
+            return
+        ExportDialog(self.capture, self).exec()
 
     # -- navigation, marks, copy -----------------------------------------
 
