@@ -57,6 +57,62 @@ class TestSessionName:
         assert "\x1f" not in paths.session_name("a\x00b\x1fc", "s")
 
 
+class TestSessionPath:
+    """The whole path is one decision, so one function makes it.
+
+    It used to be two: this module produced a stem and the storage layer
+    applied the suffix with ``Path.with_suffix``, which *replaces* the last
+    dotted component. Any device name containing a dot therefore lost its
+    timestamp, and the uniqueness guarantee with it.
+    """
+
+    def test_the_suffix_is_appended(self, tmp_path: Path) -> None:
+        result = paths.session_path("iPhone", "20260808-130000", root=tmp_path)
+        assert result.name == "iPhone-20260808-130000.ostrace"
+        assert result.parent == tmp_path
+
+    @pytest.mark.parametrize(
+        "device_name",
+        ["iPhone 15.1", "Test 2.0 phone", "a.b.c.d", "iPhone."],
+    )
+    def test_a_dot_in_the_device_name_does_not_eat_the_timestamp(
+        self,
+        device_name: str,
+        tmp_path: Path,
+    ) -> None:
+        result = paths.session_path(device_name, "20260808-130000", root=tmp_path)
+        assert result.name.endswith("-20260808-130000.ostrace")
+
+    def test_two_captures_from_one_device_do_not_collide(self, tmp_path: Path) -> None:
+        first = paths.session_path("iPhone 15.1", "20260808-130000", root=tmp_path)
+        second = paths.session_path("iPhone 15.1", "20260808-130500", root=tmp_path)
+        assert first != second
+
+    def test_it_defaults_to_the_sessions_directory(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("OSTRACE_HOME", str(tmp_path))
+        assert paths.session_path("iPhone", "s").parent == paths.sessions_dir()
+
+    @pytest.mark.parametrize(
+        ("given", "expected"),
+        [
+            ("capture", "capture.ostrace"),
+            ("capture.ostrace", "capture.ostrace"),
+            ("iPhone 15.1-20260808", "iPhone 15.1-20260808.ostrace"),
+        ],
+    )
+    def test_with_session_suffix_appends_and_never_replaces(
+        self,
+        given: str,
+        expected: str,
+        tmp_path: Path,
+    ) -> None:
+        assert paths.with_session_suffix(tmp_path / given).name == expected
+
+
 class TestDirectories:
     def test_every_directory_is_absolute(self) -> None:
         for resolver in (paths.data_dir, paths.config_dir, paths.cache_dir, paths.log_dir):

@@ -7,11 +7,18 @@ literal, and nothing assumes a layout: the predecessor tool hardcoded
 ``C:\\msys64\\...`` and that single habit was the largest obstacle to running it
 anywhere else.
 
-One macOS-specific trap is worth stating because it is invisible from Windows:
-on macOS the config directory and the data directory are the same path, both
-``~/Library/Application Support/ostrace``. Any code that writes a config file
-and a data file with the same name into "different" directories overwrites
-itself there and nowhere else.
+"Where a session lives" is one decision, so this module owns all of it -- the
+directory, the sanitised name, the suffix and the length budget. Splitting it
+was actively harmful: the suffix used to be applied elsewhere with
+``Path.with_suffix``, which *replaces* the last dotted component, so a device
+called ``iPhone 15.1`` produced ``iPhone-15.ostrace`` and lost the timestamp
+that makes the name unique. Two captures then landed in the same directory.
+
+One macOS trap is worth stating because it is invisible from Windows: there the
+config directory and the data directory are the same path, both
+``~/Library/Application Support/ostrace``. Code that writes a config file and a
+data file with the same name into "different" directories overwrites itself
+there and nowhere else.
 """
 
 from __future__ import annotations
@@ -23,12 +30,15 @@ from pathlib import Path
 from platformdirs import PlatformDirs
 
 __all__ = [
+    "SESSION_SUFFIX",
     "cache_dir",
     "config_dir",
     "data_dir",
     "log_dir",
     "session_name",
+    "session_path",
     "sessions_dir",
+    "with_session_suffix",
 ]
 
 _APP = "ostrace"
@@ -36,18 +46,24 @@ _APP = "ostrace"
 #: Set to redirect every path below, for tests and for portable installs.
 _ENV_OVERRIDE = "OSTRACE_HOME"
 
+#: Directory extension for a capture.
+SESSION_SUFFIX = ".ostrace"
+
 _dirs = PlatformDirs(appname=_APP, appauthor=False, roaming=False)
 
 
-def _home_override() -> Path | None:
-    raw = os.environ.get(_ENV_OVERRIDE)
-    return Path(raw).expanduser() if raw else None
+def _resolve(subdirectory: str | None, default: str) -> Path:
+    """One override rule for every directory, so they cannot drift apart."""
+    override = os.environ.get(_ENV_OVERRIDE)
+    if override:
+        base = Path(override).expanduser()
+        return base / subdirectory if subdirectory else base
+    return Path(default)
 
 
 def data_dir() -> Path:
     """Captured sessions and anything else worth keeping."""
-    override = _home_override()
-    return override if override is not None else Path(_dirs.user_data_dir)
+    return _resolve(None, _dirs.user_data_dir)
 
 
 def config_dir() -> Path:
@@ -56,20 +72,17 @@ def config_dir() -> Path:
     On macOS this is the same directory as :func:`data_dir`. That is correct
     for the platform, not an oversight -- see the module docstring.
     """
-    override = _home_override()
-    return override / "config" if override is not None else Path(_dirs.user_config_dir)
+    return _resolve("config", _dirs.user_config_dir)
 
 
 def cache_dir() -> Path:
     """Regenerable data. Safe to delete at any time."""
-    override = _home_override()
-    return override / "cache" if override is not None else Path(_dirs.user_cache_dir)
+    return _resolve("cache", _dirs.user_cache_dir)
 
 
 def log_dir() -> Path:
     """ostrace's own diagnostics -- not device logs."""
-    override = _home_override()
-    return override / "logs" if override is not None else Path(_dirs.user_log_dir)
+    return _resolve("logs", _dirs.user_log_dir)
 
 
 def sessions_dir(*, create: bool = False) -> Path:
@@ -97,7 +110,7 @@ _MAX_STEM = 96
 
 
 def session_name(device_name: str, stamp: str) -> str:
-    """Build a filesystem-safe session directory name.
+    """Build a filesystem-safe session directory name, without the suffix.
 
     The device name is chosen by the user and routinely contains an apostrophe
     (``Berkay's iPhone``), a colon, or an emoji. The timestamp is always
@@ -115,3 +128,18 @@ def session_name(device_name: str, stamp: str) -> str:
         cleaned = "device"
 
     return f"{cleaned}-{stamp}"
+
+
+def session_path(device_name: str, stamp: str, *, root: Path | None = None) -> Path:
+    """Full path of a new capture directory.
+
+    The suffix is *appended*, never applied with ``Path.with_suffix`` -- see
+    the module docstring for what that cost.
+    """
+    base = root if root is not None else sessions_dir()
+    return base / f"{session_name(device_name, stamp)}{SESSION_SUFFIX}"
+
+
+def with_session_suffix(path: Path) -> Path:
+    """Ensure a caller-supplied path carries the session suffix."""
+    return path if path.suffix == SESSION_SUFFIX else path.with_name(path.name + SESSION_SUFFIX)

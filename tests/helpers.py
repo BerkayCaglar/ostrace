@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from ostrace.model import Gap, Level, Record
+from ostrace.model import Gap, Level, Platform, Record
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MIXED = FIXTURES / "ios26-mixed.jsonl.gz"
@@ -42,6 +42,7 @@ def make_record(
         thread_id=13570622 + index,
         image_path="/System/Library/PrivateFrameworks/CloudKit.framework/CloudKit",
         message=message if message is not None else f"record number {index}",
+        platform=Platform.IOS,
     )
 
 

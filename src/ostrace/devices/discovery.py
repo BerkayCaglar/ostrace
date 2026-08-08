@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from ostrace.errors import NoDeviceFoundError, translate
-from ostrace.model import DeviceInfo
+from ostrace.model import DeviceInfo, Platform, optional_str
 
 if TYPE_CHECKING:
     from pymobiledevice3.lockdown import LockdownClient
@@ -27,6 +27,16 @@ __all__ = [
     "read_device_info",
     "require_device",
 ]
+
+_WANTED = (
+    "DeviceName",
+    "ProductType",
+    "ProductVersion",
+    "BuildVersion",
+    "TimeZone",
+    "TimeZoneOffsetFromUTC",
+    "TimeIntervalSince1970",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,23 +100,12 @@ async def read_device_info(
     timestamps, so the device's own UTC offset is what makes them meaningful --
     the host's offset is a different clock and frequently a different zone.
     """
-    values = {
-        key: await _value(lockdown, key)
-        for key in (
-            "DeviceName",
-            "ProductType",
-            "ProductVersion",
-            "BuildVersion",
-            "TimeZone",
-            "TimeZoneOffsetFromUTC",
-            "TimeIntervalSince1970",
-        )
-    }
+    values = await _values(lockdown, _WANTED)
 
-    offset_raw = values["TimeZoneOffsetFromUTC"]
+    offset_raw = values.get("TimeZoneOffsetFromUTC")
     utc_offset = timedelta(seconds=int(offset_raw)) if offset_raw is not None else None
 
-    device_epoch = values["TimeIntervalSince1970"]
+    device_epoch = values.get("TimeIntervalSince1970")
     clock_skew = None
     if device_epoch is not None:
         device_now = datetime.fromtimestamp(float(device_epoch), tz=UTC)
@@ -117,14 +116,15 @@ async def read_device_info(
         # surprising, but it is an identifying field rather than a functional
         # one, so an empty string beats failing a capture over it.
         udid=lockdown.udid or "",
-        name=str(values["DeviceName"] or "iPhone"),
-        product_type=str(values["ProductType"] or "unknown"),
-        product_version=str(values["ProductVersion"] or "unknown"),
-        build_version=_optional_str(values["BuildVersion"]),
+        name=str(values.get("DeviceName") or "iPhone"),
+        product_type=str(values.get("ProductType") or "unknown"),
+        product_version=str(values.get("ProductVersion") or "unknown"),
+        build_version=optional_str(values.get("BuildVersion")),
         connection=connection,
-        timezone_name=_optional_str(values["TimeZone"]),
+        timezone_name=optional_str(values.get("TimeZone")),
         utc_offset=utc_offset,
         clock_skew=clock_skew,
+        platform=Platform.IOS,
     )
 
 
@@ -142,7 +142,7 @@ async def require_device(udid: str | None = None) -> DeviceSummary:
         msg = f"device {udid} is not connected"
         raise NoDeviceFoundError(msg)
 
-    usb = [d for d in devices if not d.is_network]
+    usb = [device for device in devices if not device.is_network]
     if usb:
         return usb[0]
 
@@ -156,18 +156,30 @@ async def require_device(udid: str | None = None) -> DeviceSummary:
     )
 
 
-async def _value(lockdown: LockdownClient, key: str) -> Any:  # noqa: ANN401
-    """Read one lockdown value, treating an absent key as absent rather than fatal.
+async def _values(lockdown: LockdownClient, keys: tuple[str, ...]) -> dict[str, Any]:
+    """Read several lockdown values with as few round trips as possible.
 
-    Which keys a device exposes varies by iOS version and by pairing state.
-    ``UsesTwentyFourHourClock`` raises ``MissingValueError`` on iOS 26, for
-    instance. None of these are worth failing a capture over.
+    The client already holds the device's root value dictionary: it fetches it
+    during the handshake and keeps it on ``all_values``. Reading from there
+    costs nothing, where asking key by key is one request/response over usbmux
+    each -- seven round trips before the first record can arrive, with the clock
+    reading last and absorbing the latency of the six before it.
+
+    Keys absent from that dictionary still fall back to an individual read, and
+    a key the device does not expose at all is treated as absent rather than
+    fatal: which keys exist varies by iOS version and pairing state, and none of
+    them is worth failing a capture over.
     """
-    try:
-        return await lockdown.get_value(key=key)
-    except Exception:
-        return None
+    cached = getattr(lockdown, "all_values", None)
+    bulk: dict[str, Any] = dict(cached) if isinstance(cached, dict) else {}
 
-
-def _optional_str(value: object) -> str | None:
-    return None if value is None else str(value)
+    values: dict[str, Any] = {}
+    for key in keys:
+        if key in bulk:
+            values[key] = bulk[key]
+            continue
+        try:
+            values[key] = await lockdown.get_value(key=key)
+        except Exception:
+            values[key] = None
+    return values

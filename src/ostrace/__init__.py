@@ -7,19 +7,14 @@ The package is organised around one boundary: everything downstream of
 learns where they came from. That is what lets the test suite run the whole
 pipeline against a committed fixture with no device attached.
 
-This is the phase 0 skeleton. The subpackages described in ``docs/`` land in
-later phases; see ``CHANGELOG.md`` for what is actually implemented.
+Importing this package deliberately does no work and pulls in no device
+libraries, so offline use -- replaying a session, re-exporting a capture --
+costs nothing and depends on nothing.
 """
 
 from __future__ import annotations
 
-from ostrace.errors import guard_optimized_interpreter
-
 __all__ = ["__version__"]
-
-# Fail at import time rather than let a user debug corrupted logs. See the
-# function's docstring for why an interpreter flag can corrupt a wire protocol.
-guard_optimized_interpreter()
 
 try:
     from ostrace._version import __version__

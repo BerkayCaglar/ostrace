@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ostrace.model import Gap, Level, Record
-from ostrace.storage.codec import decode, encode_record
+from ostrace.storage.codec import decode, encode_gap, encode_record
 from ostrace.storage.spool import SpoolReader, SpoolWriter
 from tests.helpers import make_gap, make_record
 
@@ -74,6 +74,26 @@ def test_gaps_are_written_in_stream_order(tmp_path: Path) -> None:
     assert [type(item) for item in items] == [Record, Gap, Record]
     assert len(list(SpoolReader(path).records())) == 2
     assert len(list(SpoolReader(path).gaps())) == 1
+
+
+def test_scanning_for_gaps_does_not_decode_every_record(tmp_path: Path) -> None:
+    """A capture holds millions of records and a handful of gaps.
+
+    ``gaps()`` filters on the raw object before decoding; building a full
+    Record for each line only to discard it more than doubled the cost of this
+    scan. The behaviour must stay identical, which is what this asserts --
+    including that a damaged *record* does not disturb a gap scan.
+    """
+    path = tmp_path / "s.jsonl.gz"
+    with gzip.open(path, "wb") as raw:
+        for index in range(20):
+            raw.write(json.dumps(encode_record(make_record(index))).encode() + b"\n")
+        raw.write(b'{"ts": "nonsense", "level": "NOTICE"}\n')
+        raw.write(json.dumps(encode_gap(make_gap())).encode() + b"\n")
+
+    gaps = list(SpoolReader(path).gaps())
+    assert len(gaps) == 1
+    assert gaps[0] == make_gap()
 
 
 def test_counts(tmp_path: Path) -> None:
@@ -167,14 +187,15 @@ class TestDamagedFiles:
         assert len(list(reader.records())) == 2
         assert reader.malformed == 1
 
-    def test_a_malformed_line_can_be_made_fatal(self, tmp_path: Path) -> None:
+    def test_a_line_that_is_not_an_object_is_skipped(self, tmp_path: Path) -> None:
         path = tmp_path / "s.jsonl.gz"
         with gzip.open(path, "wb") as raw:
-            raw.write(b"{ this is not json\n")
+            raw.write(b"[1, 2, 3]\n")
+            raw.write(json.dumps(encode_record(make_record(0))).encode() + b"\n")
 
-        reader = SpoolReader(path, skip_malformed=False)
-        with pytest.raises(ValueError, match=r"[Ee]xpecting|[Dd]elimiter|line \d"):
-            list(reader.records())
+        reader = SpoolReader(path)
+        assert len(list(reader.records())) == 1
+        assert reader.malformed == 1
 
     def test_a_record_with_a_naive_timestamp_is_rejected(self, tmp_path: Path) -> None:
         """No writer of ours produces one, so it means something else wrote it.

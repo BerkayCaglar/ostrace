@@ -4,12 +4,13 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ostrace.model import DeviceInfo, Gap, Level, Platform, Record
+from ostrace.model import DeviceInfo, Gap, Level, Platform, Record, basename, optional_str
 from tests.helpers import make_record
 
 
@@ -88,6 +89,7 @@ class TestRecord:
             thread_id=None,
             image_path="/usr/libexec/dasd",
             message="x",
+            platform=Platform.IOS,
         )
         assert record.image is None
         assert record.process_label == "dasd[83]"
@@ -112,6 +114,7 @@ class TestRecord:
                 "ColourSensorFilterPlugin"
             ),
             message="x",
+            platform=Platform.IOS,
         )
         assert record.image == "ColourSensorFilterPlugin"
         assert record.process_label == "backboardd(ColourSensorFilterPlugin)[70]"
@@ -121,9 +124,54 @@ class TestRecord:
         assert make_record(level=Level.ERROR).is_error
         assert make_record(level=Level.FAULT).is_error
 
-    def test_platform_defaults_to_ios_and_is_a_plain_string_on_the_wire(self) -> None:
-        assert make_record().platform is Platform.IOS
+    def test_platform_has_no_default(self) -> None:
+        """A source always knows what it is reading. A default would let a
+        second platform's records silently claim to be iOS."""
+        fields = {f.name: f for f in dataclasses.fields(Record)}
+        assert fields["platform"].default is dataclasses.MISSING
+
+    def test_platform_is_a_plain_string_on_the_wire(self) -> None:
         assert str(Platform.IOS) == "ios"
+
+
+class TestHelpers:
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            ("/usr/libexec/dasd", "dasd"),
+            ("/usr/lib/system/libxpc.dylib", "libxpc.dylib"),
+            ("dasd", "dasd"),
+            ("", ""),
+            # Real device paths include directory-style entries. A bare
+            # rpartition returns "" for these, which is how a process ends up
+            # nameless in the viewer.
+            (
+                "/System/Library/DriverExtensions/AppleCentauriAlpha.dext/",
+                "AppleCentauriAlpha.dext",
+            ),
+            ("/a/b/", "b"),
+        ],
+    )
+    def test_basename(self, path: str, expected: str) -> None:
+        assert basename(path) == expected
+
+    def test_basename_matches_pathlib_on_real_captured_paths(self) -> None:
+        """The string form replaced PurePosixPath for speed; it must not have
+        replaced its behaviour."""
+        from pathlib import PurePosixPath
+
+        for path in (
+            "/usr/libexec/nsurlsessiond",
+            "/System/Library/PrivateFrameworks/CloudKitDaemon.framework/Support/cloudd",
+            "/System/Library/DriverExtensions/AppleCentauriAlpha.dext/",
+            "/usr/lib/system/libxpc.dylib",
+        ):
+            assert basename(path) == PurePosixPath(path).name
+
+    def test_optional_str(self) -> None:
+        assert optional_str(None) is None
+        assert optional_str("x") == "x"
+        assert optional_str(3) == "3"
 
 
 class TestDeviceInfo:
@@ -150,6 +198,23 @@ class TestDeviceInfo:
             product_version="26.5.2",
         )
         assert device.label == "Test iPhone (iPhone18,2, iOS 26.5.2)"
+
+    def test_label_reads_the_platform_rather_than_assuming_one(self) -> None:
+        """The device object describes the subject, so the platform belongs on
+        it. Hardcoding 'iOS' here would render 'Pixel 8 (Pixel 8, iOS 15)' in
+        every window title the day a second source lands, with no field to fix
+        it from."""
+        device = DeviceInfo(
+            udid="x",
+            name="Test iPhone",
+            product_type="iPhone18,2",
+            product_version="26.5.2",
+        )
+        assert device.platform is Platform.IOS
+        assert device.platform.display_name in device.label
+
+    def test_platform_display_name_is_written_for_humans(self) -> None:
+        assert Platform.IOS.display_name == "iOS"
 
 
 def test_gap_duration() -> None:

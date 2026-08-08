@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING
 
 from ostrace.errors import StorageError
 from ostrace.model import DeviceInfo
-from ostrace.storage.session import SessionReader
+from ostrace.sources.base import SourceCloseMixin
+from ostrace.storage.session import SessionMeta, SessionReader
 from ostrace.storage.spool import SpoolReader
 
 if TYPE_CHECKING:
@@ -36,60 +37,58 @@ _UNKNOWN_DEVICE = DeviceInfo(
     product_version="unknown",
 )
 
+_EPOCH = datetime.fromtimestamp(0, tz=UTC)
 
-class ReplaySource:
+
+class ReplaySource(SourceCloseMixin):
     """Yield the records of a session directory or a bare spool file."""
 
     name = "replay"
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
-        self._session: SessionReader | None = None
 
+        # A session directory and a bare spool differ in exactly one way: one
+        # has metadata. Resolving that once here means the accessors below have
+        # a single thing to test, rather than each inventing its own fallback.
         if self.path.is_dir():
-            self._session = SessionReader(self.path)
-            self._reader: SessionReader | SpoolReader = self._session
+            session = SessionReader(self.path)
+            self._reader = session.spool
+            self._meta: SessionMeta | None = session.meta
         elif self.path.is_file():
             self._reader = SpoolReader(self.path)
+            self._meta = None
         else:
             msg = f"no session or spool at {self.path}"
             raise StorageError(msg)
 
     async def device_info(self) -> DeviceInfo:
         """The device the session came from, or a placeholder for a bare spool."""
-        if self._session is not None and self._session.meta is not None:
-            return self._session.meta.device
-        return _UNKNOWN_DEVICE
+        return self._meta.device if self._meta is not None else _UNKNOWN_DEVICE
 
     @property
     def started_at(self) -> datetime:
         """When the original capture began, or the epoch if unrecorded."""
-        if self._session is not None and self._session.meta is not None:
-            return self._session.meta.started_at
-        return datetime.fromtimestamp(0, tz=UTC)
+        return self._meta.started_at if self._meta is not None else _EPOCH
 
     async def stream(self) -> AsyncGenerator[Record | Gap, None]:
         """Yield everything in the session -- records and gaps -- in order."""
         for item in self._reader.items():
             yield item
 
-    async def records(self) -> AsyncGenerator[Record, None]:
-        """Yield only the records, skipping gap markers."""
-        for record in self._reader.records():
-            yield record
-
-    def gaps(self) -> list[Gap]:
-        return list(self._reader.gaps())
-
     @property
     def truncated(self) -> bool:
-        """True when the spool has no gzip trailer -- still open, or killed."""
+        """True when the spool has no gzip trailer -- still open, or killed.
+
+        Meaningful only for a recorded session; a live source has no equivalent,
+        which is why it is here rather than on the protocol.
+        """
         return self._reader.truncated
 
     async def aclose(self) -> None:
-        """Nothing to release: the readers open the file per iteration."""
+        """Nothing to release: the reader opens the file per iteration."""
         return
 
     def __repr__(self) -> str:
-        kind = "session" if self._session is not None else "spool"
+        kind = "session" if self.path.is_dir() else "spool"
         return f"ReplaySource({kind}={self.path.name!r})"

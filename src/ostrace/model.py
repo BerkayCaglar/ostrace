@@ -9,19 +9,25 @@ learns which device, transport or library produced them.
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from enum import IntEnum, StrEnum
-from pathlib import PurePosixPath
-from typing import Any
 
-__all__ = ["DeviceInfo", "Gap", "Level", "Platform", "Record"]
+__all__ = ["DeviceInfo", "Gap", "Level", "Platform", "Record", "basename", "optional_str"]
 
 
 class Platform(StrEnum):
     """Which kind of device a record came from."""
 
     IOS = "ios"
+
+    @property
+    def display_name(self) -> str:
+        """How to write it for a human: ``iOS``, not ``ios``."""
+        return _PLATFORM_NAMES.get(self, self.value.title())
+
+
+_PLATFORM_NAMES: dict[Platform, str] = {Platform.IOS: "iOS"}
 
 
 class Level(IntEnum):
@@ -83,6 +89,30 @@ _LEVEL_ALIASES: dict[str, Level] = {
 }
 
 
+def optional_str(value: object) -> str | None:
+    """Coerce to ``str``, passing ``None`` through.
+
+    One implementation so that a device field and the same field read back from
+    disk cannot diverge -- they feed the same model attributes from two
+    different directions.
+    """
+    return None if value is None else str(value)
+
+
+def basename(path: str) -> str:
+    """Last component of a device path.
+
+    A plain string operation rather than ``PurePosixPath(path).name``, which
+    measured at 2.4 microseconds per call -- about a third of the entire
+    per-record ingest cost at a thousand-plus records a second.
+
+    ``rstrip("/")`` is not decoration: real device paths include directory-style
+    entries such as ``/System/Library/DriverExtensions/AppleCentauriAlpha.dext/``
+    and a bare ``rpartition`` returns an empty string for those.
+    """
+    return path.rstrip("/").rpartition("/")[2]
+
+
 def _intern(value: str | None) -> str | None:
     """Intern a repeated string field, tolerating ``None``.
 
@@ -116,7 +146,11 @@ class Record:
     #: roughly nine records out of ten.
     image_path: str | None
     message: str
-    platform: Platform = Platform.IOS
+    #: Required rather than defaulted: a source always knows what it is reading,
+    #: and a default would let a second platform's records silently claim to be
+    #: iOS. The only place a default belongs is reading a file written before
+    #: the key existed, and that lives in the codec.
+    platform: Platform
 
     def __post_init__(self) -> None:
         for name in ("process", "process_path", "subsystem", "category", "image_path"):
@@ -131,7 +165,7 @@ class Record:
         """Basename of :attr:`image_path`, when it differs from the process."""
         if self.image_path is None:
             return None
-        name = PurePosixPath(self.image_path).name
+        name = basename(self.image_path)
         return None if name == self.process else name
 
     @property
@@ -165,7 +199,9 @@ class DeviceInfo:
     utc_offset: timedelta | None = None
     #: Difference between the device clock and this host's, if measured.
     clock_skew: timedelta | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
+    #: Carried here as well as on every record: it is a property of the subject,
+    #: and without it every window title and export header would have to guess.
+    platform: Platform = Platform.IOS
 
     @property
     def tzinfo(self) -> timezone:
@@ -186,7 +222,10 @@ class DeviceInfo:
     @property
     def label(self) -> str:
         """``Berkay's iPhone (iPhone18,2, iOS 26.5.2)``."""
-        return f"{self.name} ({self.product_type}, iOS {self.product_version})"
+        return (
+            f"{self.name} ({self.product_type}, "
+            f"{self.platform.display_name} {self.product_version})"
+        )
 
 
 @dataclass(frozen=True, slots=True)

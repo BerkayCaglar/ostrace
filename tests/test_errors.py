@@ -98,6 +98,46 @@ class TestHints:
         assert "Apple Mobile Device Service" in UsbmuxUnavailableError("x").hint
 
 
+class TestRecoverability:
+    """Whether waiting helps is the error's own business.
+
+    Before this existed, the reconnect loop retried *every* error at connect
+    time -- including a device that was never trusted, which no amount of
+    waiting fixes. The user sat through thirty silent retries before seeing the
+    one sentence that would have solved it, and a false gap was written into
+    the session file for an outage that never happened.
+    """
+
+    def test_a_dropped_stream_is_recoverable(self) -> None:
+        assert StreamInterruptedError("x").recoverable is True
+
+    def test_a_vanished_device_is_recoverable(self) -> None:
+        """Usually a cable being knocked mid-capture."""
+        assert NoDeviceFoundError("x").recoverable is True
+
+    @pytest.mark.parametrize(
+        "error",
+        [DeviceNotPairedError, UsbmuxUnavailableError, DeviceLockedError, SourceUnavailableError],
+    )
+    def test_errors_needing_a_human_are_not_recoverable(
+        self,
+        error: type[OstraceError],
+    ) -> None:
+        assert error("x").recoverable is False
+
+    def test_the_default_is_not_recoverable(self) -> None:
+        """Retrying should be opted into, not inherited by accident."""
+        assert OstraceError("x").recoverable is False
+
+    def test_translation_preserves_recoverability(self) -> None:
+        assert translate(fake("ConnectionTerminatedError")("x")).recoverable is True
+        assert translate(fake("NotPairedError")("x")).recoverable is False
+
+    def test_an_unrecognised_error_is_not_retried(self) -> None:
+        """An error we cannot classify is surfaced, not silently looped on."""
+        assert translate(fake("CompletelyNovelError")("x")).recoverable is False
+
+
 class TestUpstreamNamesStillExist:
     """Every name we dispatch on must still be a real pymobiledevice3 exception.
 

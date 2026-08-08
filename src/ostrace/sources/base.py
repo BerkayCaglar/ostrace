@@ -11,22 +11,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from ostrace.model import Record
+
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+    from types import TracebackType
+    from typing import Self
 
-    from ostrace.model import DeviceInfo, Gap, Record
+    from ostrace.model import DeviceInfo, Gap
 
-__all__ = ["LogSource"]
+__all__ = ["LogSource", "SourceCloseMixin"]
 
 
 @runtime_checkable
 class LogSource(Protocol):
-    """Something that yields records.
-
-    Implementations must be usable as an async context manager, because the
-    live sources own a socket and the offline ones own a file handle, and the
-    caller should not have to know which it has.
-    """
+    """Something that yields records."""
 
     #: Short stable identifier, written into the session metadata so that an
     #: export can say which service produced the data. A session captured over
@@ -61,6 +60,62 @@ class LogSource(Protocol):
         """
         ...
 
+    def records(self) -> AsyncGenerator[Record, None]:
+        """:meth:`stream` without the gap markers."""
+        ...
+
     async def aclose(self) -> None:
         """Release the connection or file handle."""
         ...
+
+    async def __aenter__(self) -> LogSource:
+        """Every source is an async context manager.
+
+        Declared on the protocol rather than left to implementations, because a
+        consumer holding a ``LogSource`` writes ``async with`` without knowing
+        which one it has -- and a replay fixture that did not support it would
+        fail exactly where the test suite is meant to prove substitutability.
+        """
+        ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None: ...
+
+
+class SourceCloseMixin:
+    """``__aenter__``/``__aexit__`` written once, in terms of ``aclose()``.
+
+    Implementations inherit this instead of repeating the pair. A third source
+    then gets the behaviour by construction rather than by remembering.
+    """
+
+    async def aclose(self) -> None:  # pragma: no cover - overridden
+        """Release whatever the source holds."""
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        await self.aclose()
+
+    async def records(self) -> AsyncGenerator[Record, None]:
+        """Filter :meth:`stream` down to records.
+
+        One implementation for every source: the predicate is identical and the
+        only thing that differs is where the stream comes from.
+        """
+        async for item in self.stream():
+            if isinstance(item, Record):
+                yield item
+
+    def stream(self) -> AsyncGenerator[Record | Gap, None]:  # pragma: no cover - overridden
+        raise NotImplementedError

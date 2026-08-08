@@ -21,6 +21,10 @@ as the end of the data rather than as an error -- and, specifically, still
 yields the last complete line before giving up. An earlier implementation
 dropped the final record of every unclosed file because the exception was caught
 before the final ``yield``; there is a regression test for exactly that.
+
+A damaged line is always skipped and counted in :attr:`SpoolReader.malformed`,
+never raised. This is a diagnostic tool: reading as far as possible and saying
+how much was lost beats refusing to open a capture that is mostly intact.
 """
 
 from __future__ import annotations
@@ -54,13 +58,7 @@ class SpoolWriter:
     Not thread-safe and not shared: one capture owns one writer.
     """
 
-    def __init__(
-        self,
-        path: Path,
-        *,
-        flush_every: int = DEFAULT_FLUSH_EVERY,
-        compresslevel: int = 6,
-    ) -> None:
+    def __init__(self, path: Path, *, flush_every: int = DEFAULT_FLUSH_EVERY) -> None:
         self.path = path
         self.flush_every = flush_every
         self._records = 0
@@ -70,7 +68,7 @@ class SpoolWriter:
         path.parent.mkdir(parents=True, exist_ok=True)
         # Held open for the life of the writer rather than per call: a capture
         # runs for an hour and reopening per record would defeat the point.
-        self._fh = gzip.open(path, "wb", compresslevel=compresslevel)  # noqa: SIM115
+        self._fh = gzip.open(path, "wb")  # noqa: SIM115
 
     @property
     def record_count(self) -> int:
@@ -143,11 +141,15 @@ class SpoolReader:
     :class:`~ostrace.model.Gap` in the order they were written.
     """
 
-    def __init__(self, path: Path, *, skip_malformed: bool = True) -> None:
+    def __init__(self, path: Path) -> None:
         self.path = path
-        self.skip_malformed = skip_malformed
         self.truncated = False
         self.malformed = 0
+        #: Set by :class:`~ostrace.storage.session.SessionReader` when a sidecar
+        #: describes this spool. ``None`` for a bare spool file, so that a
+        #: consumer has one attribute to ask rather than two shapes to tell
+        #: apart.
+        self.meta: object | None = None
 
     def __iter__(self) -> Iterator[Record | Gap]:
         return self.items()
@@ -159,25 +161,41 @@ class SpoolReader:
                 yield item
 
     def gaps(self) -> Iterator[Gap]:
-        for item in self.items():
-            if isinstance(item, Gap):
-                yield item
+        """Only the gap markers.
+
+        Filters on the raw object before decoding. A capture holds millions of
+        records and a handful of gaps, and building a full
+        :class:`~ostrace.model.Record` for each one only to discard it more than
+        doubled the cost of this scan.
+        """
+        for obj in self._objects():
+            if obj.get("gap"):
+                try:
+                    item = decode(obj)
+                except SessionCorruptError:
+                    self.malformed += 1
+                    continue
+                if isinstance(item, Gap):
+                    yield item
 
     def items(self) -> Iterator[Record | Gap]:
+        for obj in self._objects():
+            try:
+                yield decode(obj)
+            except SessionCorruptError:
+                self.malformed += 1
+
+    def _objects(self) -> Iterator[dict[str, object]]:
         for line in self.lines():
             try:
                 obj = json.loads(line)
             except ValueError:
                 self.malformed += 1
-                if self.skip_malformed:
-                    continue
-                raise
-            try:
-                yield decode(obj)
-            except SessionCorruptError:
+                continue
+            if isinstance(obj, dict):
+                yield obj
+            else:
                 self.malformed += 1
-                if not self.skip_malformed:
-                    raise
 
     def lines(self) -> Iterator[str]:
         """Yield decoded lines, stopping cleanly at truncation.

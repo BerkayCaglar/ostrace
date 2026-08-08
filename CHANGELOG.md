@@ -51,4 +51,36 @@ because the obvious assumption is wrong in each case.
 
 The CLI subcommands are still declared but unimplemented; they land in phase 3.
 
+### Changed
+
+A review pass over phases 0 and 1 tightened several things before they had
+callers to break:
+
+- Naming a capture is one decision and now lives entirely in `paths.py`. It was
+  split, and the halves cancelled out: the suffix was applied with
+  `Path.with_suffix`, which *replaces* the last dotted component, so a device
+  called `iPhone 15.1` produced `iPhone-15.ostrace` and lost the timestamp that
+  makes the name unique.
+- Errors declare whether they are `recoverable`, and the reconnect loop asks
+  them instead of enumerating types. A device that was never trusted used to be
+  retried thirty times before its hint appeared, with a fabricated gap written
+  into the session file for an outage that never happened.
+- Every source is an async context manager, declared on the protocol. Only one
+  of the two implemented it, so the teardown pattern the tests establish would
+  have failed the first time it met a replay fixture.
+- The `-O` guard moved from package import to `OsTraceSource`. It is a
+  constraint of one library, and offline replay was being blocked by it.
+- `DeviceInfo` carries its platform rather than the label hardcoding "iOS", and
+  `Record.platform` is required rather than defaulted.
+- Reading device identity uses the value dictionary the lockdown client already
+  holds: one round trip became none, where it used to be seven before the first
+  record could arrive.
+- Deriving a process name from its path is cached, and `Record.image` no longer
+  builds a `PurePosixPath` per access — together about 40% of the measured
+  per-record ingest cost, and it takes `pathlib` off `model.py`'s import path.
+- Scanning a capture for gaps no longer decodes every record on the way past.
+- Dropped from `compat.py`: the subprocess helpers, which supported an
+  architecture ADR 0002 rejected, and the platform constants, which the module's
+  own rules left with no legal caller.
+
 [Unreleased]: https://github.com/BerkayCaglar/ostrace/commits/main

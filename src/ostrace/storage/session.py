@@ -19,19 +19,24 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ostrace import __version__
 from ostrace.errors import StorageError, UnsupportedFormatVersionError
-from ostrace.model import DeviceInfo, Gap, Record
+from ostrace.model import DeviceInfo, Platform
+from ostrace.paths import with_session_suffix
+from ostrace.storage.codec import parse_timestamp
 from ostrace.storage.spool import SpoolReader, SpoolWriter
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from datetime import datetime
     from types import TracebackType
     from typing import Self
+
+    from ostrace.model import Gap, Record
 
 __all__ = ["FORMAT_VERSION", "SessionMeta", "SessionReader", "SessionWriter"]
 
@@ -39,7 +44,6 @@ FORMAT_VERSION = 1
 
 SPOOL_NAME = "session.jsonl.gz"
 META_NAME = "session.json"
-SUFFIX = ".ostrace"
 
 
 @dataclass(slots=True)
@@ -63,6 +67,7 @@ class SessionMeta:
             "device": {
                 "udid": self.device.udid,
                 "name": self.device.name,
+                "platform": str(self.device.platform),
                 "product_type": self.device.product_type,
                 "product_version": self.device.product_version,
                 "build_version": self.device.build_version,
@@ -100,15 +105,19 @@ class SessionMeta:
             connection=str(raw.get("connection", "usb")),
             timezone_name=raw.get("timezone_name"),
             utc_offset=None if offset is None else timedelta(seconds=int(offset)),
+            platform=Platform(raw.get("platform", Platform.IOS)),
         )
         ended = obj.get("ended_at")
         return cls(
             device=device,
             source=str(obj.get("source", "unknown")),
-            started_at=datetime.fromisoformat(str(obj["started_at"])),
+            # Same rule as the records themselves: a timestamp without an offset
+            # is rejected rather than guessed at. One function owns that so the
+            # two halves of one format cannot drift apart.
+            started_at=parse_timestamp(obj["started_at"]),
             format_version=version,
             ostrace_version=str(obj.get("ostrace_version", "unknown")),
-            ended_at=None if ended is None else datetime.fromisoformat(str(ended)),
+            ended_at=None if ended is None else parse_timestamp(ended),
             record_count=int(obj.get("record_count", 0)),
             gap_count=int(obj.get("gap_count", 0)),
             flags=dict(obj.get("flags") or {}),
@@ -120,6 +129,10 @@ class SessionWriter:
 
     The sidecar is written twice: once at open, so an interrupted capture is
     still identifiable, and again at close with the final counts.
+
+    ``path`` is expected to come from :func:`ostrace.paths.session_path`, which
+    owns the naming rules. The suffix is applied here only as a courtesy for
+    callers that built a path some other way.
     """
 
     def __init__(
@@ -131,7 +144,7 @@ class SessionWriter:
         started_at: datetime,
         flags: dict[str, Any] | None = None,
     ) -> None:
-        self.path = path if path.suffix == SUFFIX else path.with_suffix(SUFFIX)
+        self.path = with_session_suffix(Path(path))
         self.path.mkdir(parents=True, exist_ok=True)
         self.meta = SessionMeta(
             device=device,
@@ -142,10 +155,6 @@ class SessionWriter:
         self._spool = SpoolWriter(self.path / SPOOL_NAME)
         self._closed = False
         self._write_meta()
-
-    @property
-    def spool_path(self) -> Path:
-        return self.path / SPOOL_NAME
 
     def write(self, record: Record) -> None:
         self._spool.write(record)
@@ -201,16 +210,19 @@ class SessionReader:
             raise StorageError(msg)
 
         self.meta: SessionMeta | None = self._read_meta()
-        self._reader = SpoolReader(self.path / SPOOL_NAME)
+        #: Public so that a consumer can hold one reader rather than a session
+        #: and a spool that alias each other.
+        self.spool = SpoolReader(self.path / SPOOL_NAME)
+        self.spool.meta = self.meta
 
     @property
     def truncated(self) -> bool:
         """True when the spool has no gzip trailer -- still open, or killed."""
-        return self._reader.truncated
+        return self.spool.truncated
 
     @property
     def malformed(self) -> int:
-        return self._reader.malformed
+        return self.spool.malformed
 
     def _read_meta(self) -> SessionMeta | None:
         meta_path = self.path / META_NAME
@@ -218,22 +230,23 @@ class SessionReader:
             return None
         try:
             return SessionMeta.from_json(json.loads(meta_path.read_text(encoding="utf-8")))
-        except UnsupportedFormatVersionError:
-            raise
         except (ValueError, KeyError, TypeError):
-            # A damaged sidecar loses metadata, not data. Refusing to open the
-            # records because the description of them is corrupt would be the
-            # wrong trade for a diagnostic tool.
+            # Deliberately narrow: an UnsupportedFormatVersionError is a
+            # StorageError and is not caught here, because a file we do not
+            # understand may need fields we would silently ignore. A damaged
+            # sidecar loses metadata, not data -- refusing to open the records
+            # because their description is corrupt would be the wrong trade for
+            # a diagnostic tool.
             return None
 
     def items(self) -> Iterator[Record | Gap]:
-        return self._reader.items()
+        return self.spool.items()
 
     def records(self) -> Iterator[Record]:
-        return self._reader.records()
+        return self.spool.records()
 
     def gaps(self) -> Iterator[Gap]:
-        return self._reader.gaps()
+        return self.spool.gaps()
 
     def __iter__(self) -> Iterator[Record | Gap]:
         return self.items()

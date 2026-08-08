@@ -8,18 +8,16 @@ logical -- a service that is not installed, a device that was never trusted, a
 cable that only carries power -- and an exception that names the remedy is worth
 considerably more than one that names the layer that failed.
 
+Errors also declare whether they are ``recoverable``, so that a retry loop can
+ask the error rather than enumerate the types it knows about. Retrying a device
+that was never trusted just delays the message that would have fixed it.
+
 ``pymobiledevice3`` exceptions are translated at the ``sources`` boundary by
 :func:`translate`, so nothing downstream imports the library or has to know its
 exception names.
 """
 
 from __future__ import annotations
-
-import sys
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 __all__ = [
     "DeviceError",
@@ -44,6 +42,10 @@ class OstraceError(Exception):
     #: Default remediation, overridden per subclass or per instance.
     hint: str = ""
 
+    #: Whether waiting and trying again could plausibly succeed. Default False:
+    #: most of these describe a state only the user can change.
+    recoverable: bool = False
+
     def __init__(self, message: str, *, hint: str | None = None) -> None:
         super().__init__(message)
         self.message = message
@@ -66,6 +68,12 @@ class DeviceError(OstraceError):
 
 
 class NoDeviceFoundError(DeviceError):
+    # Recoverable during a capture: a device that vanishes mid-stream is
+    # usually a cable being knocked, and waiting for it to come back is what a
+    # user wants. It is still fatal on the *first* connect, where there is
+    # nothing to resume and the hint is the whole answer.
+    recoverable = True
+
     hint = (
         "Connect the device over USB and unlock it. If it is already connected, "
         "try a different cable -- charge-only cables give exactly this symptom."
@@ -105,9 +113,11 @@ class SourceError(OstraceError):
 
 
 class SourceUnavailableError(SourceError):
+    # Names the capability rather than a command-line flag: which flag spells it
+    # belongs to whoever owns the CLI surface, and this layer is below that.
     hint = (
         "The device did not offer this log service. Very old iOS versions have "
-        "only the legacy syslog relay; try --source syslog_relay."
+        "only the legacy syslog relay; select that source instead."
     )
 
 
@@ -117,6 +127,8 @@ class StreamInterruptedError(SourceError):
     Recoverable by design: the capture loop reconnects and writes a gap marker.
     It becomes fatal only when reconnection keeps failing.
     """
+
+    recoverable = True
 
     hint = (
         "The device disconnected. Check the cable and the port, and on Windows "
@@ -168,11 +180,6 @@ _TRANSLATIONS: tuple[tuple[str, type[DeviceError | SourceError]], ...] = (
 )
 
 
-def _class_names(exc: BaseException) -> Iterator[str]:
-    for klass in type(exc).__mro__:
-        yield klass.__name__
-
-
 def translate(exc: BaseException) -> OstraceError:
     """Map a ``pymobiledevice3`` exception onto ours.
 
@@ -185,7 +192,7 @@ def translate(exc: BaseException) -> OstraceError:
     if isinstance(exc, OstraceError):
         return exc
 
-    names = set(_class_names(exc))
+    names = {klass.__name__ for klass in type(exc).__mro__}
     for upstream, ours in _TRANSLATIONS:
         if upstream in names:
             return ours(str(exc) or upstream)
@@ -195,23 +202,3 @@ def translate(exc: BaseException) -> OstraceError:
         f"{type(exc).__name__}: {detail}",
         hint="This one is not specifically handled; please report it with the traceback.",
     )
-
-
-def guard_optimized_interpreter() -> None:
-    """Refuse to run under ``-O`` / ``PYTHONOPTIMIZE``.
-
-    ``pymobiledevice3``'s stream loop is written as
-    ``assert await self.service.recvall(1) == b"\\x02"``. Optimisation strips
-    assert statements *including the await inside them*, which desynchronises
-    the frame protocol and yields garbage records rather than an exception.
-    Silent corruption is worse than a refusal to start.
-    """
-    if sys.flags.optimize:  # pragma: no cover - depends on interpreter flags
-        msg = "ostrace cannot run under -O / PYTHONOPTIMIZE"
-        raise OstraceError(
-            msg,
-            hint=(
-                "The device stream protocol depends on assert statements that "
-                "optimisation removes. Unset PYTHONOPTIMIZE and run again."
-            ),
-        )

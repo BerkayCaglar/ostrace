@@ -34,6 +34,10 @@ async def collect(source: ReplaySource) -> list[Record]:
     return [record async for record in source.records()]
 
 
+async def count_gaps(source: ReplaySource) -> int:
+    return len([item async for item in source.stream() if not isinstance(item, Record)])
+
+
 @pytest.fixture
 def mixed(mixed_fixture: Path) -> list[Record]:
     return asyncio.run(collect(ReplaySource(mixed_fixture)))
@@ -70,7 +74,7 @@ class TestReplayMechanics:
         assert info.utc_offset == DEVICE_TZ
         assert source.started_at == started
         assert len(asyncio.run(collect(source))) == 50
-        assert len(source.gaps()) == 1
+        assert asyncio.run(count_gaps(source)) == 1
 
     def test_stream_includes_gaps_in_position(self, tmp_path: Path, device: DeviceInfo) -> None:
         with SessionWriter(

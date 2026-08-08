@@ -62,7 +62,10 @@ from an actual device.
 written as `assert await self.service.recvall(1) == b"\x02"`. Optimisation
 strips `assert` statements *including the `await` inside them*, which
 desynchronises the frame protocol and produces garbage instead of an error.
-`ostrace/__init__.py` raises at import time if the flag is set.
+`OsTraceSource` raises when it is constructed. The check sits there rather than
+at package import because it is a constraint of that one library — offline work
+such as replaying a session or re-exporting a capture never touches it and is
+not blocked by it.
 
 **macOS is written blind.** The maintainer has no Mac. Every macOS-specific
 assumption is marked `# UNVERIFIED-MACOS` in the source so it can be grepped and

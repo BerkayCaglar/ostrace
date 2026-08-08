@@ -96,11 +96,12 @@ NOTICE-level records and no subsystem or category on any of them. That is the
 service's limit, not a bug — see
 [the source comparison](research/log-sources-comparison.md).
 
-**Do not run under `-O` or `PYTHONOPTIMIZE`.** The device stream protocol
+**Do not capture under `-O` or `PYTHONOPTIMIZE`.** The device stream protocol
 depends on `assert` statements that optimisation removes, which desynchronises
 the frame protocol and produces garbage rather than an error. `ostrace` refuses
-to start when the flag is set; if you see that error, unset the environment
-variable rather than working around it.
+to open a device stream when the flag is set; if you see that error, unset the
+environment variable rather than working around it. Offline work — replaying a
+session, re-exporting a capture — is unaffected and runs fine under `-O`.
 
 ## The connection drops during a long capture
 
