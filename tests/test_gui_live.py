@@ -26,7 +26,7 @@ import pytest
 from ostrace.model import Gap, Level, Record
 from ostrace.sources.replay import ReplaySource
 from ostrace.storage.capture import open_capture
-from tests.helpers import ERRORS, make_record
+from tests.helpers import ERRORS, ScriptedSource, make_record
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
@@ -34,6 +34,7 @@ from ostrace.gui.markers import Eviction
 from ostrace.gui.models import RecordModel
 from ostrace.gui.pump import Pump
 from ostrace.gui.theme import Scheme
+from ostrace.gui.windows import main
 from ostrace.gui.windows.main import MainWindow
 
 if TYPE_CHECKING:
@@ -304,3 +305,35 @@ def test_closing_the_window_releases_the_device(qt_app: object) -> None:
     window.close()
 
     assert window._capture_thread is None
+
+
+def test_a_capture_that_will_not_stop_is_kept_rather_than_dropped(
+    qt_app: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Letting go of a *running* ``QThread`` is not a leak, it is ``qFatal``.
+
+    The wait in ``stop_capture`` is bounded on purpose, so that a device which
+    will not let go cannot freeze the window -- which means it can time out,
+    and the line clearing the reference would then have handed Qt a thread that
+    was still running. Qt's answer to that is to abort the process, so the
+    symptom is not a stuck capture, it is the viewer vanishing.
+
+    The timeout is set to zero rather than a slow source contrived to exceed
+    it: ``QThread::start`` marks the thread running before it returns, so a
+    zero wait on one just started is deterministically a timeout.
+    """
+    del qt_app
+    monkeypatch.setattr(main, "_STOP_TIMEOUT_MS", 0)
+    window = MainWindow()
+    window.start_capture(ScriptedSource([make_record(0)], delay=1.0))
+
+    thread = window._capture_thread
+    assert thread is not None
+    window.stop_capture()
+
+    assert window._capture_thread is None
+    assert thread in window._parked, "a running capture thread was dropped"
+    assert "not released the device" in window.banner.text
+
+    assert thread.wait(30_000), "the parked capture never finished"

@@ -136,6 +136,37 @@ class MainWindow(QMainWindow):
         self.scheme = scheme
         self.setWindowTitle(_TITLE)
 
+        self._build_layout()
+
+        self.capture: Capture | None = None
+        self._loader: CaptureLoader | None = None
+        self._showing_filter_notice = False
+        #: Auto-follow. Set when the user asks to resume it, cleared as soon as
+        #: they scroll away -- see `_follow`, which derives the rest.
+        self._following = True
+        self._capture_thread: CaptureThread | None = None
+        #: Capture threads that outlived their stop wait. See `_park`.
+        self._parked: list[CaptureThread] = []
+        self._pump: Pump | None = None
+        self.model = RecordModel(scheme, parent=self)
+        self.table.setModel(self.model)
+        self.minimap.set_model(self.model)
+        self.minimap.row_requested.connect(self.go_to)
+        self._connect_selection()
+
+        self._filter_debounce = QTimer(self)
+        self._filter_debounce.setSingleShot(True)
+        self._filter_debounce.setInterval(_FILTER_DEBOUNCE_MS)
+        self._filter_debounce.timeout.connect(self._apply_filter)
+
+        self._build_actions()
+        self._build_menus()
+
+        self._connect_actions()
+        self._set_capturing(capturing=False)
+
+    def _build_layout(self) -> None:
+        """Assemble the widgets. No behaviour, no state."""
         self.filter_bar = FilterBar(self)
         self.banner = Banner(self)
         self.table = LogTable(self)
@@ -148,7 +179,7 @@ class MainWindow(QMainWindow):
         beside.setContentsMargins(0, 0, 0, 0)
         beside.setSpacing(0)
         beside.addWidget(self.table, stretch=1)
-        self.minimap = Minimap(scheme, table_area)
+        self.minimap = Minimap(self.scheme, table_area)
         beside.addWidget(self.minimap)
 
         self._split = QSplitter(Qt.Orientation.Vertical, self)
@@ -173,31 +204,6 @@ class MainWindow(QMainWindow):
 
         self.status = StatusBar(self)
         self.setStatusBar(self.status)
-
-        self.capture: Capture | None = None
-        self._loader: CaptureLoader | None = None
-        self._showing_filter_notice = False
-        #: Auto-follow. Set when the user asks to resume it, cleared as soon as
-        #: they scroll away -- see `_follow`, which derives the rest.
-        self._following = True
-        self._capture_thread: CaptureThread | None = None
-        self._pump: Pump | None = None
-        self.model = RecordModel(scheme, parent=self)
-        self.table.setModel(self.model)
-        self.minimap.set_model(self.model)
-        self.minimap.row_requested.connect(self.go_to)
-        self._connect_selection()
-
-        self._filter_debounce = QTimer(self)
-        self._filter_debounce.setSingleShot(True)
-        self._filter_debounce.setInterval(_FILTER_DEBOUNCE_MS)
-        self._filter_debounce.timeout.connect(self._apply_filter)
-
-        self._build_actions()
-        self._build_menus()
-
-        self._connect_actions()
-        self._set_capturing(capturing=False)
 
     def _connect_actions(self) -> None:
         """Wire every action to what it does.
@@ -543,16 +549,45 @@ class MainWindow(QMainWindow):
         """
         if self._capture_thread is None:
             return
-        self._capture_thread.stop()
+        thread = self._capture_thread
+        thread.stop()
         # Bounded: the capture's own teardown is a socket close, not a network
         # round trip. Waiting at all is what stops a second capture starting
         # while the first still holds the device.
-        self._capture_thread.wait(_STOP_TIMEOUT_MS)
+        if not thread.wait(_STOP_TIMEOUT_MS):
+            self._park(thread)
         if self._pump is not None:
             self._pump.stop()
         self.minimap.stop()
         self._capture_thread = None
         self._set_capturing(capturing=False)
+
+    def _park(self, thread: CaptureThread) -> None:
+        """Keep a capture thread that outlived the wait above.
+
+        The wait is bounded so that a device which will not let go cannot
+        freeze the window -- which means it can time out, and clearing the
+        reference would then drop the last one to a *running* ``QThread``. That
+        is not a leak. Qt's destructor calls ``qFatal`` on a running thread, so
+        the window would not report a stuck capture, it would take the process
+        down with it. A parked thread costs one small object instead.
+
+        The user is told, because the consequence is theirs: the device is
+        still held, so the next capture finds the relay busy.
+        """
+        self._parked.append(thread)
+        # Queued, because `self` lives on the GUI thread and the signal is
+        # emitted on the capture's: the object is destroyed by this thread once
+        # the other has genuinely ended, and never from inside its own `run`.
+        thread.finished.connect(self._reap)
+        self.banner.show_message(
+            "The capture has not released the device yet. It is still shutting "
+            "down, and a new capture may fail until it has."
+        )
+
+    def _reap(self) -> None:
+        """Let go of every parked thread that has actually finished."""
+        self._parked = [thread for thread in self._parked if thread.isRunning()]
 
     def set_paused(self, paused: bool) -> None:
         """Freeze the view. The device is not consulted."""

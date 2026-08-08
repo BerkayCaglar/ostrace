@@ -199,6 +199,28 @@ fixed 200 records however large the capture is.
   nothing. Everything else is a summary, and a default that quietly discards
   data is the wrong default.
 
+### Fixed (phase 5 groundwork)
+
+- **A capture that would not stop took the whole viewer down with it.** The
+  wait in Disconnect is bounded — five seconds, so that a device refusing to
+  let go cannot freeze the window — and the line after it cleared the last
+  reference to the capture thread whether or not that wait had succeeded.
+  Dropping a running `QThread` is not a leak: Qt's destructor aborts the
+  process. Measured here at exit code `0xC0000409`, with no message on either
+  stream, so the symptom a user would report is "it disappeared".
+
+  A thread that outlives the wait is now kept until it really finishes, and the
+  user is told — the device is still held, so the next capture would find the
+  relay busy.
+
+### Changed (phase 5 groundwork)
+
+- The GUI job runs `python -X faulthandler -m pytest` rather than the console
+  script. pytest turns faulthandler off when the session ends, and the one CI
+  failure this job has had was the process exiting 1 *after* reporting 159
+  passed, with nothing on either stream and no reproduction. The cause is still
+  unknown; this is what makes the next occurrence legible.
+
 ### Added (phase 4, the overview strip)
 
 - **A minimap beside the table**, marking every error, gap and mark across the

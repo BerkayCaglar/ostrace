@@ -170,7 +170,14 @@ jobs:
         run: python -c "import PySide6; print(PySide6.__version__)"
 
       - name: Test
-        run: pytest -m gui -ra
+        # `python -X faulthandler -m pytest` rather than the console script.
+        # pytest enables faulthandler for the run and switches it off again
+        # when the session ends -- and the one failure this job has ever had
+        # was the process exiting 1 *after* reporting 159 passed, with nothing
+        # on either stream. Whatever that was, it happened outside the window
+        # pytest covers. `-X` covers the whole process, so the next occurrence
+        # arrives as a traceback instead of a mystery.
+        run: python -X faulthandler -m pytest -m gui -ra
 
   build:
     name: Build distributions

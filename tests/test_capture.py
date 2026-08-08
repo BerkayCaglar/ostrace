@@ -17,45 +17,16 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from ostrace.capture import capture
-from ostrace.model import DeviceInfo, Gap, Platform, Record
 from ostrace.sources.base import SourceCloseMixin
 from ostrace.sources.replay import ReplaySource
 from ostrace.storage.session import SessionReader
-from tests.helpers import make_gap, make_record
+from tests.helpers import ScriptedSource, make_gap, make_record
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from pathlib import Path
 
-
-class ScriptedSource(SourceCloseMixin):
-    """A source that yields what it is told, and remembers being closed."""
-
-    name = "scripted"
-
-    def __init__(self, items: list[Record | Gap], *, delay: float = 0.0) -> None:
-        self.items = items
-        self.delay = delay
-        self.closed = False
-
-    async def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            udid="00000000-000000000000000A",
-            name="Test iPhone",
-            product_type="iPhone18,2",
-            product_version="26.5.2",
-            utc_offset=dt.timedelta(hours=3),
-            platform=Platform.IOS,
-        )
-
-    async def stream(self) -> AsyncGenerator[Record | Gap, None]:
-        for item in self.items:
-            if self.delay:
-                await asyncio.sleep(self.delay)
-            yield item
-
-    async def aclose(self) -> None:
-        self.closed = True
+    from ostrace.model import DeviceInfo, Gap, Record
 
 
 def run(*args: Any, **kwargs: Any) -> Any:

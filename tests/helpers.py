@@ -4,11 +4,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from ostrace.model import Gap, Level, Platform, Record
+from ostrace.model import DeviceInfo, Gap, Level, Platform, Record
+from ostrace.sources.base import SourceCloseMixin
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -59,6 +65,42 @@ def make_record(
         message=message if message is not None else f"record number {index}",
         platform=Platform.IOS,
     )
+
+
+class ScriptedSource(SourceCloseMixin):
+    """A source that yields what it is told, and remembers being closed.
+
+    ``delay`` is what makes it useful beyond a canned list: a real source can
+    take arbitrarily long between records -- measured, up to forty seconds --
+    and anything asserting what happens *while* a capture is still running
+    needs a source that has not finished yet.
+    """
+
+    name = "scripted"
+
+    def __init__(self, items: list[Record | Gap], *, delay: float = 0.0) -> None:
+        self.items = items
+        self.delay = delay
+        self.closed = False
+
+    async def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            udid="00000000-000000000000000A",
+            name="Test iPhone",
+            product_type="iPhone18,2",
+            product_version="26.5.2",
+            utc_offset=DEVICE_TZ,
+            platform=Platform.IOS,
+        )
+
+    async def stream(self) -> AsyncGenerator[Record | Gap, None]:
+        for item in self.items:
+            if self.delay:
+                await asyncio.sleep(self.delay)
+            yield item
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 def make_gap(index: int = 0) -> Gap:
