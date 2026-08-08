@@ -199,6 +199,55 @@ fixed 200 records however large the capture is.
   nothing. Everything else is a summary, and a default that quietly discards
   data is the wrong default.
 
+### Added (phase 4, the model)
+
+- **`RecordModel`** — the table model: a plain list of retained items, its own
+  filtered index, and a bounded head. Records arriving under a filter test only
+  themselves and append, so the steady state is O(batch); only a filter
+  *change* rescans.
+
+- **The marker invariant, implemented at one choke point.** A gap or an
+  eviction notice is exempt from filtering *by type*, before any predicate
+  runs. A filter says which records the user wants; a marker says whether the
+  answer is complete, and hiding it makes the filtered view lie about its own
+  completeness. `is_record()` is a `TypeGuard`, so the type checker proves a
+  filter is only ever handed a `Record` — the invariant and the types cannot
+  drift apart.
+
+- **A gap and an eviction do not render the same.** One says the records are
+  gone and nothing buffered them; the other says they are in the capture on
+  disk and merely not on screen. The eviction notice is updated rather than
+  accumulated — twenty evictions are one fact about the view, not twenty rows
+  of noise at the top of it.
+
+- `Filter` as a value object. An invalid regular expression raises at
+  construction rather than becoming a filter that quietly matches nothing: a
+  user halfway through typing `[com` has an incomplete pattern, not an empty
+  log, and a view that empties itself as they type is indistinguishable from a
+  device that stopped talking. A process term matches a pid exactly and a name
+  loosely, so `97` does not match `launchd[9712]`.
+
+### Changed (phase 4, the model)
+
+- **ADR 0004's `QSortFilterProxyModel` figure does not reproduce.** It records
+  roughly 66× and calls the proxy "a frozen window". Re-measured on PySide6
+  6.11.1 at 100,000 records, changing the filter to a message substring, best
+  of three with a view attached: this model 0.130 s, the proxy's built-in regex
+  over a role 0.607 s, a Python `filterAcceptsRow` 0.642 s. About **4.7×**, and
+  nothing froze. The decision is unchanged — 4.7× is worth having, and the row
+  cap, eviction notice and marker exemption all need a model we own — but it no
+  longer rests on that number.
+
+### Fixed (phase 4, the model)
+
+- **A run of repeated cells could exhaust the stack.** Blanking a cell that
+  repeats the row above asked what the row above *displayed*, which asks
+  whether that row was itself a repeat, all the way to the top of the run —
+  recursion whose depth is the length of the run. A capture with 100,000
+  consecutive records from one process crashed; the tests had runs of three and
+  saw nothing. It compares the underlying fields now, which is O(1). Found by
+  benchmarking, not by the suite, and the regression test uses a run of 5,000.
+
 ### Added (phase 4)
 
 - **The GUI shell**, behind the optional `gui` extra: `pip install 'ostrace[gui]'`,

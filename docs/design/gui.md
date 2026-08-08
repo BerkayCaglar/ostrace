@@ -193,10 +193,18 @@ visible when the message column is truncated, and a **per-term hit count**,
 which turns highlight into a free live aggregate.
 
 **Filtering is incremental.** Each arriving batch tests only the new records
-and appends matching indices — O(batch). Only a filter *change* rescans. This
-is the hand-written index list from ADR 0004, not `QSortFilterProxyModel`,
-which was measured at roughly 66× slower on a filter change (about 6 s against
-about 0.09 s at 100k rows) — and 6 s is a frozen window, not a slow one.
+and appends matching indices — O(batch). Only a filter *change* rescans.
+
+This is the hand-written index list from ADR 0004 rather than
+`QSortFilterProxyModel` — but **the ADR's figure for that does not reproduce**.
+Re-measured on PySide6 6.11.1 at 100,000 records, changing the filter to a
+message substring, best of three with a view attached: this model 0.130 s, the
+proxy with its built-in regex over a role 0.607 s, the proxy with
+`filterAcceptsRow` written in Python 0.642 s. About **4.7×**, not 66×, and
+nothing here is the six-second freeze the ADR describes.
+
+The decision stands on the smaller margin plus control of the row cap, the
+eviction notice and the marker exemption — not on the original number.
 
 > Note for anyone reading the prior-art research: it recommends implementing
 > the marker exemption inside `QSortFilterProxyModel.filterAcceptsRow()`. The

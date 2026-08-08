@@ -44,6 +44,14 @@ change through the proxy takes about 6 seconds against about 0.09 seconds for a
 direct predicate over an index list — roughly a 66× gap, and 6 seconds is a
 frozen window, not a slow one.
 
+> **Re-measured, and the number was wrong.** On PySide6 6.11.1 with the model
+> as built, 100,000 records, best of three with a view attached: our index list
+> 0.130 s, the proxy's built-in regex over a role 0.607 s, a Python
+> `filterAcceptsRow` 0.642 s. About **4.7×**, and no configuration froze
+> anything. The choice is unchanged — 4.7× is still worth having, and the row
+> cap, the eviction notice and the marker exemption all need a model we own —
+> but it does not rest on the figure above.
+
 Our filtering is incremental: each arriving batch tests only the new records and
 appends the matching indices, which is O(batch). Only a change to the filter
 itself rescans.
