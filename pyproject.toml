@@ -61,9 +61,12 @@ Changelog = "https://github.com/BerkayCaglar/ostrace/blob/main/CHANGELOG.md"
 [project.scripts]
 ostrace = "ostrace.cli:main"
 
-# [project.gui-scripts] is deliberately absent until the GUI lands in phase 4.
-# Declaring an entry point for a module that does not exist yields a console
-# script that fails with ModuleNotFoundError at run time.
+# gui-scripts is a Windows convention -- PyPA defines it as "console script
+# without a console window", and it has no effect elsewhere. A Terminal-free
+# launch on macOS needs a real .app bundle, which is a later phase; until then
+# macOS users start it the same way Linux users do.
+[project.gui-scripts]
+ostrace-gui = "ostrace.gui:main"
 
 [dependency-groups]
 dev = [
@@ -148,8 +151,13 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# The CLI is the one place that legitimately writes to stdout.
+# The CLI is the one place in the package that legitimately writes to stdout.
 "src/ostrace/cli.py" = ["T20"]
+# The GUI launcher prints one thing: the sentence explaining that Qt is missing,
+# which has to reach a user who has no window to be told in.
+"src/ostrace/gui/__init__.py" = ["T20"]
+# tools/ are command-line utilities, not library code.
+"tools/**" = ["T20"]
 # Tests may use assert-heavy style and need no annotations. They also reach into
 # private module members on purpose -- a mapping table that must stay in step
 # with an upstream library is worth asserting about directly -- and import inside
@@ -206,6 +214,10 @@ addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
 xfail_strict = true
 markers = [
     "device: requires a physical iOS device attached over USB (excluded in CI)",
+    # Needs the `gui` extra. Split out of the interpreter sweep because what it
+    # verifies is portability across operating systems, not across Python
+    # versions, and Qt is a 78-110 MB download per job.
+    "gui: needs PySide6 (run in its own CI job, on all three operating systems)",
 ]
 
 [tool.coverage.run]

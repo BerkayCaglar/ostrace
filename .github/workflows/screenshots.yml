@@ -1,0 +1,76 @@
+# Actions are pinned to a full-length commit SHA, not a tag -- see ci.yml for
+# why, and let Dependabot do the bumping.
+#
+# This workflow exists because the maintainer has no Mac. Qt reports an
+# always-integer device pixel ratio on macOS where Windows allows fractional,
+# and picks a system font nobody here can preview. A passing test suite says
+# nothing about either. A picture does, and a macOS runner is free on a public
+# repository.
+#
+# It cannot show the macOS menu bar -- that belongs to the screen rather than
+# to the window, so render() cannot contain it. Menu relocation is guarded by
+# the menu-role test in tests/test_gui_window.py instead.
+#
+# It is deliberately manual: a documentation tool, not a gate. Nothing here
+# fails a pull request.
+name: Screenshots
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_COLOR: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  capture:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS is the entire point. The offscreen plugin renders correctly
+          # there and needs no display, no window manager and no extra
+          # packages.
+          - os: macos-15
+            qt_platform: offscreen
+          # Windows uses the native plugin: measured, the offscreen font
+          # database is empty there, and every glyph comes out as a tofu box
+          # while QFontMetrics keeps returning plausible numbers. It is here as
+          # the comparison baseline -- the picture the maintainer can check
+          # against what is on their own screen.
+          - os: windows-latest
+            qt_platform: windows
+
+    env:
+      QT_QPA_PLATFORM: ${{ matrix.qt_platform }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[gui]"
+
+      - name: Capture
+        run: python tools/capture_screens.py --out screenshots
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: screenshots-${{ matrix.os }}
+          path: screenshots/
+          # A capture that silently produced nothing is the failure mode worth
+          # catching: an empty artifact looks like a successful run.
+          if-no-files-found: error
