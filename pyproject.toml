@@ -68,10 +68,10 @@ ostrace = "ostrace.cli:main"
 
 [dependency-groups]
 dev = [
-    "mypy==1.18.2",
+    "mypy==2.3.0",
     "pytest>=8.3",
     "pytest-cov>=6.0",
-    "ruff==0.14.0",
+    "ruff==0.16.1",
 ]
 
 # ---------------------------------------------------------------------------
@@ -101,6 +101,11 @@ include = ["src", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+# ruff 0.16 formats Python code blocks inside Markdown. Not wanted here: the
+# docs quote upstream code verbatim (misquoting it defeats the point), several
+# snippets are illustrative rather than runnable, and CODE_OF_CONDUCT.md is
+# vendored text that must stay byte-for-byte as published.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [
