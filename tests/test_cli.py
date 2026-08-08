@@ -14,6 +14,7 @@ from ostrace.devices import doctor
 from ostrace.devices.discovery import DeviceSummary
 from ostrace.errors import DeviceNotPairedError, NoDeviceFoundError
 from ostrace.model import DeviceInfo, Platform
+from tests.helpers import plain
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,7 +63,7 @@ def stub_devices(monkeypatch: pytest.MonkeyPatch) -> list[DeviceSummary]:
 class TestTopLevel:
     def test_no_command_prints_help(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert cli.main([]) == cli.EXIT_OK
-        assert "usage: ostrace" in capsys.readouterr().out.replace("\x1b", "")
+        assert "usage: ostrace" in plain(capsys.readouterr().out)
 
     def test_an_unknown_command_is_rejected(self) -> None:
         with pytest.raises(SystemExit) as excinfo:
