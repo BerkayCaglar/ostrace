@@ -104,10 +104,17 @@ class DetailPane(QScrollArea):
         Asking the layout for its ``heightForWidth`` at the viewport's width
         turns "how short could this be" into "how tall is this actually", which
         is the question a scrollable pane needs answered.
+
+        ``activate()`` first, because the question is asked immediately after
+        the rows are replaced and a layout answers it from what it last laid
+        out. Without it the pane sizes the new record against the *previous*
+        one's height -- measured, twelve fields given 8 pixels each where they
+        need 16, so every row rendered as its own top half.
         """
         width = self.viewport().width()
         if width <= 0:
             return
+        self._form.activate()
         needed = self._form.heightForWidth(width)
         if needed > 0:
             self._body.setMinimumHeight(needed)

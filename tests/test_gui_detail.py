@@ -21,9 +21,27 @@ from tests.helpers import MIXED
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
+from PySide6.QtWidgets import QApplication, QFormLayout, QLabel
+
 from ostrace.gui.widgets.detail_pane import ABSENT, DetailPane
 
 pytestmark = pytest.mark.gui
+
+
+def field_widgets(pane: DetailPane) -> list[QLabel]:
+    """The value half of every row, in order.
+
+    Reaching into the layout because geometry is what is under test here and
+    there is no public accessor for it -- the pane's own interface is text.
+    """
+    form = pane._form
+    widgets = []
+    for row in range(form.rowCount()):
+        item = form.itemAt(row, QFormLayout.ItemRole.FieldRole)
+        widget = item.widget() if item is not None else None
+        if isinstance(widget, QLabel):
+            widgets.append(widget)
+    return widgets
 
 
 @pytest.fixture(scope="module")
@@ -105,6 +123,39 @@ def test_a_gap_says_plainly_that_the_records_are_unrecoverable(pane: DetailPane)
     recoverable = pane.field("Recoverable")
     assert recoverable is not None
     assert recoverable.startswith("No.")
+
+
+def test_a_record_is_not_squeezed_into_the_previous_one_s_height(
+    pane: DetailPane, records: list[Record]
+) -> None:
+    """The bug every other test here is blind to, because they all read text.
+
+    The pane sizes itself from what its wrapped text actually needs, and it
+    asked the layout that question immediately after replacing the rows -- when
+    the layout still answered for the *previous* contents. Coming from the
+    "Nothing selected" placeholder, twelve fields were given eight pixels each
+    where they needed sixteen, and every row rendered as its own top half. The
+    text was correct throughout, which is why nothing caught it until somebody
+    looked at a picture.
+
+    A relation, not a measurement: each row is compared against its own
+    requirement in whatever font is in use. Nothing here asserts a pixel count,
+    which it could not do offscreen -- the offscreen font database is empty on
+    Windows and returns numbers for a face no user will ever see.
+    """
+    pane.resize(600, 80)  # deliberately far shorter than twelve rows need
+    pane.show()
+    pane.show_record(records[0])
+    # Geometry is applied by the event loop, and there is not one here. Every
+    # other test in this file reads text, which is why none of them needs this.
+    QApplication.processEvents()
+
+    squeezed = [
+        label.text()
+        for label in field_widgets(pane)
+        if label.height() < label.heightForWidth(label.width())
+    ]
+    assert not squeezed, f"{len(squeezed)} rows rendered shorter than their text"
 
 
 def test_show_item_dispatches_on_the_kind(pane: DetailPane, records: list[Record]) -> None:

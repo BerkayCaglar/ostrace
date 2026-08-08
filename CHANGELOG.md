@@ -199,7 +199,31 @@ fixed 200 records however large the capture is.
   nothing. Everything else is a summary, and a default that quietly discards
   data is the wrong default.
 
-### Fixed (phase 5 groundwork)
+### Changed (phase 5, the README)
+
+- **The README describes what ships rather than what is planned**, with
+  screenshots of the viewer in both colour schemes. The images are absolute
+  URLs because this file is also the PyPI description, where a relative path
+  resolves to nothing.
+
+- It now says what 0.1.0 is *not*: no binaries, nothing signed, macOS verified
+  by CI rather than by hand. Every one of those is something a reader would
+  otherwise have to discover, and the macOS one in particular is a fact about
+  how much this project's macOS support has actually been exercised.
+
+### Fixed (phase 5, found by looking at a picture)
+
+- **The detail pane sized every row to half the height of its text.** It sizes
+  itself from what its wrapped text actually needs — a word-wrapped `QLabel`
+  reports a minimum of about one line, and a scroll area reads that as
+  permission to compress — but it asked the layout that question immediately
+  after replacing the rows, when the layout still answers for the *previous*
+  contents. Coming from the placeholder, twelve fields were given 8 pixels each
+  where they needed 16.
+
+  Every existing test of that pane reads text, and the text was correct
+  throughout. The new one compares each row against its own requirement rather
+  than against a pixel count, so it means the same thing offscreen.
 
 - **A capture that would not stop took the whole viewer down with it.** The
   wait in Disconnect is bounded — five seconds, so that a device refusing to
@@ -214,6 +238,11 @@ fixed 200 records however large the capture is.
   relay busy.
 
 ### Changed (phase 5 groundwork)
+
+- **The screenshot job renders a window with a real capture loaded.** An empty
+  table says nothing about column widths, elision, severity colouring or the
+  detail pane, which is most of what there is to get wrong on the one platform
+  that cannot be looked at here — and it is what the README needs.
 
 - The GUI job runs `python -X faulthandler -m pytest` rather than the console
   script. pytest turns faulthandler off when the session ends, and the one CI

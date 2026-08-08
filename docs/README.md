@@ -24,7 +24,7 @@ does. Read [formats/](formats/) if you are writing something that consumes an
 | 2 | `analysis/` and `exporters/`, six-column agent bundle | **done** |
 | 3b | CLI: `export` | **done** |
 | 4 | PySide6 GUI | **done**, against [its contract](design/gui.md) |
-| 5 | Release: PyPI via Trusted Publishing, tagged 0.1.0 | not started |
+| 5 | Release: PyPI via Trusted Publishing, tagged 0.1.0 | in progress |
 
 Phases 1 and 2 carried the real risk, and phase 4 carried the rest of it: it is
 the one part of the program whose macOS behaviour cannot be run here. See
