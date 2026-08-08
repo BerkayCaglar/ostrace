@@ -1,0 +1,43 @@
+# Optional but recommended:  pre-commit install
+#
+# These hooks are a fast local echo of what CI runs. The ruff revision must
+# stay in step with the pinned version in pyproject.toml's [dependency-groups],
+# or a commit can pass locally and fail in CI for no reason a contributor can see.
+
+# Never rewrite vendored text. LICENSE is the GPL verbatim and CODE_OF_CONDUCT
+# is the Contributor Covenant; both must stay byte-for-byte as published.
+exclude: '^(LICENSE|CODE_OF_CONDUCT\.md)$'
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        # Test fixtures are real captures and are legitimately chunky.
+        args: [--maxkb=2048]
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: trailing-whitespace
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      # Run mypy from the project environment rather than an isolated one, so
+      # it sees the installed dependencies and matches what CI does.
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false

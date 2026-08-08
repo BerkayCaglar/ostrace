@@ -1,0 +1,70 @@
+name: Bug report
+description: Something does not work the way it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before anything else:** if no device is listed, please work through
+        [docs/troubleshooting.md](https://github.com/BerkayCaglar/ostrace/blob/main/docs/troubleshooting.md)
+        first. On Windows the answer is usually Apple Mobile Device Service.
+
+        **Redact before you paste.** A capture can contain account identifiers,
+        file paths, network endpoints and anything an app decided to log.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: And what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ostrace capture ...
+        2. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: ostrace version
+      description: Output of `ostrace --version`
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux]
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device and iOS version
+      placeholder: iPhone18,2 / iOS 26.5.2
+    validations:
+      required: false
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: ostrace doctor output
+      render: text
+    validations:
+      required: false

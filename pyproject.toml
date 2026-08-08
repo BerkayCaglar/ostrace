@@ -1,0 +1,200 @@
+[build-system]
+requires = ["hatchling>=1.27", "hatch-vcs>=0.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ostrace"
+description = "Stream, inspect and export iOS device logs on Windows, macOS and Linux."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Berkay ÇAĞLAR", email = "77461514+BerkayCaglar@users.noreply.github.com" },
+]
+keywords = [
+    "ios",
+    "iphone",
+    "logging",
+    "syslog",
+    "os_log",
+    "unified-logging",
+    "console",
+    "debugging",
+    "pymobiledevice3",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: System :: Logging",
+    "Typing :: Typed",
+]
+dynamic = ["version"]
+dependencies = [
+    "pymobiledevice3>=10.3,<11",
+    "platformdirs>=4.2",
+]
+
+# The GUI is optional so that `pipx install ostrace` stays a CLI-sized install.
+# PySide6-Essentials, never bare PySide6: the meta-package additionally pulls
+# PySide6-Addons (QtWebEngine, Qt3D, QtCharts, QtMultimedia), which this project
+# does not use and which costs 170-330 MB. See docs/adr/0004.
+[project.optional-dependencies]
+gui = ["PySide6-Essentials>=6.8,<7"]
+
+[project.urls]
+Homepage = "https://github.com/BerkayCaglar/ostrace"
+Source = "https://github.com/BerkayCaglar/ostrace"
+Issues = "https://github.com/BerkayCaglar/ostrace/issues"
+Changelog = "https://github.com/BerkayCaglar/ostrace/blob/main/CHANGELOG.md"
+
+[project.scripts]
+ostrace = "ostrace.cli:main"
+
+# [project.gui-scripts] is deliberately absent until the GUI lands in phase 4.
+# Declaring an entry point for a module that does not exist yields a console
+# script that fails with ModuleNotFoundError at run time.
+
+[dependency-groups]
+dev = [
+    "mypy==1.18.2",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff==0.14.0",
+]
+
+# ---------------------------------------------------------------------------
+# Build
+# ---------------------------------------------------------------------------
+
+[tool.hatch.version]
+source = "vcs"
+# Building from a source tarball with no .git directory (Linux distribution
+# packaging, for example) must not fail outright.
+fallback-version = "0.0.0"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/ostrace/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ostrace"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE"]
+
+# ---------------------------------------------------------------------------
+# Lint and format
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "A",     # flake8-builtins
+    "ANN",   # flake8-annotations
+    "ARG",   # flake8-unused-arguments
+    "ASYNC", # flake8-async
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "DTZ",   # flake8-datetimez -- naive datetimes are a real bug class here
+    "E",     # pycodestyle errors
+    "EM",    # flake8-errmsg
+    "F",     # pyflakes
+    "FA",    # flake8-future-annotations
+    "I",     # isort
+    "ISC",   # flake8-implicit-str-concat
+    "N",     # pep8-naming
+    "PERF",  # perflint
+    "PIE",   # flake8-pie
+    "PL",    # pylint
+    "PT",    # flake8-pytest-style
+    "PTH",   # flake8-use-pathlib -- os.path habits are how Windows paths leak in
+    "RET",   # flake8-return
+    "RSE",   # flake8-raise
+    "RUF",   # ruff-specific
+    "SIM",   # flake8-simplify
+    "SLF",   # flake8-self
+    "T20",   # flake8-print
+    "TC",    # flake8-type-checking
+    "TID",   # flake8-tidy-imports
+    "UP",    # pyupgrade
+    "W",     # pycodestyle warnings
+]
+ignore = [
+    "ISC001", # conflicts with the formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The CLI is the one place that legitimately writes to stdout.
+"src/ostrace/cli.py" = ["T20"]
+# Tests may use assert-heavy style and need no annotations.
+"tests/**" = ["ANN", "PLR2004", "SLF"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+[tool.ruff.lint.isort]
+known-first-party = ["ostrace"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+
+[[tool.mypy.overrides]]
+# pymobiledevice3 ships no type information.
+module = ["pymobiledevice3.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Written by hatch-vcs at build time; not present in a clean checkout.
+module = ["ostrace._version"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
+xfail_strict = true
+markers = [
+    "device: requires a physical iOS device attached over USB (excluded in CI)",
+]
+
+[tool.coverage.run]
+source = ["ostrace"]
+branch = true
+# Generated by hatch-vcs; not ours to cover.
+omit = ["*/ostrace/_version.py"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

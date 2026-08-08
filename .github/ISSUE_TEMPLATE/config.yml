@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: No device is listed
+    url: https://github.com/BerkayCaglar/ostrace/blob/main/docs/troubleshooting.md
+    about: On Windows this is almost always Apple Mobile Device Service. Check here first.
+  - name: Security or code of conduct report
+    url: https://github.com/BerkayCaglar/ostrace/security/advisories/new
+    about: Private reporting. Please do not open a public issue for either of these.

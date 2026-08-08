@@ -1,0 +1,19 @@
+# Normalise to LF in the repository and on checkout everywhere. The project is
+# developed on Windows but must behave identically on macOS and Linux; letting
+# core.autocrlf decide per-machine is how line endings become review noise.
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF or cmd.exe mis-parses them.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Captured log fixtures are binary; never let Git rewrite bytes inside them.
+*.gz    binary
+*.gzip  binary
+*.png   binary
+*.ico   binary
+*.icns  binary
+
+# Keep generated and vendored files out of diff statistics.
+CHANGELOG.md linguist-generated=false

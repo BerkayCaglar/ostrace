@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Actions are the supply-chain surface that matters most here: they run with
+  # the repository's token, and release.yml runs with an OIDC identity that can
+  # publish to PyPI.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      # ruff and mypy are pinned exactly on purpose; batching their bumps keeps
+      # "the linter has new opinions" out of unrelated pull requests.
+      dev-tooling:
+        patterns: ["ruff", "mypy", "pytest*"]

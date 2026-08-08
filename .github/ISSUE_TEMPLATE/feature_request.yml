@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest something ostrace should do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A few things are already decided and written down — please skim
+        [docs/adr/](https://github.com/BerkayCaglar/ostrace/tree/main/docs/adr)
+        first. Network (Wi-Fi) capture and Android support are both known and
+        deliberately deferred rather than overlooked.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve
+      description: The situation you are in, not the solution you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead
+    validations:
+      required: false
