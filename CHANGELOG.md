@@ -51,6 +51,29 @@ because the obvious assumption is wrong in each case.
 
 The CLI subcommands are still declared but unimplemented; they land in phase 3.
 
+### Added (phase 3a)
+
+- `ostrace doctor` — diagnoses why a device cannot be reached, in dependency
+  order, and stops reporting downstream failures once an upstream one is found.
+  Almost every problem in this domain is environmental rather than logical, and
+  that deserves a command rather than a paragraph in a README.
+- `ostrace devices` — lists what is attached, `--verbose` to read identity.
+- `ostrace capture` — streams a device log to a session file. `--duration`,
+  `--max-records` and Ctrl-C all stop it cleanly, and the sidecar is finalised
+  on every exit path including an exception.
+- `ostrace.capture.capture()`, separate from the CLI because a GUI stop button
+  has the same obligations as Ctrl-C.
+
+`export` is declared but not implemented; it needs the exporters from phase 2.
+
+The capture loop takes a `LogSource`, so a recorded session stands in for a
+device: the end-to-end tests run a real iPhone capture through the CLI and
+assert on the session file that comes out, with no hardware.
+
+`--duration` is enforced with `asyncio.timeout`, which fires from a timer
+rather than from record arrival. On a device that can go silent for tens of
+seconds, a limit checked only when the next record shows up is not a limit.
+
 ### Fixed
 
 A correctness review of phases 0 and 1 found twelve defects, all fixed before

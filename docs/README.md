@@ -19,8 +19,9 @@ does. Read [formats/](formats/) if you are writing something that consumes an
 | --- | --- | --- |
 | 0 | Repository skeleton, packaging, CI, documentation, ADRs | **done** |
 | 1 | `model.py`, `sources/`, `storage/`, `paths.py`, `compat.py` | **done** |
+| 3a | CLI: `devices`, `capture`, `doctor` | **done** |
 | 2 | `analysis/` and `exporters/`, six-column agent bundle | not started |
-| 3 | CLI: `devices`, `capture`, `export`, `doctor` | not started |
+| 3b | CLI: `export` | blocked on phase 2 |
 | 4 | PySide6 GUI | not started |
 | 5 | Release: PyPI via Trusted Publishing, tagged 0.1.0 | not started |
 

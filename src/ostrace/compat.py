@@ -30,7 +30,24 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["open_in_file_manager"]
+__all__ = ["local_usbmux_endpoint", "open_in_file_manager"]
+
+
+def local_usbmux_endpoint() -> tuple[str, int] | None:
+    """Where usbmux listens, when it listens on TCP.
+
+    Windows has no usbmux of its own: Apple Mobile Device Service provides it,
+    over TCP, and its absence is the single most common reason nothing works
+    there. macOS and Linux reach usbmuxd over a unix socket owned by the OS or
+    by a package, which this does not probe.
+
+    ``None`` therefore means "not a TCP endpoint here", not "unavailable" --
+    which is what lets a caller diagnose the Windows case without branching on
+    the operating system itself.
+    """
+    if sys.platform == "win32":
+        return ("127.0.0.1", 27015)
+    return None
 
 
 def open_in_file_manager(path: Path) -> None:

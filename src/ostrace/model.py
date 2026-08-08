@@ -227,6 +227,23 @@ class DeviceInfo:
             f"{self.platform.display_name} {self.product_version})"
         )
 
+    def now(self) -> datetime:
+        """The current time on the *device's* clock, in the device's offset.
+
+        Every timestamp in a session comes from the device, so anything this
+        package stamps itself -- when a capture started, when a gap ended --
+        has to come from the same clock or the arithmetic between them is
+        wrong by the skew, and can come out negative.
+
+        Best effort: the host clock corrected by the skew measured when the
+        device was identified. Without a measurement it is the host clock,
+        which is the honest answer rather than a confident wrong one.
+        """
+        moment = datetime.now(tz=UTC)
+        if self.clock_skew is not None:
+            moment += self.clock_skew
+        return moment.astimezone(self.tzinfo)
+
 
 @dataclass(frozen=True, slots=True)
 class Gap:

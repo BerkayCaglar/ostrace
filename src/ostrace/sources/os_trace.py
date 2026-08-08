@@ -391,19 +391,11 @@ class OsTraceSource(SourceCloseMixin):
             del recent[next(iter(recent))]
 
     def _device_now(self) -> datetime:
-        """The current time on the *device's* clock, in its own offset.
+        """Now, on the device's clock.
 
-        Gap boundaries must come from one clock. The start of a gap is the
-        timestamp of the last record, which the device stamped; taking the end
-        from the host produces a duration that is wrong by the clock skew and,
-        when the device runs ahead, negative. The skew is already measured when
-        the device is identified, so applying it costs nothing and keeps both
-        ends on the same clock.
+        Gap boundaries must come from one clock: the start is a timestamp the
+        device stamped, so taking the end from the host makes the duration
+        wrong by the skew and negative whenever the device runs ahead.
         """
         device = self._device
-        now = datetime.now(tz=UTC)
-        if device is None:
-            return now
-        if device.clock_skew is not None:
-            now += device.clock_skew
-        return now.astimezone(device.tzinfo)
+        return device.now() if device is not None else datetime.now(tz=UTC)

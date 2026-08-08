@@ -77,13 +77,30 @@ see [docs/adr/0002](docs/adr/0002-use-pymobiledevice3-over-libimobiledevice-cli.
 ## Usage
 
 ```bash
-ostrace devices          # list attached devices
-ostrace doctor           # diagnose the environment
-ostrace capture          # stream to a session file
-ostrace export           # turn a session file into a report
+ostrace doctor                    # why can't I see my device?
+ostrace devices --verbose         # list what is attached
+ostrace capture --duration 60     # stream to a session file
 ```
 
-None of these are implemented yet — see the changelog.
+`ostrace capture` writes a session directory under your data directory and
+prints the path. `--max-records` and `--duration` both stop it; so does Ctrl-C,
+cleanly. If the device disconnects mid-capture it reconnects and records a gap
+rather than pretending the log is continuous.
+
+`ostrace export` is declared but not implemented — it needs the exporters, which
+arrive in phase 2. See [CHANGELOG.md](CHANGELOG.md).
+
+Start with `doctor` if anything is not working. Almost every problem here is
+environmental rather than a bug, and it checks the causes in the order they
+actually occur:
+
+```
+[ ok ] ostrace      0.1.0 on Python 3.13.14 (win32)
+[ ok ] usbmux       Apple Mobile Device Service on 127.0.0.1:27015
+[FAIL] devices      none connected
+               Connect the device over USB and unlock it. A charge-only cable
+               gives exactly this symptom.
+```
 
 ## Documentation
 

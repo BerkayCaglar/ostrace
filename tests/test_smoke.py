@@ -43,10 +43,9 @@ def test_package_is_installed_not_merely_on_the_path() -> None:
     assert "site-packages" in ostrace.__file__ or "src" in ostrace.__file__
 
 
-def test_parser_advertises_every_planned_subcommand() -> None:
-    parser = build_parser()
-    args = parser.parse_args(["doctor"])
-    assert args.command == "doctor"
+@pytest.mark.parametrize("command", ["devices", "capture", "doctor", "export"])
+def test_parser_accepts_every_subcommand(command: str) -> None:
+    assert build_parser().parse_args([command]).command == command
 
 
 def test_bare_invocation_prints_help_and_succeeds(
@@ -56,10 +55,10 @@ def test_bare_invocation_prints_help_and_succeeds(
     assert "usage: ostrace" in plain(capsys.readouterr().out)
 
 
-def test_unimplemented_subcommand_reports_a_distinct_exit_code(
+def test_export_reports_a_distinct_exit_code_until_phase_two(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert main(["capture"]) == EXIT_NOT_IMPLEMENTED
+    assert main(["export"]) == EXIT_NOT_IMPLEMENTED
     assert "not implemented" in plain(capsys.readouterr().out)
 
 
