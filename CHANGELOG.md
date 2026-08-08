@@ -105,6 +105,30 @@ Test coverage of the live source went from 22% to 80%: the reconnect loop, gap
 bookkeeping and session lifecycle are now driven in CI against stubbed device
 seams, with no hardware.
 
+### Fixed (found on hardware)
+
+- **`aclose()` did not stop a running stream.** It closed the lockdown session,
+  returned in a millisecond and reported success — while the records kept
+  coming, because they arrive over a *second* socket: `os_trace_relay` is a
+  service connection that lockdown merely starts, and closing lockdown does not
+  touch it. Measured on an `iPhone18,2`: 8,239 further records in the five
+  seconds after "closing", and the orphaned service left the next capture unable
+  to stream at all. `_stream_once` never closed the service on the ordinary path
+  either, so every connection leaked one.
+
+  Nothing in CI could have caught this. The stubbed tests replace
+  `_stream_once`, which is the only place the service connection exists — so the
+  one function that owns the socket was the one function no test ran. It now
+  has two device tests of its own.
+
+- **A deliberate stop was indistinguishable from a dropped cable.** `aclose()`
+  works by closing the socket the stream is reading, so the failing read looks
+  exactly like an outage. With reconnection enabled the source answered a stop
+  by reconnecting to the device it had just been asked to release, and wrote a
+  gap for an outage that never happened. Stopping is now a clean end of stream
+  rather than an error — a stop button that reports a failure every time is a
+  stop button nobody trusts.
+
 ### Changed
 
 A review pass over phases 0 and 1 tightened several things before they had

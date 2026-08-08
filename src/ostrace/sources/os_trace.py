@@ -129,9 +129,18 @@ class OsTraceSource(SourceCloseMixin):
 
         self._device: DeviceInfo | None = None
         self._last_seen: datetime | None = None
-        # The lockdown session currently held, whichever call opened it, so
-        # that aclose() has exactly one thing to close. See aclose().
+        # The lockdown session currently held, whichever call opened it. See
+        # aclose().
         self._active: Any | None = None
+        # The os_trace_relay service, while streaming. This is a *second*
+        # socket: lockdown starts the service and hands back its own connection,
+        # so closing the lockdown does not touch it. Measured on an iPhone18,2 --
+        # after closing only the lockdown, the stream delivered a further 8,239
+        # records in five seconds. See aclose().
+        self._stream_service: Any | None = None
+        # Set once aclose() has been called, so that the reconnect loop can tell
+        # "the user stopped this" from "the device went away".
+        self._closing = False
         # Insertion-ordered, doubling as the membership test: one structure
         # rather than a deque and a set hand-synchronised at the eviction point.
         # It records what arrived just before a drop, so that the backlog
@@ -169,7 +178,7 @@ class OsTraceSource(SourceCloseMixin):
             await lockdown.close()
 
     async def aclose(self) -> None:
-        """Close the live session, if one is open.
+        """Close whatever the source holds: the stream service, then lockdown.
 
         A consumer that stops iterating early -- a GUI stop button, a capture
         that reached its record limit -- leaves the stream generator suspended
@@ -179,11 +188,28 @@ class OsTraceSource(SourceCloseMixin):
         collector happens to reach it. Starting and stopping a capture
         repeatedly then accumulates sockets.
 
-        Closing the session from the outside makes the pending read fail, which
-        unwinds the generator. Every path that opens a session registers it
-        here, so this covers all of them. Use the source as an async context
-        manager whenever iteration might stop early.
+        **There are two sockets, and closing the wrong one looks like success.**
+        The lockdown session is what identity is read from and what starts the
+        service; the records arrive over a separate connection that
+        ``OsTraceService`` holds. An earlier version closed only the lockdown,
+        returned in a millisecond, and left the stream running -- an
+        ``iPhone18,2`` delivered a further 8,239 records in the five seconds
+        after "closing". Nothing in the stubbed tests could see it: they replace
+        ``_stream_once``, which is where the service socket lives.
+
+        The service is closed first, because that is the read the generator is
+        blocked on. Use the source as an async context manager whenever
+        iteration might stop early.
         """
+        self._closing = True
+
+        service = self._stream_service
+        if service is not None:
+            self._stream_service = None
+            # An already-dead connection is not a reason to fail a shutdown.
+            with contextlib.suppress(Exception):
+                await service.close()
+
         active = self._active
         if active is not None:
             await self._close(active)
@@ -198,6 +224,17 @@ class OsTraceSource(SourceCloseMixin):
             finally:
                 await self._close(lockdown)
         return device
+
+    def _stopped(self) -> bool:
+        """Whether ``aclose()`` has been called.
+
+        Read through a call rather than as an attribute so that it is genuinely
+        re-read each time. ``aclose()`` runs in another task, and a type checker
+        narrowing the attribute after one test declares the next one dead code
+        -- reasoning that is sound only in a world where nothing else is
+        running, which is not the world a stop button lives in.
+        """
+        return self._closing
 
     async def _identify(self, lockdown: Any) -> DeviceInfo:  # noqa: ANN401 - LockdownClient
         """Read device identity from a session we already hold.
@@ -256,33 +293,42 @@ class OsTraceSource(SourceCloseMixin):
 
             try:
                 async for record in self._stream_once(lockdown, device.tzinfo):
-                    # Backlog suppression lives here rather than inside
+                    # Backlog suppression is asked about here rather than inside
                     # _stream_once: it is reconnect policy, and _stream_once is
                     # only "what this one connection produced".
-                    if self._suppressing:
-                        self._suppressing -= 1
-                        if self._key(record) in self._recent:
-                            continue
+                    if self._is_replayed(record):
+                        continue
                     self._remember(record)
                     self._last_seen = record.timestamp
                     yield record
             except OstraceError as exc:
-                # One question, asked the same way here as at connect time:
-                # is waiting going to help? Matching on a specific exception
-                # type instead would miss a recoverable outage that arrives
-                # wearing a different class.
+                # `aclose()` closes the socket out from under the pending read,
+                # so a deliberate stop arrives here looking exactly like an
+                # outage. It is not one: reconnecting would be the opposite of
+                # what was asked, and reporting an error would make every stop
+                # button look like a failure.
+                if self._stopped():
+                    return
+                # Otherwise one question, asked the same way here as at connect
+                # time: is waiting going to help? Matching on a specific
+                # exception type instead would miss a recoverable outage that
+                # arrives wearing a different class.
                 if not (self.reconnect.enabled and exc.recoverable):
                     raise
                 reason = exc.message
             else:
                 # A live stream does not end by itself. If it did, the device
                 # went away quietly, which is the same outage in a politer form.
-                if not self.reconnect.enabled:
+                if self._stopped() or not self.reconnect.enabled:
                     return
                 reason = "stream ended"
 
             pending_gap = (self._last_seen or self._device_now(), reason)
             await asyncio.sleep(self.reconnect.delay)
+            # Checked again after the wait: a stop that lands during the
+            # reconnect delay must not be answered by reconnecting.
+            if self._stopped():
+                return
 
     async def _connect(self, *, resuming: bool) -> Any:  # noqa: ANN401 - LockdownClient
         """Open a session, retrying only when retrying could plausibly work.
@@ -311,8 +357,12 @@ class OsTraceSource(SourceCloseMixin):
         from pymobiledevice3.services.os_trace import OsTraceService  # noqa: PLC0415
 
         try:
-            async with lockdown:
-                service = OsTraceService(lockdown=lockdown)
+            # The service is entered as a context manager rather than merely
+            # constructed: it owns a connection of its own, and leaving that to
+            # the lockdown's teardown leaks it -- the lockdown does not know
+            # about it.
+            async with lockdown, OsTraceService(lockdown=lockdown) as service:
+                self._stream_service = service
                 async for entry in service.syslog(
                     pid=self.pid,
                     stream_flags=self.stream_flags,
@@ -325,6 +375,7 @@ class OsTraceSource(SourceCloseMixin):
         except Exception as exc:
             raise translate(exc) from exc
         finally:
+            self._stream_service = None
             self._active = None
 
     # ------------------------------------------------------------------
@@ -380,6 +431,18 @@ class OsTraceSource(SourceCloseMixin):
     @staticmethod
     def _key(record: Record) -> tuple[Any, ...]:
         return (record.timestamp, record.pid, record.thread_id, record.message)
+
+    def _is_replayed(self, record: Record) -> bool:
+        """Whether this record is backlog already delivered before an outage.
+
+        Only ever true inside the window following a reconnect: the device
+        replays its history on every connect, so the first stretch after an
+        outage overlaps what the session already contains.
+        """
+        if not self._suppressing:
+            return False
+        self._suppressing -= 1
+        return self._key(record) in self._recent
 
     def _remember(self, record: Record) -> None:
         if not self.reconnect.enabled:

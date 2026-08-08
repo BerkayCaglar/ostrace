@@ -44,6 +44,13 @@ Each of these has cost real time at least once.
   optimisation strips the `assert` *including the `await` inside it*, which
   desynchronises the wire protocol and yields garbage instead of an error.
   `OsTraceSource` refuses to construct when the flag is set.
+- **A device stream is two sockets, not one.** The lockdown session starts
+  `os_trace_relay` and hands back a *separate* service connection; closing
+  lockdown does not close it. `aclose()` closed only the lockdown for a while —
+  it returned in a millisecond, reported success, and left the device
+  delivering thousands more records into a stream nobody was reading. Anything
+  that releases a device releases the service too, and first, because that is
+  the read the generator is blocked on.
 - **Only `compat.py` may branch on the operating system** or touch a
   platform-specific attribute. Write the literal `sys.platform == "win32"`
   form, not a named constant — type checkers narrow on the literal and not on a
@@ -93,6 +100,10 @@ operating systems with no hardware.
   device output is interpreted.
 - New behaviour ships with a test. A bug fix ships with the test that fails
   without it.
+- `test_sources_os_trace.py` stubs `_stream_once` wholesale. That is where the
+  service connection lives, so socket ownership is *structurally invisible*
+  there and belongs in a device test. Coverage of that file proves control
+  flow, not resource handling.
 
 ## Etiquette
 

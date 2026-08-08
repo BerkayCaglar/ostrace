@@ -177,6 +177,42 @@ class TestSessionLifecycle:
         asyncio.run(run())
         assert seam.opened[0].closed is True
 
+    def test_a_deliberate_stop_is_not_reported_as_an_outage(
+        self,
+        seam: types.SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Stopping and losing the device look identical from inside the loop.
+
+        `aclose()` works by closing the socket the stream is reading, so the
+        read fails exactly as it would if the cable were pulled. Told apart by
+        the wrong half, the source answers a stop by reconnecting to the device
+        it was just asked to release, and writes a gap for an outage that never
+        happened.
+        """
+        emitting(
+            [record(0), record(1), StreamInterruptedError("socket closed")],
+            [record(2)],
+            monkeypatch=monkeypatch,
+        )
+        source = OsTraceSource(reconnect=ReconnectPolicy(delay=0.0))
+
+        async def run() -> list[Record | Gap]:
+            out: list[Record | Gap] = []
+            async with contextlib.aclosing(source.stream()) as stream:
+                async for item in stream:
+                    out.append(item)
+                    if len(out) == 2:
+                        await source.aclose()
+            return out
+
+        items = asyncio.run(run())
+
+        # Ends where it was stopped: no gap, and the second connection in the
+        # script is never reached.
+        assert [type(item).__name__ for item in items] == ["Record", "Record"]
+        assert len(seam.opened) == 1
+
     def test_a_short_lived_identity_session_is_closed_and_deregistered(
         self,
         seam: types.SimpleNamespace,
