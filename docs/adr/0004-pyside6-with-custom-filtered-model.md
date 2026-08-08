@@ -76,6 +76,14 @@ itself rescans.
 
 ### Performance rules that follow, and are mandatory rather than stylistic
 
+> **Superseded.** The table below is kept as the record of what was decided and
+> why. Before phase 4 the claims were re-measured on PySide6 6.11.1 and half did
+> not survive: `multiData()` is *marginally slower* in PySide6, the `flags()`
+> figure was overstated by about 15×, and hiding the horizontal header — a
+> footnote here — is worth about 1000×. Use
+> [`docs/design/gui.md` §11](../design/gui.md) instead. The choice of PySide6
+> and of a hand-written filtered model is unaffected.
+
 Each comes from a measurement or an open Qt bug, and each has stalled a real
 table view at these row counts.
 

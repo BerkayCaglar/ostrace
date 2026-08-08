@@ -199,6 +199,35 @@ fixed 200 records however large the capture is.
   nothing. Everything else is a summary, and a default that quietly discards
   data is the wrong default.
 
+### Added (phase 4 groundwork)
+
+- [`docs/design/gui.md`](docs/design/gui.md) — the GUI behaviour contract,
+  written before the code the way `docs/formats/` was. It fixes what breaks
+  follow, what a filter may never hide, what "pause" is allowed to touch, and
+  what the user is told when records go missing.
+
+  The load-bearing rule is that a marker — a gap, a view eviction, a
+  connect — is exempt from filtering by type, at the one choke point, before
+  any predicate runs. A filter says which records the user wants; a marker says
+  whether the answer is complete, and hiding it makes the filtered view lie.
+  No surveyed log viewer guarantees this.
+
+### Changed (phase 4 groundwork)
+
+- **Half of [ADR 0004](docs/adr/0004-pyside6-with-custom-filtered-model.md)'s
+  performance table did not survive re-measurement** on PySide6 6.11.1, and is
+  superseded by `docs/design/gui.md` §11. Overriding `multiData()` is
+  *marginally slower* in PySide6 (0.96–0.99×), not the biggest available win:
+  the span has to be iterated from Python, so seven inbound crossings become
+  one inbound plus about fourteen outbound. The `flags()` caching figure was
+  overstated by roughly 15× (~1.3×, not 20×). Hiding the horizontal header,
+  recorded there as a footnote, is worth about 1000× — and it is the *cause* of
+  the `flags()` calls the caching rule was treating. The `QListView` figures
+  were fixed in Qt 6.8, which this project already pins.
+
+  The decision itself — PySide6 with a hand-written filtered model — is
+  unaffected.
+
 ### Fixed (found on hardware)
 
 - **`aclose()` did not stop a running stream.** It closed the lockdown session,
