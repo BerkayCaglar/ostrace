@@ -110,10 +110,22 @@ seams, with no hardware.
 - `analysis/` — message normalisation and a single-pass fold of a capture into
   the numbers worth reporting: counts per level, process, subsystem and minute,
   and distinct message templates with the line each first appears on.
-- `exporters/` — the exporter protocol, a registry, and the **agent bundle**:
-  seven files of tab-separated text designed to be investigated with `grep` and
-  bounded line reads rather than loaded into a context window. Implements
-  [docs/formats/agent-bundle.md](docs/formats/agent-bundle.md).
+- `exporters/` — the exporter protocol, a registry, and four formats:
+  - **agent bundle** — seven files of tab-separated text designed to be
+    investigated with `grep` and bounded line reads rather than loaded into a
+    context window. Implements
+    [docs/formats/agent-bundle.md](docs/formats/agent-bundle.md).
+  - **jsonl** — the session file's own per-line shape, uncompressed, written by
+    the same encoder. There is one record encoding, not two. No metadata line:
+    a JSON Lines file whose first line differs from every other breaks `jq`,
+    `pandas.read_json(lines=True)` and every short script, which is the entire
+    audience for the format.
+  - **text** — aligned columns for reading in a terminal, records and nothing
+    else. Where a value overflows its column the pid is kept:
+    `duetexpertd(AppPredictionI…[27291]` rather than a truncation that discards
+    the field most needed to tell eight instances of a process apart.
+  - **markdown** — a document to paste into an issue: which device, what span,
+    how much, what the columns mean, then the records verbatim.
 
 `session.log` gained the two columns this rewrite existed for. A query like
 "every record from `com.apple.network`, across every process" is not
@@ -131,6 +143,11 @@ The generated `CLAUDE.md` is bounded by construction — a bundle of two million
 records must not produce a longer one than a bundle of six thousand — and it
 declares what it cannot show: gaps in the capture, and any records whose
 template was dropped at the cap.
+
+The markdown export states the level set iOS actually emits. The predecessor
+documented `Warning` and `Critical`, which it had inherited from the legacy
+text stream; a reader who trusted that would filter for a level that never
+appears.
 
 ### Fixed (found on hardware)
 
