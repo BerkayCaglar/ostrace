@@ -13,23 +13,13 @@ later phases; see ``CHANGELOG.md`` for what is actually implemented.
 
 from __future__ import annotations
 
-import sys
+from ostrace.errors import guard_optimized_interpreter
 
 __all__ = ["__version__"]
 
-# pymobiledevice3's os_trace stream loop is written as
-#     assert await self.service.recvall(1) == b"\x02"
-# Running under -O / PYTHONOPTIMIZE strips assert statements *including the
-# await inside them*, which desynchronises the frame protocol and yields
-# garbage records instead of a clean error. Fail loudly at import time rather
-# than let a user debug corrupted logs.
-if sys.flags.optimize:  # pragma: no cover - depends on interpreter flags
-    _MSG = (
-        "ostrace cannot run under -O / PYTHONOPTIMIZE: the device stream "
-        "protocol depends on assert statements that optimisation removes. "
-        "Unset PYTHONOPTIMIZE and run again."
-    )
-    raise RuntimeError(_MSG)
+# Fail at import time rather than let a user debug corrupted logs. See the
+# function's docstring for why an interpreter flag can corrupt a wire protocol.
+guard_optimized_interpreter()
 
 try:
     from ostrace._version import __version__

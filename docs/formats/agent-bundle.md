@@ -17,7 +17,7 @@ An agent bundle is a directory. Exporting produces:
 <name>-bundle/
 ├── CLAUDE.md          generated documentation, auto-loaded by Claude Code
 ├── session.log        every record, one per line          <- the main data file
-├── errors.log         Error/Fault/Critical only, with line-number pointers
+├── errors.log         Error and Fault only, with line-number pointers
 ├── patterns.tsv       distinct message templates, with counts
 ├── processes.tsv      record count per process
 ├── subsystems.tsv     record count per subsystem
@@ -36,8 +36,8 @@ timestamp <TAB> level <TAB> process[pid] <TAB> subsystem <TAB> category <TAB> me
 
 | Column | Contents |
 | --- | --- |
-| `timestamp` | `YYYY-MM-DDTHH:MM:SS`, local device time |
-| `level` | One of `Debug` `Info` `Notice` `Warning` `Error` `Fault` `Critical`, or `-` |
+| `timestamp` | `YYYY-MM-DDTHH:MM:SS`, device local time |
+| `level` | One of `Debug` `Info` `Notice` `User Action` `Error` `Fault` |
 | `process[pid]` | e.g. `dasd[83]`. A parenthesised part is the emitting library: `backboardd(ColourSensorFilterPlugin)[70]` |
 | `subsystem` | e.g. `com.apple.network`, or `-` when the record carries none |
 | `category` | e.g. `default`, or `-` |
@@ -46,6 +46,13 @@ timestamp <TAB> level <TAB> process[pid] <TAB> subsystem <TAB> category <TAB> me
 Empty fields are written as `-`, never as an empty string. An empty field
 between two tabs is ambiguous to read and easy to mis-split; a literal `-` is
 not. **Contract.**
+
+The level set is exactly what iOS emits, taken from a real device rather than
+from the legacy text format: `Debug`, `Info`, `Notice`, `User Action`, `Error`,
+`Fault`. There is no `Warning` and no `Critical` — the predecessor tool listed
+both because it was reading a text stream that used different names. `Warning`
+becomes reachable if an Android source is added; a level being absent from a
+capture means the device emitted none, not that it was filtered out.
 
 Records appear in the order the device delivered them. Under load the device
 itself can emit slightly out of chronological order — measured at about 0.065%
@@ -70,7 +77,7 @@ timestamp, level and process. It is the most important property of the format.
 
 ## `errors.log`
 
-Records at `Error`, `Fault` or `Critical`. Seven columns — the six from
+Records at `Error` or `Fault`. Seven columns — the six from
 `session.log`, prefixed by the **`session.log` line number** (1-based):
 
 ```
@@ -135,7 +142,7 @@ the advice improves.
 
 ```bash
 # how many errors, before asking for any content
-rg -c '\t(Error|Fault|Critical)\t' session.log
+rg -c '\t(Error|Fault)\t' session.log
 
 # one subsystem, across every process -- not expressible before six columns
 rg -n '\tcom\.apple\.network\t' session.log | head -n 50

@@ -24,9 +24,31 @@ such: the `Record` model and the on-disk export formats documented in
 - A `ostrace` console script and `python -m ostrace`, both of which currently
   only report a version and the fact that nothing is implemented.
 
+- The core: `model.py` (`Record`, `Level`, `DeviceInfo`, `Gap`), `errors.py`,
+  `paths.py`, `compat.py`, `devices/discovery.py`, `storage/` (gzip JSON-Lines
+  spool plus a metadata sidecar) and `sources/` with the live `os_trace_relay`
+  source and an offline replay source.
+- Two captures from a physical `iPhone18,2` on iOS 26.5.2, committed as test
+  fixtures, so the whole pipeline is exercised in CI on three operating systems
+  with no device attached.
+
 ### Notes
 
-Nothing in this release talks to a device. The subcommands are declared so that
-`--help` documents the intended surface; they land in phase 3.
+Three things were measured on hardware during this phase and are worth knowing
+because the obvious assumption is wrong in each case.
+
+- **Apple's log levels are not severity-ordered.** `SyslogLogLevel` on iOS 26 is
+  `NOTICE=0, INFO=1, DEBUG=2, USER_ACTION=3, ERROR=16, FAULT=17`, so a filter
+  written against those numbers matches everything. `Level` is our own ordered
+  enum for that reason before any portability one.
+- **Turning off the `HISTORICAL` stream flag starves the stream rather than
+  trimming it.** The same device delivered roughly 1,600 records a second with
+  it and 65 a second without, in bursts separated by up to forty seconds of
+  silence. It stays on by default.
+- **A quiet device can produce nothing for tens of seconds.** Any timeout has to
+  come from a separate task; waiting for the next record in order to notice that
+  time has passed is a hang, not a timeout.
+
+The CLI subcommands are still declared but unimplemented; they land in phase 3.
 
 [Unreleased]: https://github.com/BerkayCaglar/ostrace/commits/main

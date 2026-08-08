@@ -50,7 +50,7 @@ Chosen option: **an agent bundle** — a directory containing:
 | File | Contents |
 | --- | --- |
 | `session.log` | Every record, one per line, tab-separated. The main data file. |
-| `errors.log` | Error/Fault/Critical only. **First column is the `session.log` line number.** |
+| `errors.log` | Error and Fault only. **First column is the `session.log` line number.** |
 | `patterns.tsv` | Distinct message templates with counts. |
 | `processes.tsv` | Record count per process. |
 | `subsystems.tsv` | Record count per subsystem. |

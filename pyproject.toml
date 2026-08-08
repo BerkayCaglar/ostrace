@@ -146,8 +146,12 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # The CLI is the one place that legitimately writes to stdout.
 "src/ostrace/cli.py" = ["T20"]
-# Tests may use assert-heavy style and need no annotations.
-"tests/**" = ["ANN", "PLR2004", "SLF"]
+# Tests may use assert-heavy style and need no annotations. They also reach into
+# private module members on purpose -- a mapping table that must stay in step
+# with an upstream library is worth asserting about directly -- and import inside
+# test bodies so that a heavy or device-only dependency is not imported by the
+# whole suite.
+"tests/**" = ["ANN", "PLC0415", "PLC2701", "PLR2004", "SLF"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "parents"
@@ -168,6 +172,14 @@ strict = true
 files = ["src", "tests"]
 warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+
+[[tool.mypy.overrides]]
+# compat.py exists in order to branch on sys.platform. A type checker narrows
+# those branches and then reports every other platform's code as unreachable --
+# which is precisely the code that most needs checking, since it cannot be run
+# here. CI type-checks all three platforms explicitly instead.
+module = ["ostrace.compat"]
+warn_unreachable = false
 
 [[tool.mypy.overrides]]
 # pymobiledevice3 ships no type information.

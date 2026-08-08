@@ -43,8 +43,17 @@ jobs:
       - name: ruff format
         run: ruff format --check --diff .
 
-      - name: mypy
-        run: mypy
+      # Type-check every target platform, not just the runner's. Windows-only
+      # and macOS-only branches are otherwise never checked at all: this job
+      # runs on Linux, and mypy narrows sys.platform to whatever it is running
+      # on. Catching an AttributeError on a name that does not exist on macOS
+      # is worth three seconds.
+      - name: mypy (linux)
+        run: mypy --platform linux
+      - name: mypy (windows)
+        run: mypy --platform win32
+      - name: mypy (macos)
+        run: mypy --platform darwin
 
   test:
     name: ${{ matrix.os }} / Python ${{ matrix.python-version }}

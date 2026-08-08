@@ -53,7 +53,7 @@ is a regression test for exactly this.
 
 ```json
 {
-  "ts": "2026-08-08T01:10:31.696620+00:00",
+  "ts": "2026-08-08T01:10:31.696620+03:00",
   "level": "NOTICE",
   "pid": 70,
   "process": "backboardd",
@@ -61,15 +61,40 @@ is a regression test for exactly this.
   "subsystem": "com.apple.CoreBrightness.ColourSensorFilterPlugin",
   "category": "default",
   "thread_id": 13570622,
-  "image_name": "/System/Library/HIDPlugins/ColourSensorFilterPlugin.plugin/...",
+  "image_path": "/System/Library/HIDPlugins/ColourSensorFilterPlugin.plugin/...",
   "platform": "ios",
   "message": "[ALS] ts=861562.666 lux=3.830<private> ..."
 }
 ```
 
-Timestamps are stored timezone-aware in UTC and converted for display. Naive
-datetimes are treated as a bug class here, which is why ruff's `DTZ` rules are
-enabled.
+`process_path` and `image_path` read backwards from the upstream field names
+they come from, and the distinction matters. `process_path` is the process
+executable; `image_path` is the binary that actually emitted the record, which is
+usually a framework or plugin loaded into that process — they differ in roughly
+nine records out of ten. Mapped the wrong way round, every plugin's output is
+attributed to whichever host process happened to load it.
+
+Keys with no value are **omitted rather than written as null**, so `subsystem`,
+`category`, `thread_id` and `image_path` are absent on the roughly 3% of records
+that carry no label. Readers must treat absent and null alike.
+
+Timestamps are timezone-aware, carrying **the device's** UTC offset. The device
+reports naive local time and the host is a different clock in a frequently
+different zone, so the offset is read from lockdown (`TimeZoneOffsetFromUTC`) and
+attached at capture. A record with no offset is rejected on read rather than
+guessed at: a plausible wrong answer is worse than a visible one. Naive datetimes
+are a bug class here, which is why ruff's `DTZ` rules are enabled.
+
+Levels are written by **name**, never by number. The numeric values of
+`Level` are spaced so that new levels can be inserted — Android's `WARN` when a
+logcat source arrives — which would silently reinterpret every existing file if
+numbers were stored. The names iOS produces are `DEBUG`, `INFO`, `NOTICE`,
+`USER_ACTION`, `ERROR` and `FAULT`.
+
+Note that Apple's own values are *not* severity-ordered: `SyslogLogLevel` on
+iOS 26 is `NOTICE=0, INFO=1, DEBUG=2, USER_ACTION=3, ERROR=16, FAULT=17`. A
+filter written against those numbers is silently wrong, which is why the mapping
+into our own ordered enum is not cosmetic.
 
 `platform` is present from day one, before there is a second platform to put in
 it. Adding a field to a documented on-disk format later invalidates every file

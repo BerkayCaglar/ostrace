@@ -18,7 +18,7 @@ does. Read [formats/](formats/) if you are writing something that consumes an
 | Phase | Deliverable | State |
 | --- | --- | --- |
 | 0 | Repository skeleton, packaging, CI, documentation, ADRs | **done** |
-| 1 | `model.py`, `sources/`, `storage/`, `paths.py`, `compat.py` | not started |
+| 1 | `model.py`, `sources/`, `storage/`, `paths.py`, `compat.py` | **done** |
 | 2 | `analysis/` and `exporters/`, six-column agent bundle | not started |
 | 3 | CLI: `devices`, `capture`, `export`, `doctor` | not started |
 | 4 | PySide6 GUI | not started |
