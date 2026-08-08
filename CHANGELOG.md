@@ -12,6 +12,20 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] - 2026-08-09
+
+The first release, and the first entry: everything here is new, so the sections
+below are the order it was built in rather than a diff against a version that
+does not exist. Where a measurement contradicted a decision, the entry says so
+rather than quietly adopting the new number.
+
+What you get is a command line (`devices`, `capture`, `doctor`, `export` with
+six formats) and a graphical viewer (`ostrace-gui`), on Windows, macOS and
+Linux, reading Apple's unified log over `os_trace_relay` — subsystem, category,
+thread and emitting library included, at DEBUG level and above.
+
 ### Added
 
 - Repository skeleton: `pyproject.toml` (hatchling + hatch-vcs, src-layout),
@@ -21,8 +35,8 @@ such: the `Record` model and the on-disk export formats documented in
   long-lived API token exists.
 - Architecture decision records 0001–0006 and the research they rest on, under
   [docs/](docs/).
-- A `ostrace` console script and `python -m ostrace`, both of which currently
-  only report a version and the fact that nothing is implemented.
+- A `ostrace` console script and `python -m ostrace`, and — once the GUI extra
+  is installed — an `ostrace-gui` entry point.
 
 - The core: `model.py` (`Record`, `Level`, `DeviceInfo`, `Gap`), `errors.py`,
   `paths.py`, `compat.py`, `devices/discovery.py`, `storage/` (gzip JSON-Lines
@@ -578,10 +592,11 @@ fixed 200 records however large the capture is.
   *marginally slower* in PySide6 (0.96–0.99×), not the biggest available win:
   the span has to be iterated from Python, so seven inbound crossings become
   one inbound plus about fourteen outbound. The `flags()` caching figure was
-  overstated by roughly 15× (~1.3×, not 20×). Hiding the horizontal header,
-  recorded there as a footnote, is worth about 1000× — and it is the *cause* of
-  the `flags()` calls the caching rule was treating. The `QListView` figures
-  were fixed in Qt 6.8, which this project already pins.
+  overstated by roughly 15× (~1.3×, not 20×). The horizontal header, recorded
+  there as a footnote, is the biggest lever there is: overriding
+  `initStyleOptionForIndex` is worth 541×, and it is the *cause* of the
+  `flags()` calls the caching rule was treating. The `QListView` figures were
+  fixed in Qt 6.8, which this project already pins.
 
   The decision itself — PySide6 with a hand-written filtered model — is
   unaffected.
@@ -675,4 +690,5 @@ have. Most of it is invisible until it is missing:
   or deleting `main` -- with no bypass, since an admin exemption set to "always"
   is the same as not having the rule.
 
-[Unreleased]: https://github.com/BerkayCaglar/ostrace/commits/main
+[Unreleased]: https://github.com/BerkayCaglar/ostrace/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/BerkayCaglar/ostrace/releases/tag/v0.1.0
