@@ -49,8 +49,6 @@ because the obvious assumption is wrong in each case.
   come from a separate task; waiting for the next record in order to notice that
   time has passed is a hang, not a timeout.
 
-The CLI subcommands are still declared but unimplemented; they land in phase 3.
-
 ### Added (phase 3a)
 
 - `ostrace doctor` — diagnoses why a device cannot be reached, in dependency

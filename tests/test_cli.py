@@ -232,9 +232,21 @@ class TestCapture:
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
+        """Patched where it is *used*, not where it is defined.
+
+        `os_trace` binds `open_lockdown` at import, so patching the discovery
+        module leaves the source calling the real one -- and this test then
+        passes or fails according to whether the machine running it happens to
+        have a usbmux, which is precisely the dependency the suite must not
+        have. It passed on Windows and failed on Linux CI for that reason.
+        """
+
         async def missing(udid: str | None = None) -> object:
             raise NoDeviceFoundError("no device found")
 
-        monkeypatch.setattr("ostrace.devices.discovery.open_lockdown", missing)
+        monkeypatch.setattr("ostrace.sources.os_trace.open_lockdown", missing)
         assert cli.main(["capture", "--quiet"]) == cli.EXIT_ERROR
-        assert "charge-only cables" in capsys.readouterr().err
+
+        stderr = capsys.readouterr().err
+        assert "no device found" in stderr
+        assert "charge-only cables" in stderr
