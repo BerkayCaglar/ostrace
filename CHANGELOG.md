@@ -199,6 +199,58 @@ fixed 200 records however large the capture is.
   nothing. Everything else is a summary, and a default that quietly discards
   data is the wrong default.
 
+### Added (phase 4, live capture)
+
+- **The viewer captures from a device.** `Capture` streams from an attached
+  iPhone into the table and into a session file at the same time, using the
+  same `ostrace.capture.capture` the CLI runs. Verified on an `iPhone18,2`:
+  1,191 records in eight seconds, device identified in the status bar,
+  disconnect clean.
+
+  One capture loop, not two. It is the only place that knows a device stream is
+  two sockets and that both must be released, in order, on every exit path
+  including cancellation — a lesson this project has already paid for once.
+
+- **The device stream never touches the GUI thread.** It runs on a thread with
+  an event loop of its own and reaches the window through a `deque`: the
+  producer appends, a 50 ms timer drains, one `beginInsertRows` per batch. At
+  1,600 records a second that is about eighty rows per batch and twenty model
+  updates a second, against sixteen hundred if each record arrived on its own
+  signal. **No Qt signal carries a record**; signals are for lifecycle only.
+
+- **Pause freezes the view and nothing else.** The capture keeps running and
+  keeps writing every record to disk, so the promise is real rather than
+  rhetorical. What a long pause cannot do is hold everything in memory, so the
+  queue is bounded — and when the bound bites, the dropped records are
+  announced as an **eviction**, not a gap, because they are in the session file.
+  The two look alike on screen and mean opposite things.
+
+- Auto-follow derived from the scrollbar on every tick rather than stored as a
+  mode. A stored flag can disagree with the view; Console.app kept one and
+  shipped an eleven-month bug where selecting a row silently stopped the tail.
+
+- Closing the window releases the device.
+
+### Fixed (phase 4, live capture)
+
+- **Disconnecting a capture that had already ended crashed.** The capture ends
+  by itself when the device is unplugged, and the obvious next thing anyone
+  does is press Disconnect — which reached across to an event loop that had
+  already closed and raised `RuntimeError: Event loop is closed`.
+
+- The row cap now trims with `beginRemoveRows` rather than a full model reset.
+  Resetting is easier and throws away the user's selection and scroll position
+  every time the cap is reached — which, on a live capture, is every couple of
+  minutes forever, and always while they are reading something.
+
+### Changed (phase 4, live capture)
+
+- `capture()` takes an `on_item` callback, so a live view can show what is
+  being captured without a second loop over the device.
+- The banner's button carries *what it does* rather than the caller inferring
+  it from the wording. There are several of these messages now, and matching on
+  the text to decide what the button meant is a bug waiting for a reword.
+
 ### Added (phase 4, the viewer opens a capture)
 
 - **`ostrace-gui` now shows a log.** `Open Capture…` reads a session directory

@@ -60,10 +60,10 @@ For the graphical viewer:
 pipx install "ostrace[gui]"
 ```
 
-The viewer is **under construction**, but it opens: `ostrace-gui` reads a
-capture, colours it by severity, filters it, and shows every field of the
-selected record. Live capture from a device is not wired to it yet -- use
-`ostrace capture` and open the file.
+`ostrace-gui` captures from an attached device, opens a saved capture, colours
+by severity, filters, and shows every field of the selected record. Pausing
+freezes the view only -- the capture keeps running and keeps writing to the
+session file, so nothing is lost by looking away.
 
 ### Requirements
 

@@ -55,6 +55,7 @@ from ostrace.model import Gap, Level, Record
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+    from datetime import datetime
 
     from PySide6.QtCore import QObject
 
@@ -322,27 +323,67 @@ class RecordModel(QAbstractTableModel):
         return True
 
     def _trim(self) -> None:
-        """Drop the oldest rows once the cap is exceeded, in one operation."""
+        """Drop the oldest rows once the cap is exceeded, in one operation.
+
+        A removal rather than a reset. Resetting is easier and throws away the
+        user's selection and scroll position every time the cap is reached --
+        which, on a live capture, is every couple of minutes forever, and
+        always while they are reading something.
+        """
         limit = int(self._row_cap * (1 + TRIM_MARGIN))
         if len(self._rows) <= limit:
             return
 
         drop = len(self._rows) - self._row_cap
-        # Never cut in the middle of anything: whatever is dropped, the row
+        # Never cut in the middle of anything: whatever is dropped, a row
         # boundary is where it is dropped.
         dropped = self._rows[:drop]
+        count = sum(1 for row in dropped if isinstance(row, Record))
         newest = max(
             (row.timestamp for row in dropped if isinstance(row, Record)),
             default=None,
         )
-        self._evicted += sum(1 for row in dropped if isinstance(row, Record))
 
-        self.beginResetModel()
+        # `_visible` is ascending, so the visible rows being removed are a
+        # contiguous prefix of it -- which is what makes this one removal
+        # rather than one per row.
+        gone = bisect_left(self._visible, drop)
+        if gone:
+            self.beginRemoveRows(QModelIndex(), 0, gone - 1)
         self._rows = self._rows[drop:]
+        self._visible = [index - drop for index in self._visible[gone:]]
+        if gone:
+            self.endRemoveRows()
+
         if newest is not None:
-            self._rows.insert(0, Eviction(count=self._evicted, through=newest))
-        self._rescan()
-        self.endResetModel()
+            self.note_eviction(count, newest)
+
+    def note_eviction(self, count: int, through: datetime) -> None:
+        """Record that ``count`` records left the view but not the capture.
+
+        Called by `_trim` for the model's own cap, and by `gui.pump` for
+        records dropped from a paused queue. Both mean the same thing and get
+        the same row: those records are on disk, and the view is bounded.
+
+        One notice, updated. Twenty evictions are one fact about the view, not
+        twenty rows of noise at the top of it -- and updating in place rather
+        than resetting keeps the selection the user is reading with.
+        """
+        if count <= 0:
+            return
+        self._evicted += count
+        notice = Eviction(count=self._evicted, through=through)
+
+        if self._rows and isinstance(self._rows[0], Eviction):
+            self._rows[0] = notice
+            top = self.index(0, 0)
+            self.dataChanged.emit(top, self.index(0, len(COLUMNS) - 1))
+            return
+
+        self.beginInsertRows(QModelIndex(), 0, 0)
+        self._rows.insert(0, notice)
+        self._visible = [0, *(index + 1 for index in self._visible)]
+        self.endInsertRows()
 
     # -- filtering -------------------------------------------------------
 

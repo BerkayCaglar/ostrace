@@ -48,13 +48,14 @@ class CaptureResult:
         return (self.ended_at - self.started_at).total_seconds()
 
 
-async def capture(
+async def capture(  # noqa: PLR0913 -- five knobs and a source, all keyword-only
     source: LogSource,
     *,
     destination: Path | None = None,
     duration: float | None = None,
     max_records: int | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    on_item: Callable[[Record | Gap], None] | None = None,
 ) -> CaptureResult:
     """Stream from ``source`` into a session file until told to stop.
 
@@ -66,6 +67,13 @@ async def capture(
     Both the session and the source are closed on every exit path, including
     cancellation, so the sidecar is always finalised and the device socket is
     always released.
+
+    ``on_item`` receives every record and gap as it is written, in stream
+    order. It exists so that a live view can show what is being captured
+    without a second loop over the device: there is one stream, one place that
+    understands its lifecycle, and one session file. It is called on whatever
+    thread is running this coroutine, so an implementation that hands work to
+    another thread should do the cheapest possible thing here.
     """
     device = await source.device_info()
     started_at = device.now()
@@ -87,6 +95,8 @@ async def capture(
             try:
                 async with asyncio.timeout(duration):
                     async for item in stream:
+                        if on_item is not None:
+                            on_item(item)
                         if isinstance(item, Record):
                             writer.write(item)
                             records += 1

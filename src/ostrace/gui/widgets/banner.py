@@ -22,6 +22,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from PySide6.QtWidgets import QWidget
 
 __all__ = ["Banner"]
@@ -51,17 +53,40 @@ class Banner(QFrame):
         layout.addWidget(self._label, stretch=1)
 
         self._action = QPushButton(self)
-        self._action.clicked.connect(self.dismissed)
+        self._action.clicked.connect(self.act)
         layout.addWidget(self._action)
 
+        self._handler: Callable[[], None] | None = None
         self.hide()
 
-    def show_message(self, text: str, action: str | None = None) -> None:
-        """Display ``text``, with ``action`` as the way out if there is one."""
+    def show_message(
+        self,
+        text: str,
+        action: str | None = None,
+        *,
+        on_action: Callable[[], None] | None = None,
+    ) -> None:
+        """Display ``text``, with ``action`` as the way out if there is one.
+
+        The button carries *what it does* rather than the caller inferring it
+        from the wording afterwards. There are several of these messages now --
+        a filter hiding everything, a paused view, a capture that stopped --
+        and matching on the text to decide what the button meant is a bug
+        waiting for someone to reword a sentence.
+        """
         self._label.setText(text)
         self._action.setText(action or "")
         self._action.setVisible(action is not None)
+        self._handler = on_action
         self.show()
+
+    def act(self) -> None:
+        """Take the way out, whatever it was, and dismiss."""
+        handler, self._handler = self._handler, None
+        self.hide()
+        if handler is not None:
+            handler()
+        self.dismissed.emit()
 
     @property
     def text(self) -> str:

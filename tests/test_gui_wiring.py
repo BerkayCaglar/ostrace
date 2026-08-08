@@ -138,7 +138,7 @@ def test_a_filter_that_hides_everything_offers_a_way_back(window: MainWindow) ->
     assert window.model.rowCount() == 0
     assert "hidden by the filter" in window.banner.text
 
-    window.banner.dismissed.emit()
+    window.banner.act()
     window._apply_filter()
 
     assert window.model.rowCount() == 3000

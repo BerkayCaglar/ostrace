@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QModelIndex, Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence, QShowEvent
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -41,19 +41,24 @@ from PySide6.QtWidgets import (
 
 from ostrace.errors import OstraceError
 from ostrace.gui.filters import Filter
+from ostrace.gui.live import CaptureThread
 from ostrace.gui.loader import CaptureLoader
 from ostrace.gui.models import RecordModel
+from ostrace.gui.pump import Pump
 from ostrace.gui.theme import Scheme
 from ostrace.gui.widgets.banner import Banner
 from ostrace.gui.widgets.detail_pane import DetailPane
 from ostrace.gui.widgets.filter_bar import FilterBar
 from ostrace.gui.widgets.log_table import LogTable
 from ostrace.gui.widgets.status_bar import StatusBar
+from ostrace.model import DeviceInfo
 from ostrace.paths import sessions_dir
 from ostrace.storage.capture import Capture, open_capture
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget as QWidgetType
+
+    from ostrace.sources.base import LogSource
 
 __all__ = ["MainWindow"]
 
@@ -65,6 +70,14 @@ _TITLE = "ostrace"
 #: Windows' is fractional.
 _TABLE_STRETCH = 3
 _DETAIL_STRETCH = 1
+
+#: How long to wait for the capture thread to release the device. Its teardown
+#: is a socket close rather than a network round trip, so this is generous.
+_STOP_TIMEOUT_MS = 5_000
+
+#: How near the bottom still counts as "at the bottom" for auto-follow. A few
+#: pixels of slack, because a scrollbar rarely lands exactly on its maximum.
+_FOLLOW_SLACK = 4
 
 #: How long the filter waits for the typing to stop. Long enough that a word is
 #: one rescan rather than five, short enough that the table does not feel
@@ -116,11 +129,12 @@ class MainWindow(QMainWindow):
 
         self.capture: Capture | None = None
         self._loader: CaptureLoader | None = None
+        self._showing_filter_notice = False
+        self._capture_thread: CaptureThread | None = None
+        self._pump: Pump | None = None
         self.model = RecordModel(scheme, parent=self)
         self.table.setModel(self.model)
-        selection = self.table.selectionModel()
-        if selection is not None:
-            selection.currentRowChanged.connect(self._on_current_row_changed)
+        self._connect_selection()
 
         self._filter_debounce = QTimer(self)
         self._filter_debounce.setSingleShot(True)
@@ -131,8 +145,27 @@ class MainWindow(QMainWindow):
         self._build_menus()
 
         self.filter_bar.changed.connect(self._on_filter_changed)
-        self.banner.dismissed.connect(self._on_banner_dismissed)
         self.action_open.triggered.connect(self.choose_capture)
+        self.action_capture.triggered.connect(self.capture_from_device)
+        self.action_disconnect.triggered.connect(self.stop_capture)
+        self.action_pause.toggled.connect(self.set_paused)
+        self._set_capturing(capturing=False)
+
+    def _connect_selection(self) -> None:
+        """Re-attach to the selection model, which is replaced with the model."""
+        selection = self.table.selectionModel()
+        if selection is not None:
+            selection.currentRowChanged.connect(self._on_current_row_changed)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        """Release the device before the window goes.
+
+        Without this the capture thread outlives the window it was reporting
+        to, and the device is left streaming into a queue nobody drains -- the
+        exact failure this project already paid for once at the source level.
+        """
+        self.stop_capture()
+        super().closeEvent(event)
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
         """Split the panes on first show, when there is a height to divide.
@@ -308,12 +341,11 @@ class MainWindow(QMainWindow):
             self.banner.show_message(f"Could not open {path.name}: {exc}", "Dismiss")
             return
 
+        self.stop_capture()
         self.capture = capture
         self.model = RecordModel(self.scheme, parent=self)
         self.table.setModel(self.model)
-        selection = self.table.selectionModel()
-        if selection is not None:
-            selection.currentRowChanged.connect(self._on_current_row_changed)
+        self._connect_selection()
         self.detail.clear()
         self.status.set_device(capture.device)
 
@@ -347,6 +379,145 @@ class MainWindow(QMainWindow):
             f"Stopped reading: {message}. Everything read before that point is shown.",
             "Dismiss",
         )
+
+    # -- live capture ----------------------------------------------------
+
+    def capture_from_device(self) -> None:
+        """Start capturing from whatever device is attached.
+
+        No device is not an error worth a dialog: it is the ordinary state of a
+        program whose subject is a phone that spends most of its time in a
+        pocket. It gets the same banner every other invisible state gets, with
+        the same way out.
+        """
+        try:
+            source = self._build_source()
+        except OstraceError as exc:
+            hint = f" {exc.hint}" if getattr(exc, "hint", None) else ""
+            self.banner.show_message(f"{exc}{hint}", "Retry", on_action=self.capture_from_device)
+            return
+        self.start_capture(source)
+
+    def _build_source(self) -> LogSource:
+        """The live source. Imported here, not at module scope.
+
+        `ostrace.sources.os_trace` refuses to be imported under ``-O``, and it
+        pulls in pymobiledevice3 -- about forty packages. Neither belongs in the
+        path that merely opens a saved capture.
+        """
+        from ostrace.sources.os_trace import OsTraceSource  # noqa: PLC0415
+
+        return OsTraceSource()
+
+    def start_capture(self, source: LogSource, *, destination: Path | None = None) -> None:
+        """Begin a live capture into a fresh model.
+
+        The records go to a session file as well as to the table -- the same
+        `ostrace.capture.capture` the CLI runs. A live view that keeps nothing
+        would make "pause" a promise it cannot honour and would lose everything
+        the moment the window closed. ``destination`` overrides where that file
+        goes; by default `paths` decides, as it does for the CLI.
+        """
+        self.stop_capture()
+
+        self.model = RecordModel(self.scheme, parent=self)
+        self.table.setModel(self.model)
+        self._connect_selection()
+        self.detail.clear()
+        self.capture = None
+        self.setWindowTitle(f"{source.name} — {_TITLE}")
+
+        self._capture_thread = CaptureThread(source, destination=destination)
+        self._pump = Pump(self._capture_thread.queue, self.model, parent=self)
+        self._pump.rate_changed.connect(self._on_rate)
+        self._pump.overflowed.connect(self._on_pause_overflow)
+        self._capture_thread.identified.connect(self._on_identified)
+        self._capture_thread.failed.connect(self._on_capture_failed)
+        self._capture_thread.completed.connect(self._on_capture_finished)
+
+        self._capture_thread.start()
+        self._pump.start()
+        self._set_capturing(capturing=True)
+
+    def stop_capture(self) -> None:
+        """Release the device.
+
+        Named after its consequence rather than "stop": releasing a device
+        releases the lockdown session *and* the ``os_trace_relay`` service, and
+        a control that reads as the opposite of "pause" invites the user to
+        press it expecting to be able to press it back.
+        """
+        if self._capture_thread is None:
+            return
+        self._capture_thread.stop()
+        # Bounded: the capture's own teardown is a socket close, not a network
+        # round trip. Waiting at all is what stops a second capture starting
+        # while the first still holds the device.
+        self._capture_thread.wait(_STOP_TIMEOUT_MS)
+        if self._pump is not None:
+            self._pump.stop()
+        self._capture_thread = None
+        self._set_capturing(capturing=False)
+
+    def set_paused(self, paused: bool) -> None:
+        """Freeze the view. The device is not consulted."""
+        if self._pump is not None:
+            self._pump.set_paused(paused)
+        if paused:
+            self.banner.show_message(
+                "The view is paused. The capture is still running and still "
+                "writing every record to the session file.",
+                "Resume",
+                on_action=lambda: self.action_pause.setChecked(False),
+            )
+        else:
+            self.banner.hide()
+
+    def _set_capturing(self, *, capturing: bool) -> None:
+        self.action_capture.setEnabled(not capturing)
+        self.action_disconnect.setEnabled(capturing)
+        self.action_pause.setEnabled(capturing)
+        if not capturing:
+            self.action_pause.setChecked(False)
+            self.status.set_rate(None)
+
+    def _on_identified(self, device: object) -> None:
+        if isinstance(device, DeviceInfo):
+            self.status.set_device(device)
+
+    def _on_rate(self, rate: float) -> None:
+        self.status.set_rate(rate)
+        self.status.set_volume(self.model.retained)
+        self.status.set_gap_count(self.model.gaps)
+        self._follow()
+
+    def _on_pause_overflow(self, dropped: int) -> None:
+        self.banner.show_message(
+            f"The view is paused and {dropped:,} records did not fit. They are "
+            f"in the session file, not lost.",
+            "Resume",
+            on_action=lambda: self.action_pause.setChecked(False),
+        )
+
+    def _on_capture_failed(self, message: str) -> None:
+        self.banner.show_message(f"Capture stopped: {message}", "Dismiss")
+        self._set_capturing(capturing=False)
+
+    def _on_capture_finished(self, result: object) -> None:
+        del result
+        self._set_capturing(capturing=False)
+
+    def _follow(self) -> None:
+        """Stay at the bottom, but only if that is where the user already is.
+
+        Derived from the scrollbar on every tick rather than stored as a mode.
+        A stored flag can disagree with the view -- Console.app kept one and
+        shipped an eleven-month bug where selecting a row silently stopped the
+        tail.
+        """
+        bar = self.table.verticalScrollBar()
+        if bar.value() >= bar.maximum() - _FOLLOW_SLACK:
+            self.table.scrollToBottom()
 
     # -- filtering, selection, state -------------------------------------
 
@@ -418,17 +589,6 @@ class MainWindow(QMainWindow):
         # does have two readings of one moment, will pass it.
         self.detail.show_item(self.model.row_at(current.row()))
 
-    def _on_banner_dismissed(self) -> None:
-        """The banner's one button, which means different things by context.
-
-        When a filter is hiding everything the way out *is* clearing it. For a
-        notice about the capture itself there is nothing to undo, so the button
-        only dismisses.
-        """
-        if self.banner.text.startswith("All "):
-            self.filter_bar.clear()
-        self.banner.hide()
-
     def _update_banner(self) -> None:
         """The two states that look exactly like a quiet device.
 
@@ -440,6 +600,9 @@ class MainWindow(QMainWindow):
             self.banner.show_message(
                 f"All {self.model.retained:,} records are hidden by the filter.",
                 "Clear filter",
+                on_action=self.filter_bar.clear,
             )
-        elif self.banner.text.startswith("All "):
+            self._showing_filter_notice = True
+        elif self._showing_filter_notice:
             self.banner.hide()
+            self._showing_filter_notice = False

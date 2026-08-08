@@ -255,13 +255,27 @@ def test_the_banner_is_hidden_until_there_is_something_to_say(window: MainWindow
 def test_the_banner_offers_the_way_out_of_a_filter(window: MainWindow) -> None:
     """A banner without a recovery action is a toolbar icon with extra steps."""
     window.filter_bar._search.setText("something that matches nothing")
-    assert not window.filter_bar.is_empty
+    window.banner.show_message(
+        "All records are hidden by the filter",
+        "Clear filter",
+        on_action=window.filter_bar.clear,
+    )
+    # Read into locals rather than asserting the same property twice. mypy
+    # narrows a member expression on an assert and does not un-narrow it across
+    # the call that changes it, so the second assertion would be reported as
+    # unreachable -- which is a fair complaint about the test, not the code.
+    filtered_before, shown = window.filter_bar.is_empty, window.banner.text
 
-    window.banner.show_message("All records are hidden by the filter", "Clear filter")
-    assert window.banner.text
-    window.banner.dismissed.emit()
+    # Press the button, rather than emitting the signal it happens to send.
+    # What the button *does* is carried with the message, so a test that fires
+    # the signal directly would be testing a path no user can take.
+    window.banner.act()
+    filtered_after, hidden = window.filter_bar.is_empty, window.banner.text
 
-    assert window.filter_bar.is_empty
+    assert not filtered_before
+    assert shown
+    assert filtered_after
+    assert not hidden
 
 
 def test_clearing_the_filter_emits_once_not_once_per_field(window: MainWindow) -> None:
