@@ -146,13 +146,12 @@ def test_a_filter_that_hides_everything_offers_a_way_back(window: MainWindow) ->
 
 
 def test_selection_follows_the_record_across_a_filter_change(window: MainWindow) -> None:
-    """The clearest chance in this phase to be better than the established tools.
+    """A filter change must not cost the user their place.
 
-    Wireshark has had this open since 3.0.7, lnav clamps row ordinals and
-    teleports, and Logcat re-appends its whole document so every keystroke in
-    the filter field throws the user to the bottom. Here the selection is
-    anchored to the *record*, so a filter that keeps it keeps the user where
-    they were reading.
+    Wireshark has had this open since 3.0.7 and Logcat rebuilds its document on
+    each filter change; lnav does solve it, by anchoring on the timestamp. Here
+    the selection is anchored to the *record*, so a filter that keeps it keeps
+    the user where they were reading.
     """
     load(window, ERRORS)
     chosen = next(

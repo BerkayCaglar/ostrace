@@ -147,6 +147,20 @@ such: the `Record` model and the on-disk export formats documented in
   the same wound and their savings do not add up. Corrected in `gui.md` §11,
   ADR 0004, the research note and the source.
 
+- **A claim about another project was wrong.** `docs/design/gui.md` §5 said
+  that nobody had solved keeping the user's place across a filter change, and
+  that *"lnav clamps row ordinals and teleports"*. lnav does solve it, by
+  anchoring on the log message's timestamp — its maintainer: *"The intention is
+  to preserve the location"* — in the view where a timestamp is parsed, and it
+  deliberately does not attempt it in the view where one is not. The claim was
+  repeated in `gui/models.py` and in a test docstring; all three are corrected.
+  Wireshark #16318 really is still open.
+
+  Anchoring on record identity instead of on a timestamp turns out not to be
+  the accuracy win the section implied: across two captures off an `iPhone18,2`
+  — 39,786 records at roughly 1,000/s — **every timestamp was unique**. The
+  narrower reason stands, and is what the section says now.
+
 - Documentation that had drifted from the code: three documents promised a
   `syslog_relay` fallback source that was never built, the research note had
   the `HISTORICAL` stream flag's default backwards, `CONTRIBUTING.md` listed

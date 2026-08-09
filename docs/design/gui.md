@@ -253,11 +253,20 @@ eviction notice and the marker exemption — not on the original number.
 to a row number.** After a rescan, resolve the focused record to its new row;
 if it did not survive, fall back to the nearest survivor.
 
-Nobody has solved this: Wireshark #16318 has been open since 3.0.7 (*"requires
-some Qt interface wizardry"*), lnav clamps row ordinals and teleports, and
-Logcat clears its document and re-appends, so **every keystroke in the filter
-field throws the user to the bottom**. This is the clearest opportunity in the
-whole phase to be better than the established tools, and it is worth real time.
+This is rare, though an earlier draft of this section overstated how rare by
+claiming nobody had solved it. **lnav has**, and by a different route: it
+anchors on the log message's *timestamp*, which works in its LOG view and which
+it deliberately does not attempt in TEXT view, where timestamps are not parsed.
+Wireshark #16318 is genuinely still open since 3.0.7 (*"requires some Qt
+interface wizardry"*), and Logcat rebuilds its document on each filter change.
+
+Anchoring on the record's position in the source sequence rather than on its
+timestamp is not a claim to be more accurate. Measured across two captures off
+an `iPhone18,2` at roughly 1,000 records/s — 39,786 records — **every timestamp
+was unique**, so timestamp anchoring would have resolved every one of them. The
+reason to use identity is narrower: it needs nothing parsed out of the record,
+so it cannot degrade on a source whose timestamps are coarse, absent or
+non-monotonic, and there is no tie to break.
 
 **0.1.0 ships the fielded bar, not an expression language.** This section
 argued for one copy-pasteable text field with history, citing Google's stated

@@ -410,9 +410,10 @@ class RecordModel(QAbstractTableModel):
         that point in the log, and that point still exists even when the record
         they clicked does not.
 
-        Nobody surveyed does this: Wireshark has had it open since 3.0.7, lnav
-        clamps row ordinals and teleports, and Logcat re-appends its whole
-        document so every keystroke in the filter field jumps to the bottom.
+        Uncommon rather than unheard of, which is what this comment used to
+        say: lnav does it by anchoring on the message timestamp, in the view
+        where it parses one. Wireshark has had it open since 3.0.7, and Logcat
+        rebuilds its document on each filter change.
 
         ``_visible`` is ascending by construction, so this is a binary search
         rather than the scan the rescan just did.
