@@ -27,18 +27,28 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     Qt,
 )
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QPalette
 from PySide6.QtWidgets import (
     QHeaderView,
+    QStyle,
     QStyleOptionHeader,
     QStyleOptionViewItem,
     QTableView,
 )
 
 from ostrace.gui.columns import Column
+from ostrace.gui.models import RecordModel
 from ostrace.gui.shortcuts import BINDINGS, RELOCATED
-from ostrace.gui.widgets.log_table import FastHeader, LogTable, MiddleElidingDelegate
+from ostrace.gui.theme import Scheme, palette_for, selection_row, severity_for
+from ostrace.gui.widgets.log_table import (
+    FastHeader,
+    LogTable,
+    MiddleElidingDelegate,
+    SeverityDelegate,
+)
 from ostrace.gui.windows.main import MainWindow
+from ostrace.model import Level
+from tests.helpers import make_record
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
@@ -276,7 +286,30 @@ def test_column_widths_come_from_the_font_not_from_pixels(qt_app: QApplication) 
 
     table.setModel(_CountingModel(rows=1))
     unit = table.fontMetrics().horizontalAdvance("0")
-    assert table.columnWidth(0) == 13 * unit
+    assert table.columnWidth(0) > 13 * unit, "the character budget, plus the style's own margins"
+
+
+def test_the_time_column_holds_a_whole_timestamp(qt_app: object) -> None:
+    """The column budget is characters; the style then insets the text.
+
+    Spending the budget on the column and the margins on the text elides the
+    last character of any value sized to fit exactly, which the timestamp is.
+    It did not show while the body font was proportional -- `09:14:02.118` is
+    mostly colons and full stops, narrower than the `0` the budget counts in --
+    and it appeared the moment the body became monospaced, where every
+    character is the unit.
+
+    Asserted as a relation rather than a number: the offscreen plugin has an
+    empty font database on Windows and reports a fictional advance, which is
+    fine here because both sides of the comparison use the same fiction.
+    """
+    del qt_app
+    table = LogTable()
+    table.setModel(_CountingModel(rows=1))
+
+    inset = table.style().pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, None, table) + 1
+    available = table.columnWidth(int(Column.TIME)) - 2 * inset
+    assert available >= table.fontMetrics().horizontalAdvance("09:14:02.118")
 
 
 # -- status, banner, filter --------------------------------------------------
@@ -353,3 +386,46 @@ def test_the_process_column_keeps_the_pid_when_it_does_not_fit(qt_app: QApplicat
     assert table.textElideMode() == Qt.TextElideMode.ElideRight, (
         "the message column still wants its beginning"
     )
+
+
+def test_a_selected_row_keeps_the_colour_of_its_level(qt_app: object) -> None:
+    """Selecting a row used to delete the one signal the table exists to carry.
+
+    `QStyledItemDelegate.initStyleOption` puts the model's `ForegroundRole` into
+    the palette's `Text`, and the style then draws a selected row with
+    `HighlightedText` instead -- so clicking an Error to read it was the moment
+    it stopped looking like an Error. Only the glyph survived.
+
+    Both roles carry the severity brush now. What makes that safe rather than
+    merely different is the table's own `Highlight`, which is
+    `theme.selection_row`; `test_gui_theme` asserts every level clears AA on it.
+    """
+    del qt_app
+    model = RecordModel(Scheme.LIGHT)
+    model.append([make_record(0, level=Level.ERROR)])
+    table = LogTable(scheme=Scheme.LIGHT)
+    table.setModel(model)
+
+    index = model.index(0, int(Column.MESSAGE))
+    option = QStyleOptionViewItem()
+    delegate = table.itemDelegate()
+    # Asserted rather than cast: the whole point is that the table's default
+    # delegate is this one, so a change that dropped it should fail here.
+    assert isinstance(delegate, SeverityDelegate)
+    delegate.initStyleOption(option, index)
+
+    expected = severity_for(Level.ERROR, Scheme.LIGHT).foreground
+    assert option.palette.color(QPalette.ColorRole.Text) == expected
+    assert option.palette.color(QPalette.ColorRole.HighlightedText) == expected
+
+
+def test_the_table_selection_is_not_the_application_highlight(qt_app: object) -> None:
+    """A saturated bar across a log row destroys the severity colours under it.
+
+    The application's `Highlight` stays saturated, because a menu or a text
+    selection that used a wash would read as nothing having happened.
+    """
+    del qt_app
+    table = LogTable(scheme=Scheme.DARK)
+    assert table.palette().highlight().color() == selection_row(Scheme.DARK)
+    assert table.palette().highlight().color() != palette_for(Scheme.DARK).highlight().color()

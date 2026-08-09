@@ -41,6 +41,7 @@ class StatusBar(QStatusBar):
 
         self._rate = QLabel(_IDLE, self)
         self._device = QLabel(_NO_DEVICE, self)
+        self._shown = QLabel("", self)
         self._volume = QLabel("0 records", self)
         self._gaps = QLabel("", self)
 
@@ -48,7 +49,7 @@ class StatusBar(QStatusBar):
         # a transient message is posted on the left, which is what showMessage
         # is for. A readout that a status message can push off the bar is not
         # a readout.
-        for widget in (self._rate, self._device, self._volume, self._gaps):
+        for widget in (self._rate, self._device, self._shown, self._volume, self._gaps):
             self.addPermanentWidget(widget)
 
         self.set_gap_count(0)
@@ -68,6 +69,28 @@ class StatusBar(QStatusBar):
         if bytes_on_disk is not None:
             text += f" · {bytes_on_disk / 1_000_000:,.1f} MB"
         self._volume.setText(text)
+
+    def set_shown(self, shown: int, retained: int) -> None:
+        """How much of what is held is actually on screen.
+
+        The one number every competing tool is missing and the one whose absence
+        produces the recurring "where did my logs go". Wireshark has said
+        ``Displayed: N`` for twenty years; Console, Xcode and Logcat say nothing,
+        so a filter that is one character too narrow looks exactly like a device
+        that stopped talking.
+
+        ``hidden_by_filter`` has been on the model since it was written and
+        nothing in the application ever read it.
+
+        Silent when nothing is hidden: a count that is always there teaches the
+        eye to skip it, and unlike the gap count there is no ambiguity to guard
+        against -- "hiding nothing" and "not filtering" are the same state.
+        """
+        self._shown.setText("" if shown == retained else f"{shown:,} of {retained:,} shown")
+
+    @property
+    def shown_text(self) -> str:
+        return self._shown.text()
 
     def set_gap_count(self, gaps: int) -> None:
         """Always rendered -- see the module docstring."""

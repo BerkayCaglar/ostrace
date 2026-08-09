@@ -18,6 +18,8 @@ remains unreachable in CI is only the platform's own delivery of that signal.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from ostrace.model import Level
@@ -27,12 +29,15 @@ pytest.importorskip("PySide6", reason="the gui extra is not installed")
 from PySide6.QtGui import QPalette
 
 from ostrace.gui.theme import (
+    TOKENS,
     Scheme,
     apply_theme,
     contrast_ratio,
     mark_tint,
     palette_for,
+    selection_row,
     severity_for,
+    stylesheet_for,
 )
 
 pytestmark = pytest.mark.gui
@@ -186,3 +191,60 @@ def test_the_theme_reaches_tooltips(qt_app: object) -> None:
         intended = palette_for(scheme)
         for role in (QPalette.ColorRole.ToolTipBase, QPalette.ColorRole.ToolTipText):
             assert QToolTip.palette().color(role) == intended.color(role), role.name
+
+
+@pytest.mark.parametrize("scheme", list(Scheme))
+@pytest.mark.parametrize("level", list(Level))
+def test_every_severity_stays_legible_on_the_selected_row(scheme: Scheme, level: Level) -> None:
+    """The table's selection is a wash, not the saturated application highlight.
+
+    Which is only safe if the severity colours survive being drawn on it -- and
+    they have to survive, because `SeverityDelegate` deliberately keeps them
+    there rather than letting the style substitute `HighlightedText`. A log is
+    read by scanning, and a selection that deletes the severity of the one row
+    the user clicked deletes it exactly where they were looking.
+    """
+    ratio = contrast_ratio(severity_for(level, scheme).foreground, selection_row(scheme))
+    assert ratio >= AA, f"{level.name} on the selected row in {scheme}: {ratio:.2f}:1"
+
+
+@pytest.mark.parametrize("scheme", list(Scheme))
+def test_the_stylesheet_resolves_every_token_it_names(scheme: Scheme) -> None:
+    """`Template.substitute` raises on a name that is not a token.
+
+    Which is the point of using it: QSS is made of braces, so an f-string would
+    need every brace doubled, and a mis-spelled colour in a stylesheet fails
+    silently -- Qt discards the rule and everything after it with no warning.
+    """
+    sheet = stylesheet_for(scheme)
+    assert "$" not in sheet, "a token was left unsubstituted"
+    # This scheme's colours, and not the other scheme's: a sheet built once and
+    # cached would leave every styled widget behind on a theme switch.
+    assert TOKENS[scheme]["surface"] in sheet
+    other = Scheme.DARK if scheme is Scheme.LIGHT else Scheme.LIGHT
+    assert TOKENS[other]["surface"] not in sheet
+
+
+@pytest.mark.parametrize("scheme", list(Scheme))
+def test_the_stylesheet_never_touches_the_table(scheme: Scheme) -> None:
+    """Two measured rules, both of which fail silently if broken.
+
+    A stylesheet giving `QTableView` a box model makes its viewport
+    non-blittable: every scroll notch then repaints the whole viewport rather
+    than the two percent that moved, measured at **1.6 ms to 30.8 ms** on the
+    real model at 200,000 rows -- about 32 frames per second while a capture is
+    streaming, and nothing in the code looks wrong.
+
+    A `::item` rule carrying a background, border or colour silently discards
+    the model's own `BackgroundRole` and `ForegroundRole`, which is where every
+    severity colour and the mark tint come from.
+
+    So the table is styled through the palette and the sheet leaves it alone.
+    """
+    sheet = stylesheet_for(scheme)
+    assert "QTableView" not in sheet
+    assert "QAbstractScrollArea" not in sheet
+    # `QComboBox QAbstractItemView` is the documented way to reach a combo's
+    # popup and is not an item view with model colours to lose. A bare one
+    # would also catch the log table.
+    assert re.findall(r"(?<!QComboBox )QAbstractItemView", sheet) == []

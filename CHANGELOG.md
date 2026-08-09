@@ -25,6 +25,66 @@ such: the `Record` model and the on-disk export formats documented in
   only when there are none: a file that appears solely on bad news cannot be
   told from a file nobody wrote.
 
+- **A toolbar**, which `docs/design/gui.md` §1 has specified since before there
+  was any code and phase 4 did not build. Every primary verb — capture, pause,
+  disconnect, open, export, and the jump to the previous or next error — was
+  two clicks deep in a menu. Each button drives an action that already exists
+  with its own shortcut and menu item, so this is a second way to reach a verb
+  rather than a second implementation of one.
+
+  Capture, Pause and Disconnect keep their labels; the rest are icons. A row of
+  unlabelled glyphs is the specific thing people name when they call a tool
+  dated, and those three are the ones whose consequences are not guessable —
+  one starts a device stream, one freezes a view, one releases the hardware.
+
+- **A device selector.** `OsTraceSource` has always accepted a udid and nothing
+  ever passed one, so the viewer captured from whichever device answered first
+  and never said which that was. With a phone and an iPad attached that is a
+  coin toss the user cannot see, let alone lose.
+
+  Devices are enumerated off the interface thread and in two passes: the list
+  appears as soon as usbmux answers, and each row upgrades from a udid to a
+  name when the round trip to that device finishes, because identifying a
+  sleeping phone takes long enough to freeze a toolbar. The scan never opens a
+  lockdown session against a device a capture is holding — that is not an error
+  the library reports, it is a stall in the stream the capture thread is
+  blocked on reading.
+
+- **Icons**, drawn for this project and tinted from the theme tokens rather
+  than baked, so they follow a light/dark switch like everything else. Eight
+  files, 1.8 kB: an icon library would be a runtime dependency and a licence
+  obligation for less than two kilobytes of geometry. Qt's built-in
+  `QStyle.StandardPixmap` set was the free option and is the wrong one — Fusion
+  synthesises those as pixmaps rather than masks, so they cannot be recoloured,
+  and the dark scheme would draw light-scheme glyphs.
+
+- **`N of M shown` in the status bar**, whenever a filter is hiding anything.
+  `RecordModel.hidden_by_filter` has existed since the model was written and
+  nothing in the application ever read it, so a filter one character too narrow
+  looked exactly like a device that had stopped talking. Wireshark has said
+  `Displayed: N` for twenty years; Console, Xcode and Logcat say nothing, and
+  the recurring "where did my logs go" is the result. Silent when nothing is
+  hidden — unlike the gap count there is no ambiguity to guard against, since
+  "hiding nothing" and "not filtering" are the same state.
+
+- **The empty table explains itself.** Nothing opened yet, a device that has
+  not spoken, a capture that recorded nothing and a filter that matches nothing
+  all produced the same blank grid — the state in which a working program and a
+  broken one look identical. The two with an action stay with the banner, which
+  can offer it; the two without are painted in the table itself.
+
+- **The window opens at a size worth reading at.** Left to Qt it opened at
+  751×362 — the sum of what an empty table and a two-line form ask for, and
+  about a third of what six columns of log need.
+
+- **The window remembers its geometry, its split and its column widths.**
+  `gui.app` has set the organisation and application names since it was written
+  — which is what stops Qt filing settings under a vendor called "Unknown" —
+  and nothing ever constructed a `QSettings` to use them. Not the filter and
+  not the open capture: a viewer that reopened yesterday's file would be
+  guessing, and a filter that survived a restart is one the user has to
+  remember they set.
+
 - **Help ▸ About**, which is now the only place the viewer says which version
   it is. The application has always known — nothing displayed it.
 
@@ -160,6 +220,42 @@ such: the `Record` model and the on-disk export formats documented in
   aftermath reads as "the device went quiet after the error".
 
 ### Changed
+
+- **The viewer has a colour system rather than a palette.** Every colour is now
+  a named token in `theme.TOKENS` — `surface`, `text-muted`, `level-error` —
+  and the palette, the severity colours, the mark and the stylesheet all read
+  from there and nowhere else. A colour that bypassed the table would be a
+  colour the contrast tests do not check, which is the only reason they are
+  worth running.
+
+  What changed on screen: a warmer, less default set of neutrals; a table body
+  in a monospaced face, which is what makes a column budget of *characters*
+  honest; taller rows and a taller header, with the header text left-aligned
+  over the left-aligned data it labels; and chrome — toolbars, fields, menus,
+  scrollbars, the status bar — styled from the same tokens. Fusion draws a
+  sunken frame around every permanent status-bar widget, which was the most
+  dated thing in the window and is now gone.
+
+  **Selecting a row no longer deletes its severity.** `ForegroundRole` becomes
+  the palette's `Text`, and the style draws a selected row with
+  `HighlightedText` instead — so clicking an Error to read it was the moment it
+  stopped looking like an Error, and only the `!` glyph survived. The table's
+  selection is its own token, a wash rather than the saturated highlight that
+  suits a menu, and every level clears WCAG AA on it.
+
+  The stylesheet deliberately never names `QTableView`. Giving an item view a
+  box model in QSS makes its viewport non-blittable — every scroll notch then
+  repaints the whole viewport instead of the sliver that moved, measured
+  elsewhere at 12.4×. Verified against this sheet on a 60,000-record capture:
+  0.3% of the viewport per notch either way.
+
+- **The Time column could lose the end of a timestamp.** A column is a budget
+  of characters and the style then insets the text, so spending the budget on
+  the column and the margins on the text elides the last character of anything
+  sized to fit exactly. It was latent while the body font was proportional —
+  `09:14:02.118` is mostly colons and full stops, narrower than the `0` the
+  budget counts in — and the monospaced body is what would have exposed it, so
+  the formula is fixed in the same change that could have shipped the bug.
 
 - Several published measurements were re-measured and did not survive. The
   largest: the horizontal header optimisation shipped as *"the single biggest

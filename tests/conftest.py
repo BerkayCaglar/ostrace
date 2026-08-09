@@ -59,6 +59,33 @@ def qt_app() -> QApplication:
     return build_application([])
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_settings(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Keep the suite out of the user's own settings.
+
+    `MainWindow.closeEvent` saves the layout, and a test that closes a window
+    wrote geometry into ``HKEY_CURRENT_USER`` -- geometry belonging to an
+    *offscreen* window, which the next real launch then restored, putting the
+    window somewhere no display could show it. Running the tests broke the
+    program for the person who ran them, which is as bad as a test failure and
+    considerably harder to notice.
+
+    Both calls are needed and both are global rather than per-instance: the
+    format decides *where* Qt looks, and the path only redirects the format it
+    is given. Autouse and session-scoped because the damage is done by any test
+    that closes a window, not only by the ones that mean to write settings.
+    """
+    pytest.importorskip("PySide6", reason="the gui extra is not installed")
+    from PySide6.QtCore import QSettings
+
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    QSettings.setPath(
+        QSettings.Format.IniFormat,
+        QSettings.Scope.UserScope,
+        str(tmp_path_factory.mktemp("settings")),
+    )
+
+
 @pytest.fixture
 def device() -> DeviceInfo:
     return DeviceInfo(

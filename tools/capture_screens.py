@@ -114,6 +114,15 @@ def _fill(app: QApplication, window: MainWindow, capture_path: Path) -> None:
     window.find_next(Find.ERROR)
     app.processEvents()
 
+    # Snap to a row boundary. The table scrolls by pixel -- which is what makes
+    # a live tail smooth -- so `scrollTo` lands wherever the arithmetic falls,
+    # and the top of the picture was a row sliced through the middle. Nobody
+    # notices while scrolling; everybody notices in a still.
+    bar = window.table.verticalScrollBar()
+    row_height = window.table.verticalHeader().defaultSectionSize()
+    bar.setValue(bar.value() // row_height * row_height)
+    app.processEvents()
+
 
 def capture(app: QApplication, scheme: Scheme, destination: Path, source: Path) -> Path:
     """Render the main window under ``scheme``, showing ``source``."""

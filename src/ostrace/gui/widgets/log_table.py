@@ -56,8 +56,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QAbstractItemModel, QModelIndex, QPersistentModelIndex, Qt
+from PySide6.QtGui import QBrush, QFont, QFontMetrics, QPainter, QPaintEvent, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QHeaderView,
     QStyle,
     QStyledItemDelegate,
@@ -67,17 +69,56 @@ from PySide6.QtWidgets import (
 )
 
 from ostrace.gui.columns import COLUMNS, Column
+from ostrace.gui.theme import Scheme, palette_for, selection_row, token
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
 
-__all__ = ["FastHeader", "LogTable", "MiddleElidingDelegate"]
+__all__ = ["FastHeader", "LogTable", "MiddleElidingDelegate", "SeverityDelegate"]
 
 _Index = QModelIndex | QPersistentModelIndex
 
 #: Extra pixels above and below the text. Small, because the whole point of the
 #: table is how many records fit on screen at once.
-_ROW_PADDING = 4
+_ROW_PADDING = 6
+
+#: A floor under the row height, so that the rhythm does not collapse on a
+#: platform whose UI font happens to be short. The measured Windows default
+#: lands at 21, so this bites rarely and only in the direction of legibility.
+_MIN_ROW_HEIGHT = 22
+
+#: Fixed-width faces, most-wanted first; Qt takes the first that resolves. Not
+#: a platform branch -- the list is the same on all three, which is precisely
+#: why it can live here rather than in `compat`. `Cascadia Mono` ships with
+#: Windows 11, `SF Mono` and `Menlo` with macOS, and the rest are what Linux
+#: distributions actually install.
+_MONO_FAMILIES = (
+    "Cascadia Mono",
+    "SF Mono",  # UNVERIFIED-MACOS
+    "Menlo",  # UNVERIFIED-MACOS
+    "DejaVu Sans Mono",
+    "Noto Sans Mono",
+    "Liberation Mono",
+    "Consolas",
+    "Courier New",
+)
+
+#: Points added to the interface font for the table body. A monospaced face at
+#: the same nominal size reads noticeably smaller than a proportional one, and
+#: this is the column of text the user is actually here to read.
+_MONO_POINT_BONUS = 0.5
+
+#: The empty-state heading, in points above the body. Big enough to read as a
+#: statement rather than as a stray record.
+_PLACEHOLDER_POINT_BONUS = 3.0
+
+#: Between the heading and the sentence under it.
+_PLACEHOLDER_GAP = 8
+
+#: Taller than a row, so the titles read as a header rather than as the first
+#: record. Fixed rather than derived, because the header carries the smaller of
+#: the two type sizes and would otherwise shrink below the row it labels.
+_HEADER_HEIGHT = 26
 
 
 class FastHeader(QHeaderView):
@@ -134,7 +175,35 @@ class FastHeader(QHeaderView):
         return QStyleOptionHeader.SectionPosition.Middle
 
 
-class MiddleElidingDelegate(QStyledItemDelegate):
+class SeverityDelegate(QStyledItemDelegate):
+    """Keep the level's colour on the row the user selected.
+
+    ``QStyledItemDelegate.initStyleOption`` puts the model's ``ForegroundRole``
+    into the palette's ``Text``, and the style then draws a *selected* row with
+    ``HighlightedText`` instead -- so selecting a row discarded its severity
+    colour and an Error stopped looking like an Error at exactly the moment
+    somebody clicked it to read it. The glyph survived, which is the only reason
+    the row was still identifiable at all.
+
+    Both roles get the same brush here, so severity is a property of the record
+    rather than of whether it happens to be selected. What makes that safe is
+    the table's own `Highlight`, which is `theme.selection_row` rather than the
+    saturated application highlight: every severity foreground clears WCAG AA
+    against it, asserted in `test_gui_theme.py`.
+
+    ``initStyleOption`` only -- no ``paint`` override. This runs for every
+    visible cell on every repaint, and a Python ``paint`` on that path is the
+    one thing the table cannot afford.
+    """
+
+    def initStyleOption(self, option: QStyleOptionViewItem, index: _Index) -> None:  # noqa: N802
+        super().initStyleOption(option, index)
+        foreground = index.data(Qt.ItemDataRole.ForegroundRole)
+        if foreground is not None:
+            option.palette.setBrush(QPalette.ColorRole.HighlightedText, QBrush(foreground))
+
+
+class MiddleElidingDelegate(SeverityDelegate):
     """Elide from the middle, keeping both ends of the value.
 
     For the Process column, where the cell reads ``name[pid]`` and the pid is
@@ -156,10 +225,15 @@ class MiddleElidingDelegate(QStyledItemDelegate):
 class LogTable(QTableView):
     """The record table."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, scheme: Scheme = Scheme.LIGHT) -> None:
         super().__init__(parent)
+        self._scheme = scheme
+        self._heading = ""
+        self._detail = ""
 
+        self.setFont(self._body_font())
         self.setHorizontalHeader(FastHeader(Qt.Orientation.Horizontal, self))
+        self.setItemDelegate(SeverityDelegate(self))
         self.setItemDelegateForColumn(int(Column.PROCESS), MiddleElidingDelegate(self))
 
         # Whole rows, extended selection: a log is read by row, and copying a
@@ -181,12 +255,111 @@ class LogTable(QTableView):
         vertical = self.verticalHeader()
         vertical.setVisible(False)
         vertical.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        vertical.setDefaultSectionSize(self.fontMetrics().height() + _ROW_PADDING)
+        vertical.setDefaultSectionSize(
+            max(_MIN_ROW_HEIGHT, self.fontMetrics().height() + _ROW_PADDING)
+        )
 
         horizontal = self.horizontalHeader()
         horizontal.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         horizontal.setHighlightSections(False)
         horizontal.setStretchLastSection(True)
+        # Left, against left-aligned data. Qt centres section text by default,
+        # which puts every title out of line with the column under it.
+        horizontal.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        horizontal.setFixedHeight(_HEADER_HEIGHT)
+
+        self.set_scheme(scheme)
+
+    @staticmethod
+    def _body_font() -> QFont:
+        """The face the records are read in.
+
+        Monospaced, which is also what makes `apply_column_widths` honest: it
+        budgets a column in multiples of the width of ``0``, and in a
+        proportional face a digit is nothing like a colon or a lowercase l.
+        """
+        font = QFont()
+        font.setFamilies(list(_MONO_FAMILIES))
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        size = font.pointSizeF()
+        if size > 0:
+            # Negative means the font was specified in pixels, where adding
+            # points would silently switch units and resize the whole table.
+            font.setPointSizeF(size + _MONO_POINT_BONUS)
+        return font
+
+    def set_scheme(self, scheme: Scheme) -> None:
+        """Recolour the table for ``scheme``.
+
+        Its own palette rather than the application's, for one role: the
+        selected row. See `theme.selection_row` for why a log table cannot use
+        the saturated highlight that suits a menu.
+        """
+        self._scheme = scheme
+        palette = palette_for(scheme)
+        palette.setColor(QPalette.ColorRole.Highlight, selection_row(scheme))
+        self.setPalette(palette)
+
+    def set_placeholder(self, heading: str, detail: str = "") -> None:
+        """What an empty table says about being empty.
+
+        Every reason the table has no rows produces the same blank grid: nothing
+        opened yet, a device that has not spoken, a capture that recorded
+        nothing, a filter one character too narrow. A grid that says nothing is
+        the state in which a working program and a broken one look identical,
+        and it is where "dated" is most visible -- the window has room for a
+        sentence and spends it on ruled lines.
+        """
+        self._heading = heading
+        self._detail = detail
+        self.viewport().update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
+        """Rows if there are any, an explanation if there are not.
+
+        Painted rather than a stacked widget: a widget would have to be raised
+        and lowered in step with the row count from several places, and this
+        cannot fall out of step with what is actually on screen.
+        """
+        super().paintEvent(event)
+        # Annotated optional for the same reason `FastHeader` does it: the stubs
+        # type `model()` as always returning one, and a view that has not been
+        # given a model returns None at run time -- which is exactly the state
+        # this method exists to draw.
+        model: QAbstractItemModel | None = self.model()
+        if model is not None and model.rowCount() > 0:
+            return
+        if not self._heading:
+            return
+
+        painter = QPainter(self.viewport())
+        area = self.viewport().rect()
+        # The interface font, not this widget's. The body is monospaced so that
+        # a column budget counted in characters means something, and a sentence
+        # of prose set in it reads like a printout rather than like the program
+        # talking to you.
+        body = QApplication.font()
+        heading = QFont(body)
+        heading.setPointSizeF(heading.pointSizeF() + _PLACEHOLDER_POINT_BONUS)
+
+        painter.setPen(token("text-secondary", self._scheme))
+        painter.setFont(heading)
+        metrics = QFontMetrics(heading)
+        painter.drawText(
+            area.adjusted(0, 0, 0, -metrics.height()),
+            Qt.AlignmentFlag.AlignCenter,
+            self._heading,
+        )
+
+        if self._detail:
+            painter.setPen(token("text-muted", self._scheme))
+            painter.setFont(body)
+            painter.drawText(
+                area.adjusted(0, metrics.height() + _PLACEHOLDER_GAP, 0, 0),
+                Qt.AlignmentFlag.AlignCenter,
+                self._detail,
+            )
+        painter.end()
 
     def setModel(self, model: QAbstractItemModel | None) -> None:  # noqa: N802
         """Attach a model, then size the columns.
@@ -207,8 +380,21 @@ class LogTable(QTableView):
         pixel ratio where Windows allows fractional, so a pixel width chosen on
         one is wrong on the other. Never ``resizeColumnsToContents`` --
         autosizing columns reflow under the cursor as records arrive.
+
+        The margins are added rather than absorbed. A column is a budget of
+        *characters*, and the style then insets the text by
+        ``PM_FocusFrameHMargin + 1`` on each side, so spending the budget on the
+        column and the margins on the text elides the last character of a value
+        sized to fit exactly. It did not show while the body font was
+        proportional -- ``09:14:02.118`` is mostly colons and full stops, which
+        are narrower than the ``0`` the budget is counted in, and Time had nine
+        pixels of slack. In a monospaced face every character is the unit, the
+        slack falls to one pixel, and the timestamp is the first thing to lose
+        its last digit.
         """
         unit = self.fontMetrics().horizontalAdvance("0")
+        inset = self.style().pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, None, self) + 1
+        margins = 2 * inset
         for spec in COLUMNS:
             if spec.characters is not None:
-                self.setColumnWidth(int(spec.column), spec.characters * unit)
+                self.setColumnWidth(int(spec.column), spec.characters * unit + margins)

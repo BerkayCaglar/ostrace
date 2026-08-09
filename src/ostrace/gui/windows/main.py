@@ -28,7 +28,15 @@ from html import escape as escape_html
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QElapsedTimer, QModelIndex, Qt, QTimer
+from PySide6.QtCore import (
+    QByteArray,
+    QElapsedTimer,
+    QModelIndex,
+    QSettings,
+    QSize,
+    Qt,
+    QTimer,
+)
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -39,6 +47,8 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QSplitter,
+    QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -46,6 +56,8 @@ from PySide6.QtWidgets import (
 from ostrace import __version__
 from ostrace.errors import OstraceError
 from ostrace.exporters.base import escape
+from ostrace.gui import icons
+from ostrace.gui.columns import COLUMNS
 from ostrace.gui.filters import Filter
 from ostrace.gui.live import CaptureThread
 from ostrace.gui.loader import CaptureLoader
@@ -55,6 +67,7 @@ from ostrace.gui.shortcuts import BINDINGS, key_table, sequences
 from ostrace.gui.theme import Scheme, scheme_for
 from ostrace.gui.widgets.banner import Banner
 from ostrace.gui.widgets.detail_pane import DetailPane
+from ostrace.gui.widgets.device_button import DeviceButton
 from ostrace.gui.widgets.export_dialog import ExportDialog
 from ostrace.gui.widgets.filter_bar import FilterBar
 from ostrace.gui.widgets.log_table import LogTable
@@ -101,6 +114,15 @@ _FOLLOW_MIN_MS = 100
 #: detached from the keyboard.
 _FILTER_DEBOUNCE_MS = 200
 
+#: What the window opens at when there is nothing saved, or when what was saved
+#: turned out to be unusable. Wide enough for the fixed columns and the start of
+#: a message, which is the narrowest the table is worth reading at.
+_DEFAULT_SIZE = QSize(1280, 800)
+
+#: Below this in either direction a restored window is not something a person
+#: can use, whatever the settings say.
+_MIN_USABLE = 200
+
 
 def _submenu(action: QAction) -> QMenu | None:
     """The submenu an action opens, or ``None`` if it is a plain item."""
@@ -144,6 +166,10 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.scheme = scheme
         self.setWindowTitle(_TITLE)
+        # Before anything asks for a size hint. Left to Qt the window opened at
+        # 751x362 -- the sum of what an empty table and a two-line form ask for,
+        # and about a third of what this one is worth reading at.
+        self.resize(_DEFAULT_SIZE)
 
         self._build_layout()
 
@@ -169,6 +195,7 @@ class MainWindow(QMainWindow):
 
         self._build_actions()
         self._build_menus()
+        self._build_toolbar()
 
         self._connect_actions()
         self._follow_color_scheme()
@@ -206,12 +233,16 @@ class MainWindow(QMainWindow):
         self.scheme = scheme
         self.model.set_scheme(scheme)
         self.minimap.set_scheme(scheme)
+        self.table.set_scheme(scheme)
+        self.device_button.set_scheme(scheme)
+        icons.clear_cache()
+        self._apply_icons()
 
     def _build_layout(self) -> None:
         """Assemble the widgets. No behaviour, no state."""
         self.filter_bar = FilterBar(self)
         self.banner = Banner(self)
-        self.table = LogTable(self)
+        self.table = LogTable(self, scheme=self.scheme)
         self.detail = DetailPane(self)
 
         # The table and its overview strip travel together, so the splitter
@@ -246,6 +277,75 @@ class MainWindow(QMainWindow):
 
         self.status = StatusBar(self)
         self.setStatusBar(self.status)
+
+    #: The toolbar, in order: which device, what to do with it, then the file
+    #: verbs, then the two jumps a reader makes constantly. ``None`` is a
+    #: separator. Named by action attribute and icon, so that adding a button
+    #: cannot invent a behaviour -- every one of these already exists as a menu
+    #: item with a shortcut, and this is a second way to reach it rather than a
+    #: second implementation of it.
+    _TOOLBAR: tuple[tuple[str, str, bool] | None, ...] = (
+        ("action_capture", "play", True),
+        ("action_pause", "pause", True),
+        ("action_disconnect", "eject", True),
+        None,
+        ("action_open", "folder-open", False),
+        ("action_export", "download", False),
+        None,
+        ("action_previous_error", "chevron-up", False),
+        ("action_next_error", "chevron-down", False),
+    )
+
+    def _build_toolbar(self) -> None:
+        """The five verbs, one press away.
+
+        `docs/design/gui.md` §1 sketched this and phase 4 did not build it, so
+        every primary action lived two clicks deep in a menu. A real `QToolBar`
+        rather than a styled `QWidget`: it is marginally the faster of the two
+        to paint, but the reason is the overflow menu -- narrow the window and a
+        custom widget silently clips Capture and Disconnect off the end, where
+        the real one moves them into a chevron.
+
+        Capture, Pause and Disconnect carry their labels. The rest do not: an
+        unlabelled icon row is the specific thing people name when they call a
+        tool dated, and these three are the ones whose consequences differ.
+        """
+        self.toolbar = QToolBar("Main", self)
+        self.toolbar.setMovable(False)
+        self.toolbar.setFloatable(False)
+        self.toolbar.setIconSize(QSize(icons.ICON_SIZE, icons.ICON_SIZE))
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.toolbar)
+
+        self.device_button = DeviceButton(self.scheme, self.toolbar)
+        self.toolbar.addWidget(self.device_button)
+        self.toolbar.addSeparator()
+
+        for entry in self._TOOLBAR:
+            if entry is None:
+                self.toolbar.addSeparator()
+                continue
+            name, _icon, labelled = entry
+            action = getattr(self, name)
+            self.toolbar.addAction(action)
+            button = self.toolbar.widgetForAction(action)
+            if isinstance(button, QToolButton) and not labelled:
+                button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self._apply_icons()
+
+    def _apply_icons(self) -> None:
+        """Rebuild every icon for the current scheme.
+
+        The pixmaps are tinted from a token, so they are as scheme-specific as
+        the palette and have to be redrawn beside it. A `QIcon` built from an
+        SVG file does not recolour itself.
+        """
+        ratio = self.devicePixelRatioF()
+        for entry in self._TOOLBAR:
+            if entry is None:
+                continue
+            name, icon_name, _labelled = entry
+            getattr(self, name).setIcon(icons.icon(icon_name, self.scheme, ratio=ratio))
 
     def _connect_actions(self) -> None:
         """Wire every action to what it does.
@@ -305,8 +405,16 @@ class MainWindow(QMainWindow):
         Without this the capture thread outlives the window it was reporting
         to, and the device is left streaming into a queue nobody drains -- the
         exact failure this project already paid for once at the source level.
+
+        The device scan is the same hazard in miniature. It is short, but a
+        ``QThread`` that is still running when Python drops its last reference
+        aborts the process outright -- measured here as exit ``0xC0000409``
+        with nothing printed -- and closing the window during a scan is exactly
+        how that reference gets dropped.
         """
         self.stop_capture()
+        self.device_button.stop()
+        self._save_layout()
         super().closeEvent(event)
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
@@ -323,9 +431,89 @@ class MainWindow(QMainWindow):
         if self._sized:
             return
         self._sized = True
+        if self._restore_layout():
+            return
         total = self._split.height()
         share = _TABLE_STRETCH + _DETAIL_STRETCH
         self._split.setSizes([total * _TABLE_STRETCH // share, total * _DETAIL_STRETCH // share])
+
+    # -- what the window remembers ---------------------------------------
+
+    def _settings(self) -> QSettings:
+        """Where the layout is kept between sessions.
+
+        `gui.app` has set the organisation and application names since it was
+        written -- which is what stops Qt filing settings under a vendor called
+        "Unknown" -- and nothing ever constructed a `QSettings` to use them.
+        Qt picks the location per platform, so this is not a decision `paths`
+        owns: no file of ours is being placed.
+        """
+        return QSettings()
+
+    def _on_a_screen(self) -> bool:
+        """Is this window somewhere a person could actually see it?
+
+        Both halves matter. A restored size can be degenerate, and a restored
+        *position* can be perfectly valid for a display that is not attached
+        any more -- neither of which `restoreGeometry` reports as a failure,
+        because neither is malformed.
+        """
+        if self.width() < _MIN_USABLE or self.height() < _MIN_USABLE:
+            return False
+        return any(
+            screen.availableGeometry().intersects(self.frameGeometry())
+            for screen in QApplication.screens()
+        )
+
+    def _save_layout(self) -> None:
+        """Remember the window, the split and the columns.
+
+        Only geometry. Not the filter, and not the open capture: a viewer that
+        reopened yesterday's file would be guessing, and a filter that survived
+        a restart is one the user has to remember they set -- which is the
+        "where did my logs go" failure with a longer fuse.
+        """
+        settings = self._settings()
+        settings.setValue("window/geometry", self.saveGeometry())
+        settings.setValue("window/state", self.saveState())
+        settings.setValue("window/split", self._split.saveState())
+        settings.setValue(
+            "table/columns",
+            [self.table.columnWidth(index) for index in range(len(COLUMNS))],
+        )
+
+    def _restore_layout(self) -> bool:
+        """Put it back, and say whether there was anything to put.
+
+        Column widths are only restored if the count still matches: a capture
+        opened by a version with a different set of columns would otherwise get
+        widths applied to the wrong ones, which looks like a rendering fault
+        rather than like stale settings.
+        """
+        settings = self._settings()
+        geometry = settings.value("window/geometry")
+        if not isinstance(geometry, QByteArray):
+            return False
+        if not self.restoreGeometry(geometry) or not self._on_a_screen():
+            # A geometry can be well-formed and still unusable: saved on a
+            # second monitor that is no longer attached, saved by a window
+            # manager that reported a size of nothing, or -- how this was
+            # found -- saved by an offscreen test run and restored on a real
+            # display, where the window opened somewhere nothing could show it
+            # and the program looked as though it had failed to start.
+            self.resize(_DEFAULT_SIZE)
+            return False
+        state = settings.value("window/state")
+        if isinstance(state, QByteArray):
+            self.restoreState(state)
+        split = settings.value("window/split")
+        if isinstance(split, QByteArray):
+            self._split.restoreState(split)
+        widths = settings.value("table/columns")
+        if isinstance(widths, list) and len(widths) == len(COLUMNS):
+            for index, width in enumerate(widths):
+                self.table.setColumnWidth(index, int(width))
+        return True
 
     # -- actions ---------------------------------------------------------
 
@@ -493,6 +681,7 @@ class MainWindow(QMainWindow):
     def _on_progress(self, loaded: int) -> None:
         self.status.set_volume(loaded)
         self.status.set_gap_count(self.model.gaps)
+        self.status.set_shown(self.model.rowCount(), self.model.retained)
 
     def _on_loaded(self) -> None:
         self._on_progress(self._loader.loaded if self._loader else 0)
@@ -541,7 +730,11 @@ class MainWindow(QMainWindow):
         """
         from ostrace.sources.os_trace import OsTraceSource  # noqa: PLC0415
 
-        return OsTraceSource()
+        # The udid the toolbar is showing, which until the device selector
+        # existed was always `None` -- "whichever answers first". With two
+        # devices attached that was a coin toss the user could not see and,
+        # since nothing named the winner, could not lose either.
+        return OsTraceSource(self.device_button.udid)
 
     def start_capture(self, source: LogSource, *, destination: Path | None = None) -> None:
         """Begin a live capture into a fresh model.
@@ -675,6 +868,16 @@ class MainWindow(QMainWindow):
         self.action_capture.setEnabled(not capturing)
         self.action_disconnect.setEnabled(capturing)
         self.action_pause.setEnabled(capturing)
+        # Choosing a device mid-capture would either do nothing or silently
+        # apply to the next one, and both are worse than saying you have to
+        # disconnect first. `busy_udid` covers the scan that was already in
+        # flight when the capture started.
+        self.device_button.setEnabled(not capturing)
+        self.device_button.busy_udid = self.device_button.udid if capturing else None
+        # The funnel every capture state change passes through, including the
+        # one at construction -- which is what puts a sentence on the cold-start
+        # window instead of an empty grid.
+        self._update_placeholder()
         if not capturing:
             self.action_pause.setChecked(False)
             self.status.set_rate(None)
@@ -685,8 +888,7 @@ class MainWindow(QMainWindow):
 
     def _on_rate(self, rate: float) -> None:
         self.status.set_rate(rate)
-        self.status.set_volume(self.model.retained)
-        self.status.set_gap_count(self.model.gaps)
+        self._update_counts()
         self._follow()
 
     def _on_pause_overflow(self, dropped: int) -> None:
@@ -953,7 +1155,14 @@ class MainWindow(QMainWindow):
         anchor = self._anchor()
         self.model.set_filter(wanted)
         self._restore(anchor)
+        self._update_counts()
         self._update_banner()
+
+    def _update_counts(self) -> None:
+        """Refresh the readouts that a filter change moves."""
+        self.status.set_volume(self.model.retained)
+        self.status.set_gap_count(self.model.gaps)
+        self.status.set_shown(self.model.rowCount(), self.model.retained)
 
     def _anchor(self) -> int | None:
         """Which retained item the user is currently reading.
@@ -994,6 +1203,31 @@ class MainWindow(QMainWindow):
         # does have two readings of one moment, will pass it.
         self.detail.show_item(self.model.row_at(current.row()))
 
+    def _update_placeholder(self) -> None:
+        """What the table says when it has nothing to show.
+
+        Ordered by how much the user already knows: someone who has just opened
+        the program is told what the program is for, someone whose device is
+        quiet is told the connection is fine. The two states with an action --
+        a filter that hides everything, an empty capture -- belong to the
+        banner, which can offer it, so the table stays quiet under them rather
+        than saying the same thing twice.
+        """
+        if self.model.retained > 0:
+            self.table.set_placeholder("")
+        elif self._capture_thread is not None:
+            self.table.set_placeholder(
+                "Waiting for the device",
+                "Connected and listening. Records appear as the device emits them.",
+            )
+        elif self.capture is None:
+            self.table.set_placeholder(
+                "No capture open",
+                "Open a saved capture, or record one from an attached device.",
+            )
+        else:
+            self.table.set_placeholder("")
+
     def _update_banner(self) -> None:
         """The states that look exactly like a quiet device.
 
@@ -1001,7 +1235,12 @@ class MainWindow(QMainWindow):
         device that is saying nothing all produce the same empty table. Only
         some of them are the user's own doing, and they need different answers,
         so an empty table has to say which one it is.
+
+        The banner carries the ones with a way out; the table itself carries
+        the two that have none, because a banner offering no action is a strip
+        of text the user cannot dismiss.
         """
+        self._update_placeholder()
         if self.model.rowCount() == 0 and self.model.retained > 0:
             self.banner.show_message(
                 f"All {self.model.retained:,} records are hidden by the filter.",

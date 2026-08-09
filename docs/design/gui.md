@@ -21,6 +21,8 @@ attributed to a tool that shipped the mistake. Nothing here is taste.
 ┌────────────────────────────────────────────────────────────────────────┐
 │ Capture  Edit  View  Help                                              │
 ├────────────────────────────────────────────────────────────────────────┤
+│ ▯ iPhone ▾ │ ▷ Capture  ‖ Pause  ⏏ Disconnect │ 🗀 ⭳ │ ⌃ ⌄            │
+├────────────────────────────────────────────────────────────────────────┤
 │ Level ▾  Process [____]  Subsystem [____]  Search [____] □ Regex       │
 ├──────────┬───────┬──────────┬────────────┬──────────┬─────────────────┤
 │ Time     │ Level │ Process  │ Subsystem  │ Category │ Message         │
@@ -33,11 +35,21 @@ attributed to a tool that shipped the mistake. Nothing here is taste.
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-**0.1.0 has no toolbar and no device selector**, which this sketch drew before
-either was decided. Capture, Pause, Disconnect, Open and Export are menu items
-and shortcuts; the viewer captures from the first USB device, where the command
-line takes `--udid`. Both are gaps rather than choices — a toolbar is the
-larger of the two for a program whose main verbs are otherwise two clicks deep.
+**The toolbar and the device selector were built after 0.1.0's first pass**,
+having been drawn here before either was decided and then left out of phase 4.
+Until they existed, Capture, Pause, Disconnect, Open and Export were menu items
+and shortcuts only, and the viewer captured from whichever USB device answered
+first — `OsTraceSource` has always taken a udid and nothing passed one, so with
+two devices attached the choice was invisible.
+
+The toolbar carries the device selector, the three capture verbs with their
+labels, Open and Export as icons, and the jump to the previous or next error.
+Every button drives an action that already exists with a shortcut and a menu
+item, so it is a second route to a verb rather than a second implementation.
+Capture, Pause and Disconnect keep their text because those three differ in
+consequence — one starts a device stream, one freezes a view, one releases the
+hardware — and a row of unlabelled glyphs is what makes a tool look dated.
+
 There are six columns, not five: `Category` was in §2's table from the start
 and missing from here.
 
