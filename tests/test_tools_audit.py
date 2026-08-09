@@ -60,6 +60,12 @@ class TestTheRulesCatchWhatTheyClaimTo:
     """Each rule against a synthetic value of the kind it exists to find."""
 
     def test_a_globally_unique_mac_is_a_finding(self) -> None:
+        """``00:00:5E:00:53:xx`` is IANA's documentation range (RFC 7042).
+
+        Globally unique as far as the rule is concerned -- the locally
+        administered bit is clear, which is what it tests -- while belonging to
+        nobody. Any other globally unique address would be somebody's.
+        """
         record = make_record(
             message="CurrentBSS {a-network-name - 00:00:5E:00:53:01} {-49 dbm}",
             process="wifid",
