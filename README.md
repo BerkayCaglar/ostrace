@@ -121,7 +121,7 @@ environmental rather than a bug, and it checks the causes in the order they
 actually occur:
 
 ```
-[ ok ] ostrace      0.1.0 on Python 3.13.14 (win32)
+[ ok ] ostrace      0.1.1 on Python 3.13.14 (win32)
 [ ok ] usbmux       Apple Mobile Device Service on 127.0.0.1:27015
 [FAIL] devices      none connected
                Connect the device over USB and unlock it. A charge-only cable
@@ -155,7 +155,7 @@ could not reach. An export that quietly stops reads as complete, and a reader
 then draws conclusions from an absence that is an artefact of the export rather
 than a fact about the device.
 
-## What 0.1.0 is not
+## What this is not
 
 - **There are no downloadable binaries.** Install from PyPI; that is also what
   keeps macOS from quarantining anything.
