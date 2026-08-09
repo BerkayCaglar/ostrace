@@ -26,7 +26,8 @@ from ostrace.devices.discovery import DeviceSummary
 from ostrace.gui import icons
 from ostrace.gui.models import Find
 from ostrace.gui.theme import Scheme, token
-from ostrace.gui.widgets.device_button import NO_DEVICE, SCANNING, DeviceButton
+from ostrace.gui.widgets import device_button
+from ostrace.gui.widgets.device_button import NO_DEVICE, SCANNING, DeviceButton, DeviceScanner
 from ostrace.gui.windows.main import MainWindow
 from ostrace.model import DeviceInfo, Level, Platform
 from tests.helpers import make_record
@@ -86,14 +87,30 @@ def test_the_device_menu_is_never_empty(qt_app: object) -> None:
     assert all(not action.isEnabled() for action in button.menu().actions())
 
 
+class IdleScanner(DeviceScanner):
+    """A scan that answers nothing, so a test can start one.
+
+    The real one imports pymobiledevice3 and asks usbmux, which this machine
+    happens to have and a CI runner does not -- and a `QThread` still running
+    when Python drops its last reference aborts the process with no message,
+    which is exactly how the first version of the test below took the whole
+    Windows job down after printing one dot. What is under test is the menu,
+    not the device layer.
+    """
+
+    def run(self) -> None:
+        return
+
+
 def test_the_menu_says_it_is_looking_again_rather_than_showing_a_stale_answer(
-    qt_app: object,
+    qt_app: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A menu still reading "No device attached" while the scan that would
     contradict it is running is the one moment this control is guaranteed to be
     out of date -- which is exactly when somebody has just plugged a phone in.
     """
     del qt_app
+    monkeypatch.setattr(device_button, "DeviceScanner", IdleScanner)
     button = DeviceButton()
     button._on_found([])
     assert [action.text() for action in button.menu().actions()] != [SCANNING]
