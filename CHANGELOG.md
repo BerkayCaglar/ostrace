@@ -118,6 +118,16 @@ up, and each of these was found in a state it did not.
   switch above, which was real and is fixed; every assertion that read
   `table.palette()` passed throughout both. The tests read a pixel now.
 
+- **The window called itself `os_trace_relay` while recording.** That is the
+  Apple service the stream arrives on — an implementation detail of the
+  transport, identical for every device, and an answer to no question anybody
+  has while looking at a title bar. It now says `Capturing from Berkay's
+  iPhone`, or `Capturing` until the device answers, because identifying one is
+  a round trip. An opened capture is named by its stem rather than its file
+  name: `ios26-errors`, not `ios26-errors.jsonl.gz`. The title was assembled in
+  six places with six spellings, two of which cleared it while something was
+  still open; it is derived from state in one place now.
+
 - **The columns did not fit the window, so an empty table scrolled sideways.**
   `stretchLastSection` only *grows* the last section into space left over, and
   the columns before it had used the window: measured on the shipped budgets at

@@ -75,7 +75,7 @@ from ostrace.gui.widgets.log_table import LogTable
 from ostrace.gui.widgets.minimap import Minimap
 from ostrace.gui.widgets.status_bar import StatusBar
 from ostrace.model import DeviceInfo
-from ostrace.paths import sessions_dir
+from ostrace.paths import export_stem, sessions_dir
 from ostrace.storage.capture import Capture, open_capture
 
 if TYPE_CHECKING:
@@ -86,6 +86,22 @@ if TYPE_CHECKING:
 __all__ = ["MainWindow"]
 
 _TITLE = "ostrace"
+
+#: What the title says while a device is streaming, before and after its name
+#: is known. Wireshark's wording, because it is the right one: the title is
+#: read in a taskbar, by somebody who wants to know whether the thing is still
+#: running and what it is pointed at.
+#:
+#: It used to be the source's own name, which is ``os_trace_relay`` -- the
+#: Apple service the stream comes from. That is an implementation detail of the
+#: transport, it is the same string for every device, and it answers no
+#: question anybody has while looking at a window.
+_CAPTURING = "Capturing"
+_CAPTURING_FROM = "Capturing from {device}"
+
+#: Between the subject and the application name. An em dash with spaces, which
+#: is what every desktop uses and what Qt itself writes when it composes one.
+_SEPARATOR = " — "
 
 #: Proportions of the vertical split at first show, as stretch factors rather
 #: than pixels: no fixed pixel sizes anywhere, because High DPI cannot be
@@ -192,6 +208,10 @@ class MainWindow(QMainWindow):
         self._build_layout()
 
         self.capture: Capture | None = None
+        #: The device a live capture is coming from, once it has said. Held
+        #: because the title wants it and the title is rebuilt from state
+        #: rather than pushed to from wherever the name happened to arrive.
+        self._device_name: str | None = None
         self._loader: CaptureLoader | None = None
         self._showing_filter_notice = False
         #: When the tail last scrolled. See `_follow`.
@@ -860,7 +880,7 @@ class MainWindow(QMainWindow):
         self._loader.failed.connect(self._on_load_failed)
         self._loader.start()
 
-        self.setWindowTitle(f"{path.name} — {_TITLE}")
+        self._retitle()
 
     def close_capture(self) -> None:
         """Put the window back the way it starts.
@@ -906,9 +926,44 @@ class MainWindow(QMainWindow):
         self._showing_filter_notice = False
         self.status.set_device(None)
         self.status.set_rate(None)
-        self.setWindowTitle(_TITLE)
+        self._retitle()
         self._update_counts()
         self._update_placeholder()
+
+    # -- what the window is called ---------------------------------------
+
+    def title_text(self) -> str:
+        """The window title, derived from what the window is holding.
+
+        One place decides. It was set from six, each with its own f-string, and
+        they disagreed: a live capture was titled after the *source* -- which
+        is ``os_trace_relay``, the Apple service the stream arrives on, the
+        same for every device and an answer to no question -- while a file was
+        titled with its full name including ``.jsonl.gz``, and two of the six
+        cleared it to bare ``ostrace`` in states where something was still
+        open.
+
+        The subject comes first and the application name last, which is the
+        convention on every desktop and the order that survives a taskbar
+        button too narrow to show all of it.
+        """
+        if self._capture_thread is not None:
+            subject = (
+                _CAPTURING_FROM.format(device=self._device_name)
+                if self._device_name
+                else _CAPTURING
+            )
+        elif self.capture is not None:
+            # `export_stem` rather than `path.name`: it already knows every
+            # ending a capture can arrive with, longest first, so `.jsonl.gz`
+            # does not come off as `.gz` and leave `…jsonl` behind.
+            subject = export_stem(self.capture.path)
+        else:
+            return _TITLE
+        return f"{subject}{_SEPARATOR}{_TITLE}"
+
+    def _retitle(self) -> None:
+        self.setWindowTitle(self.title_text())
 
     def _on_jump_target_changed(self, target: object) -> None:
         """Point the chevrons somewhere else, and say so in their tooltips."""
@@ -993,7 +1048,9 @@ class MainWindow(QMainWindow):
         self._connect_selection()
         self.detail.clear()
         self.capture = None
-        self.setWindowTitle(f"{source.name} — {_TITLE}")
+        # Not known until the device answers, which is a round trip. The title
+        # says so rather than guessing, and `_on_identified` fills it in.
+        self._device_name = None
 
         self._capture_thread = CaptureThread(source, destination=destination)
         self._pump = Pump(self._capture_thread.queue, self.model, parent=self)
@@ -1061,7 +1118,7 @@ class MainWindow(QMainWindow):
             return
         # The one place the window says where the capture went. The CLI prints
         # it; until now the GUI never said at all.
-        self.setWindowTitle(f"{path.name} — {_TITLE}")
+        self._retitle()
 
     def _park(self, thread: CaptureThread) -> None:
         """Keep a capture thread that outlived the wait above.
@@ -1116,8 +1173,10 @@ class MainWindow(QMainWindow):
         self.device_button.busy_udid = self.device_button.udid if capturing else None
         # The funnel every capture state change passes through, including the
         # one at construction -- which is what puts a sentence on the cold-start
-        # window instead of an empty grid.
+        # window instead of an empty grid, and the right name on the title bar
+        # whichever way the capture started or ended.
         self._update_placeholder()
+        self._retitle()
         if not capturing:
             self.action_pause.setChecked(False)
             self.status.set_rate(None)
@@ -1125,6 +1184,10 @@ class MainWindow(QMainWindow):
     def _on_identified(self, device: object) -> None:
         if isinstance(device, DeviceInfo):
             self.status.set_device(device)
+            # The title has been saying "Capturing" until now, because until
+            # now that was the whole of what was known.
+            self._device_name = device.name
+            self._retitle()
 
     def _on_rate(self, rate: float) -> None:
         self.status.set_rate(rate)
@@ -1148,10 +1211,6 @@ class MainWindow(QMainWindow):
         clears the sentence off the screen.
         """
         self.stop_capture()
-        if self.capture is None:
-            # Nothing was recorded, so the title still names a source that is
-            # not producing anything.
-            self.setWindowTitle(_TITLE)
         self.banner.show_message(
             f"Capture stopped: {message}",
             "Retry",

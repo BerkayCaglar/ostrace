@@ -312,7 +312,65 @@ def test_disconnecting_leaves_a_capture_that_can_be_exported(
 
     assert window.capture is not None, "disconnecting left nothing to export"
     list(window.capture.items())  # the session is finalised and readable
-    assert "live.ostrace" in window.windowTitle(), "the window never says where it went"
+    # The stem, not the file name: `.ostrace` is what marks it as a capture,
+    # and a title bar is not where somebody reads a suffix.
+    assert window.windowTitle() == "live — ostrace", "the window never says where it went"
+
+
+class TestWhatTheWindowIsCalled:
+    """The title was set from six places with six spellings.
+
+    A live capture was titled after the *source*, which is ``os_trace_relay``:
+    the Apple service the stream arrives on, identical for every device, and an
+    answer to no question anybody has while looking at a window.
+    """
+
+    def test_an_empty_window_is_just_the_application(self, qt_app: object) -> None:
+        del qt_app
+        assert MainWindow().title_text() == "ostrace"
+
+    def test_a_capture_says_it_is_capturing_before_the_device_answers(
+        self, qt_app: object, tmp_path: Path
+    ) -> None:
+        """Identifying a device is a round trip. Until it lands the honest
+        title is the state, not a guess at the name."""
+        del qt_app
+        window = MainWindow()
+        window.start_capture(
+            ScriptedSource([make_record(0)], delay=0.01),
+            destination=tmp_path / "live.ostrace",
+        )
+        try:
+            assert window.title_text() == "Capturing — ostrace"
+        finally:
+            window.stop_capture()
+
+    def test_the_device_name_replaces_it_once_known(self, qt_app: object) -> None:
+        del qt_app
+        window = MainWindow()
+        window._capture_thread = object()  # type: ignore[assignment]
+        try:
+            window._on_identified(
+                DeviceInfo(
+                    udid="A-UDID",
+                    name="Berkay's iPhone",
+                    product_type="iPhone18,2",
+                    product_version="26.5.2",
+                    utc_offset=timedelta(hours=3),
+                )
+            )
+            assert window.title_text() == "Capturing from Berkay's iPhone — ostrace"
+        finally:
+            window._capture_thread = None
+
+    def test_an_opened_capture_is_named_without_its_suffix(self, qt_app: object) -> None:
+        """``ios26-errors.jsonl.gz`` is a file name. ``ios26-errors`` is what
+        the capture is called."""
+        del qt_app
+        window = MainWindow()
+        window.open_capture(ERRORS)
+
+        assert window.title_text() == "ios26-errors — ostrace"
 
 
 def test_a_running_capture_exports_as_a_snapshot(qt_app: object, tmp_path: Path) -> None:
