@@ -30,8 +30,8 @@ missed.** It selected on the process a record came *from*, so it never inspected
 the contents of records from `cloudd`, `backupd`, `wifid`, `bluetoothd`,
 `SpringBoard` and the rest — which is exactly where the device's own identifiers
 travel. A system daemon logging your Wi-Fi BSSID is still logging your Wi-Fi
-BSSID. Roughly 1,000 records carried something, and every one of them is now
-redacted in place:
+BSSID. 1,123 of the 8,000 records now carry a redaction — count them yourself;
+that is a property of the files in front of you, not a claim about history:
 
 | Redacted | Why |
 | --- | --- |

@@ -89,10 +89,12 @@ one came from auditing what this repository had already published.
   credential was among it — a capture contains none — but all of it identifies
   a person, a device or a place.
 
-  1,085 records are redacted. Counts, levels and subsystem distributions are
-  unchanged, because a dozen assertions rest on them; each value became
-  `<redacted>`, or a same-shaped synthetic where the shape is what the parser
-  sees. The rewrite ran through this project's own `SpoolReader` and
+  1,123 of the 8,000 records carry a redaction — a figure anyone holding the
+  fixtures can count, rather than a historical tally of how many were edited,
+  which is not recoverable now that the originals are gone. Record counts,
+  levels and subsystem distributions are unchanged, because a dozen assertions
+  rest on them; each value became `<redacted>`, or a same-shaped synthetic
+  where the shape is what the parser sees. The rewrite ran through this project's own `SpoolReader` and
   `SpoolWriter`, verified byte-identical on a no-op pass before any
   substitution was made. `tests/fixtures/README.md` now records what was
   removed and the rule that would have prevented it: **filter on what a record
