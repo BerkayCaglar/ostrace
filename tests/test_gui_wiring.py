@@ -10,6 +10,8 @@ which is the class of bug that unit tests on each piece cannot see.
 
 from __future__ import annotations
 
+import gc
+
 import pytest
 
 from ostrace.model import Level, Record
@@ -260,6 +262,14 @@ class TestTheThemeSwitchReachesTheRecords:
         app = QApplication.instance()
         assert isinstance(app, QApplication)
 
+        # `colorSchemeChanged` belongs to the application, so it reaches every
+        # window this session has built and not yet collected -- each of which
+        # recolours a model and rebuilds an icon set. Left to CPython's own
+        # timing that was 151 seconds for this one test. Collecting first is
+        # not tidiness; it is the difference between driving one window and
+        # driving every window the suite has ever made.
+        gc.collect()
+
         # Both directions in one loop rather than two statements: asserting on
         # the same attribute twice narrows it to the first answer, and the
         # second comparison is then unreachable as far as a type checker knows.
@@ -295,3 +305,55 @@ def test_the_table_shows_what_the_model_says(window: MainWindow) -> None:
     assert isinstance(row, Record)
     shown = window.model.data(window.model.index(index, int(Column.SUBSYSTEM)))
     assert shown == row.subsystem
+
+
+class TestChoosingATheme:
+    """Following the system is the default, not the only option.
+
+    Reported as "there is no dark mode". There was one; there was no way to ask
+    for it, and the machine it was asked on is set to light.
+    """
+
+    def test_choosing_dark_takes_effect(self, window: MainWindow) -> None:
+        window.toggle_dark_mode(dark=True)
+
+        assert window.scheme is Scheme.DARK
+        assert window.model.scheme is Scheme.DARK
+        assert window.table.palette().base().color() == palette_for(Scheme.DARK).base().color()
+
+    def test_a_choice_outranks_the_system(self, window: MainWindow) -> None:
+        """Otherwise the next time the machine changes its mind it silently
+        overrules the person using the program."""
+        app = QApplication.instance()
+        assert isinstance(app, QApplication)
+        gc.collect()
+
+        window.toggle_dark_mode(dark=True)
+        app.styleHints().colorSchemeChanged.emit(Qt.ColorScheme.Light)
+
+        assert window.scheme is Scheme.DARK
+
+    def test_following_the_system_is_not_a_choice(self, window: MainWindow) -> None:
+        """The checkbox is wired to the toggle, so moving it to match the system
+        would mark the theme as chosen -- and one system switch would work while
+        every one after it did nothing."""
+        app = QApplication.instance()
+        assert isinstance(app, QApplication)
+        gc.collect()
+
+        hints = app.styleHints()
+        for emitted, expected in (
+            (Qt.ColorScheme.Dark, Scheme.DARK),
+            (Qt.ColorScheme.Light, Scheme.LIGHT),
+            (Qt.ColorScheme.Dark, Scheme.DARK),
+        ):
+            hints.colorSchemeChanged.emit(emitted)
+            assert window.scheme is expected
+            assert window.action_dark_mode.isChecked() is (expected is Scheme.DARK)
+
+    def test_the_choice_is_remembered(self, window: MainWindow) -> None:
+        window.toggle_dark_mode(dark=True)
+
+        reopened = MainWindow()
+        assert reopened.scheme is Scheme.DARK
+        assert reopened.action_dark_mode.isChecked()

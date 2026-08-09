@@ -59,7 +59,7 @@ def qt_app() -> QApplication:
     return build_application([])
 
 
-@pytest.fixture(autouse=True, scope="session")
+@pytest.fixture(autouse=True)
 def _isolate_settings(tmp_path_factory: pytest.TempPathFactory) -> None:
     """Keep the suite out of the user's own settings.
 
@@ -72,8 +72,14 @@ def _isolate_settings(tmp_path_factory: pytest.TempPathFactory) -> None:
 
     Both calls are needed and both are global rather than per-instance: the
     format decides *where* Qt looks, and the path only redirects the format it
-    is given. Autouse and session-scoped because the damage is done by any test
-    that closes a window, not only by the ones that mean to write settings.
+    is given. Autouse because the damage is done by any test that closes a
+    window, not only by the ones that mean to write settings.
+
+    A fresh directory *per test*, not per session. Shared, the settings leak
+    between tests exactly as they leaked onto the user: one test toggling the
+    theme left `window/theme` set for every window built afterwards, and the
+    test asserting that the window follows the system failed because by then it
+    correctly no longer did.
     """
     pytest.importorskip("PySide6", reason="the gui extra is not installed")
     from PySide6.QtCore import QSettings

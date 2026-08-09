@@ -108,6 +108,13 @@ BINDINGS: tuple[Binding, ...] = (
         description="Jump to the search box",
     ),
     Binding(
+        "deselect",
+        "Dese&lect",
+        "Esc",
+        menu="edit",
+        description="Let go of the selected row, and let the tail follow again",
+    ),
+    Binding(
         "mark",
         "&Mark Row",
         "Ctrl+M",
@@ -170,6 +177,14 @@ BINDINGS: tuple[Binding, ...] = (
         "Previous Row",
         "F7",
         description="Previous row, even when the detail pane has focus",
+    ),
+    Binding(
+        "dark_mode",
+        "&Dark Mode",
+        "Ctrl+Shift+T",
+        menu="view",
+        checkable=True,
+        description="Use the dark theme regardless of what the system is set to",
     ),
     Binding("keys", "&Keyboard Shortcuts", "F1", menu="help", description="This list"),
 )

@@ -64,7 +64,7 @@ from ostrace.gui.loader import CaptureLoader
 from ostrace.gui.models import Find, RecordModel
 from ostrace.gui.pump import Pump
 from ostrace.gui.shortcuts import BINDINGS, key_table, sequences
-from ostrace.gui.theme import Scheme, scheme_for
+from ostrace.gui.theme import Scheme, apply_theme, scheme_for
 from ostrace.gui.widgets.banner import Banner
 from ostrace.gui.widgets.detail_pane import DetailPane
 from ostrace.gui.widgets.device_button import DeviceButton
@@ -145,6 +145,7 @@ class MainWindow(QMainWindow):
     action_open: QAction
     action_export: QAction
     action_copy: QAction
+    action_deselect: QAction
     action_find: QAction
     action_mark: QAction
     action_clear_marks: QAction
@@ -158,6 +159,7 @@ class MainWindow(QMainWindow):
     action_previous_mark: QAction
     action_step_down: QAction
     action_step_up: QAction
+    action_dark_mode: QAction
     action_keys: QAction
     action_quit: QAction
     action_about: QAction
@@ -165,6 +167,13 @@ class MainWindow(QMainWindow):
     def __init__(self, scheme: Scheme = Scheme.LIGHT, parent: QWidgetType | None = None) -> None:
         super().__init__(parent)
         self.scheme = scheme
+        #: Set once the user picks a theme, after which the system stops
+        #: being consulted. Default is to follow it.
+        self._theme_chosen = False
+        #: Whether the tail should stay at the bottom. Only a person can
+        #: turn it off -- see `_on_user_scroll`.
+        self._at_bottom = True
+        self._user_scrolled = False
         self.setWindowTitle(_TITLE)
         # Before anything asks for a size hint. Left to Qt the window opened at
         # 751x362 -- the sum of what an empty table and a two-line form ask for,
@@ -199,7 +208,26 @@ class MainWindow(QMainWindow):
 
         self._connect_actions()
         self._follow_color_scheme()
+        self._restore_theme()
         self._set_capturing(capturing=False)
+
+    def _restore_theme(self) -> None:
+        """Re-apply a theme the user chose in an earlier session.
+
+        Absent, the window follows the system, which is the right default and
+        was the only behaviour. The checkbox is set through `_show_theme_state`
+        so that restoring a preference does not look like expressing one.
+        """
+        stored = self._settings().value("window/theme")
+        if stored not in (Scheme.LIGHT.value, Scheme.DARK.value):
+            return
+        scheme = Scheme(stored)
+        self._theme_chosen = True
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            apply_theme(app, scheme)
+        self.set_scheme(scheme)
+        self._show_theme_state()
 
     def _follow_color_scheme(self) -> None:
         """Track the operating system's light/dark setting while this window lives.
@@ -215,7 +243,46 @@ class MainWindow(QMainWindow):
         app.styleHints().colorSchemeChanged.connect(self._on_color_scheme_changed)
 
     def _on_color_scheme_changed(self, colour_scheme: Qt.ColorScheme) -> None:
+        if self._theme_chosen:
+            # The user said which one they wanted. The operating system is the
+            # default, not the authority.
+            return
         self.set_scheme(scheme_for(colour_scheme))
+        self._show_theme_state()
+
+    def _show_theme_state(self) -> None:
+        """Put the checkbox where the scheme is, without that counting as a choice.
+
+        `setChecked` emits `toggled`, which is wired to `toggle_dark_mode` --
+        so *following* the system would mark the theme as chosen and the next
+        system switch would be ignored. Measured: one switch worked and every
+        one after it did nothing.
+        """
+        self.action_dark_mode.blockSignals(True)
+        self.action_dark_mode.setChecked(self.scheme is Scheme.DARK)
+        self.action_dark_mode.blockSignals(False)
+
+    def toggle_dark_mode(self, *, dark: bool) -> None:
+        """Choose a theme, rather than inheriting one.
+
+        The viewer followed the system and offered no way to disagree with it,
+        which is fine until you are the person reading a log at night on a
+        machine set to light -- or the reverse. Reported as "there is no dark
+        mode", and there was one; there was no way to ask for it.
+
+        Choosing stops the following, and it is remembered. `apply_theme` is
+        called here as well as `set_scheme`: the palette belongs to the
+        application and the prebuilt colours belong to this window, and a
+        switch that moved only one of them is the bug this project already
+        found once, where every severity colour stayed in the previous scheme.
+        """
+        self._theme_chosen = True
+        scheme = Scheme.DARK if dark else Scheme.LIGHT
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            apply_theme(app, scheme)
+        self.set_scheme(scheme)
+        self._settings().setValue("window/theme", scheme.value)
 
     def set_scheme(self, scheme: Scheme) -> None:
         """Move the colours this window prebuilt for itself to ``scheme``.
@@ -277,6 +344,10 @@ class MainWindow(QMainWindow):
 
         self.status = StatusBar(self)
         self.setStatusBar(self.status)
+
+        # Once: the scrollbar belongs to the view, which outlives every
+        # model the window will attach to it.
+        self.table.verticalScrollBar().actionTriggered.connect(self._on_user_scroll)
 
     #: The toolbar, in order: which device, what to do with it, then the file
     #: verbs, then the two jumps a reader makes constantly. ``None`` is a
@@ -361,6 +432,8 @@ class MainWindow(QMainWindow):
         self.action_pause.toggled.connect(self.set_paused)
 
         self.action_copy.triggered.connect(self.copy_selection)
+        self.action_deselect.triggered.connect(self.deselect)
+        self.action_dark_mode.toggled.connect(lambda on: self.toggle_dark_mode(dark=on))
         self.action_find.triggered.connect(self.filter_bar.focus_search)
         self.action_mark.triggered.connect(self.toggle_mark)
         self.action_clear_marks.triggered.connect(self.clear_marks)
@@ -398,6 +471,45 @@ class MainWindow(QMainWindow):
         selection = self.table.selectionModel()
         if selection is not None:
             selection.currentRowChanged.connect(self._on_current_row_changed)
+        # A new capture and a newly opened file both build a new model, and a
+        # connection to the old one dies with it.
+        self._at_bottom = True
+        self.model.top_shifted.connect(self._keep_place)
+
+    def _on_user_scroll(self) -> None:
+        """The user moved the view themselves.
+
+        ``actionTriggered`` fires for a drag, a wheel, an arrow and a page --
+        and *not* for ``setValue``, which is how everything this window does
+        moves the view. That distinction is the whole mechanism: leaving the
+        bottom is something a person does, and nothing else here can be
+        mistaken for it.
+
+        The position cannot be read yet -- the signal arrives before the value
+        changes -- so this only records that a look is owed, and `_follow`
+        takes it.
+        """
+        self._user_scrolled = True
+
+    def _keep_place(self, shifted: int) -> None:
+        """Hold the same records under the reader when the top is trimmed.
+
+        The view keeps a *pixel* offset from the top of its content, so
+        dropping twenty thousand rows above the viewport slides everything
+        under it while the offset stays put. On a busy device that is every
+        seven seconds, forever, and always while somebody is reading: measured
+        at a cap of 2,000, a reader on record 989 was looking at record 1,588
+        afterwards, having pressed nothing.
+
+        Exact rather than approximate because the row height is fixed, which is
+        a property this table already guarantees for its own reasons. Applied
+        whether or not the tail is following -- following will scroll to the
+        bottom a moment later either way, and a correct position in between
+        costs nothing.
+        """
+        bar = self.table.verticalScrollBar()
+        row_height = self.table.verticalHeader().defaultSectionSize()
+        bar.setValue(max(0, bar.value() - shifted * row_height))
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Release the device before the window goes.
@@ -931,6 +1043,26 @@ class MainWindow(QMainWindow):
         del result  # `stop_capture` reads the path off the thread, which is the same one
         self.stop_capture()
 
+    def deselect(self) -> None:
+        """Let go of the selected row.
+
+        Selecting a row stops the tail, deliberately -- see `_follow`. Until
+        this existed there was no way to say you had finished reading it: the
+        only route back was `Go to Bottom` pressed twice, which is a thing you
+        have to be told. A live capture therefore stopped following the first
+        time anybody clicked anything, and stayed stopped.
+
+        `Esc` because it is what the key means everywhere else, and it was the
+        only obvious chord this window had not already spent.
+        """
+        self.table.clearSelection()
+        self.table.setCurrentIndex(QModelIndex())
+        self.detail.clear()
+        # Asking to let go of a row is asking for the tail back.
+        self._at_bottom = True
+        self._user_scrolled = False
+        self._follow()
+
     def _follow(self) -> None:
         """Stay at the bottom, but only if that is where the user already is.
 
@@ -955,7 +1087,16 @@ class MainWindow(QMainWindow):
         if current.isValid() and current.row() < last:
             return
         bar = self.table.verticalScrollBar()
-        if bar.value() < bar.maximum() - _FOLLOW_SLACK:
+        if self._user_scrolled:
+            # Read once, when a person has just moved the view. Reading it on
+            # every tick instead is what broke this: appending raises the
+            # maximum and leaves the value alone, so a view that had simply not
+            # been scrolled *yet* -- or one whose scroll had just been skipped
+            # by the throttle below -- looked exactly like a reader who had
+            # gone up, and follow died on the first batch and stayed dead.
+            self._at_bottom = bar.value() >= bar.maximum() - _FOLLOW_SLACK
+            self._user_scrolled = False
+        if not self._at_bottom:
             return
         # Throttled apart from the drain. Each tick appends about a hundred
         # rows and the scroll advances by a hundred, but the viewport holds

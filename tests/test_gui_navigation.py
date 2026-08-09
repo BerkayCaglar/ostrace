@@ -19,8 +19,8 @@ from tests.helpers import ERRORS, make_record
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
-from PySide6.QtCore import QModelIndex
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QModelIndex, Qt
+from PySide6.QtWidgets import QAbstractSlider, QApplication
 
 from ostrace.gui.columns import Column
 from ostrace.gui.filters import Filter
@@ -353,3 +353,122 @@ def test_copying_nothing_leaves_the_clipboard_alone(window: MainWindow) -> None:
     window.copy_selection()
 
     assert clipboard.text() == "untouched"
+
+
+def test_the_tail_follows_a_capture_that_was_never_scrolled(window: MainWindow) -> None:
+    """The state a real capture actually starts in, which no other test used.
+
+    Every follow test here scrolls to the bottom first -- and that setup is
+    exactly what hid this. Appending does not move a scrollbar: Qt raises the
+    maximum and leaves the value where it was, so a check made after the insert
+    saw 0 out of 3,919 and concluded the user had scrolled up. Follow never
+    engaged once, because the only thing that could have returned the bar to
+    the bottom was the follow it was refusing to do.
+
+    Shipped in 0.1.0 and reported as "auto scroll is not working", which it was
+    not.
+    """
+    bar = window.table.verticalScrollBar()
+    assert bar.value() == 0, "a fresh window has never been scrolled"
+
+    for batch in range(3):
+        window.model.append([make_record(batch * 100 + i) for i in range(100)])
+        window._scrolled.invalidate()  # the 100 ms coalescing, not the rule
+        window._follow()
+
+    assert bar.value() >= bar.maximum() - 4
+
+
+def test_a_trim_does_not_move_the_log_out_from_under_the_reader(qt_app: object) -> None:
+    """The cap drops rows from the *top*, and a scroll position is a pixel
+    offset from the top of the content.
+
+    So the surviving rows slide up under a viewport that stays where it was.
+    On a device emitting three thousand records a second that is every seven
+    seconds, forever, and always while somebody is reading. Measured at a cap
+    of 2,000: a reader on record 989 was looking at record 1,588 afterwards,
+    having pressed nothing.
+
+    The cap is lowered here so the trim happens in one batch; the mechanism is
+    the one that runs at 200,000.
+    """
+    del qt_app
+    window = MainWindow()
+    window.model = RecordModel(window.scheme, row_cap=2_000, parent=window)
+    window.table.setModel(window.model)
+    window._connect_selection()
+    window.resize(1280, 800)
+    # Shown, or the viewport has no height, nothing scrolls and the reader is
+    # left at row zero -- where a trim legitimately lands them on the eviction
+    # notice, and the test would be asserting nothing.
+    window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    window.show()
+    QApplication.processEvents()
+
+    window.model.append([make_record(i, message=f"record {i}") for i in range(2_000)])
+    QApplication.processEvents()
+    bar = window.table.verticalScrollBar()
+    bar.setValue(bar.maximum() // 2)
+    assert bar.value() > 0, "the reader has to be somewhere a trim can move them from"
+
+    def top_row() -> object:
+        index = window.table.indexAt(window.table.viewport().rect().topLeft())
+        return window.model.row_at(index.row()) if index.isValid() else None
+
+    reading = top_row()
+    assert reading is not None
+
+    window.model.append([make_record(2_000 + i, message=f"record {2_000 + i}") for i in range(600)])
+
+    assert top_row() is reading, "the trim moved the log under the reader"
+
+
+def test_escape_lets_go_of_a_row_and_the_tail_resumes(window: MainWindow) -> None:
+    """Selecting a row stops the tail deliberately -- and there was no way to
+    say you had finished reading it.
+
+    The only route back was `Go to Bottom` pressed twice, which is a thing you
+    have to be told. So a live capture stopped following the first time anybody
+    clicked anything and stayed stopped.
+    """
+    window.model.append([make_record(i) for i in range(200)])
+    window.go_to(5)
+    assert window.table.currentIndex().row() == 5
+
+    window.deselect()
+
+    assert not window.table.currentIndex().isValid()
+    window.model.append([make_record(200 + i) for i in range(100)])
+    window._scrolled.invalidate()
+    window._follow()
+    bar = window.table.verticalScrollBar()
+    assert bar.value() >= bar.maximum() - 4, "the tail did not resume"
+
+
+def test_scrolling_up_stops_the_tail_and_scrolling_back_resumes_it(window: MainWindow) -> None:
+    """The half that protects the reader, and the half that lets them go again.
+
+    Leaving the bottom is something a person does. `actionTriggered` is what
+    says so -- it fires for a drag, a wheel, an arrow and a page, and not for
+    `setValue`, which is how everything this window does moves the view. Reading
+    the position on every tick instead is what broke follow entirely: a scroll
+    the throttle had just skipped was indistinguishable from a reader going up.
+    """
+    window.table.scrollToBottom()
+    bar = window.table.verticalScrollBar()
+
+    bar.actionTriggered.emit(QAbstractSlider.SliderAction.SliderPageStepSub.value)
+    bar.setValue(0)
+    window.model.append([make_record(i) for i in range(500, 600)])
+    window._scrolled.invalidate()
+    window._follow()
+
+    assert bar.value() == 0, "the tail dragged a reader who had scrolled away"
+
+    bar.actionTriggered.emit(QAbstractSlider.SliderAction.SliderToMaximum.value)
+    bar.setValue(bar.maximum())
+    window.model.append([make_record(i) for i in range(600, 700)])
+    window._scrolled.invalidate()
+    window._follow()
+
+    assert bar.value() >= bar.maximum() - 4, "the tail did not resume"

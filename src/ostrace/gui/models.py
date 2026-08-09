@@ -46,7 +46,13 @@ from bisect import bisect_left
 from enum import IntFlag, StrEnum
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QModelIndex,
+    QPersistentModelIndex,
+    Qt,
+    Signal,
+)
 
 from ostrace.exporters.plaintext import gap_line
 from ostrace.gui.columns import COLUMNS, Column
@@ -147,6 +153,19 @@ def _field(record: Record, column: Column) -> str:
 
 class RecordModel(QAbstractTableModel):
     """Records and markers, filtered, bounded, and coloured by severity."""
+
+    #: How many view rows just left the top, so that a view can keep the same
+    #: records under the reader. Qt does not do this: a scroll position is a
+    #: pixel offset from the top of the content, and dropping twenty thousand
+    #: rows above the viewport moves everything under it while the offset stays
+    #: where it was. Measured before this existed: a reader sitting on record
+    #: 989 was looking at record 1,588 afterwards, having pressed nothing.
+    #:
+    #: Emitted as a *net* row delta rather than as the removal and the eviction
+    #: notice separately, because it is measured as one -- the difference in
+    #: `rowCount` across the whole operation, which cannot disagree with what
+    #: the view was told however the branches inside `_trim` fall.
+    top_shifted = Signal(int)
 
     def __init__(
         self,
@@ -590,6 +609,12 @@ class RecordModel(QAbstractTableModel):
         if len(self._rows) <= limit:
             return
 
+        # Everything this method adds or removes happens at the *top*, so the
+        # net change in the row count is exactly how far the surviving rows
+        # move. Measured across the whole operation rather than derived from
+        # the branches below, which is what makes it impossible for the number
+        # the view is given to disagree with what the view was told.
+        before = len(self._visible)
         drop = len(self._rows) - self._row_cap
         # Never cut in the middle of anything: whatever is dropped, a row
         # boundary is where it is dropped.
@@ -645,6 +670,10 @@ class RecordModel(QAbstractTableModel):
             self.endRemoveRows()
         elif notice is not None and not replacing:
             self.endInsertRows()
+
+        shifted = before - len(self._visible)
+        if shifted:
+            self.top_shifted.emit(shifted)
 
     def note_eviction(self, count: int, through: datetime) -> None:
         """Record that ``count`` records left the view but not the capture.

@@ -22,6 +22,8 @@ from tests.helpers import ERRORS, MIXED, make_gap, make_record
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
+from PySide6.QtWidgets import QApplication
+
 from ostrace.gui.widgets.export_dialog import DEFAULT_FORMAT, ExportDialog
 from ostrace.gui.windows.main import MainWindow
 
@@ -29,6 +31,21 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.gui
+
+
+def run_and_wait(dialog: ExportDialog) -> None:
+    """Press Export and wait for it.
+
+    The export runs on its own thread now -- measured at 1.5 to 2.3 seconds on
+    a 61,190 record capture, which is a frozen window with nothing on it if it
+    runs here. `wait()` blocks this thread; the worker's signals are queued, so
+    they need one turn of the loop afterwards to be delivered.
+    """
+    dialog.run_export()
+    worker = dialog._worker
+    if worker is not None:
+        assert worker.wait(30_000), "the export did not finish"
+    QApplication.processEvents()
 
 
 @pytest.fixture
@@ -76,7 +93,7 @@ def test_exporting_writes_the_file_and_says_where(dialog: ExportDialog, tmp_path
     dialog.format_box.setCurrentIndex(dialog.format_box.findData("markdown"))
     dialog.destination.setText(str(destination))
 
-    dialog.run_export()
+    run_and_wait(dialog)
 
     assert destination.is_file()
     assert str(destination) in dialog.report.text()
@@ -92,7 +109,7 @@ def test_a_clean_capture_gets_no_alarming_notes(dialog: ExportDialog, tmp_path: 
     dialog.format_box.setCurrentIndex(dialog.format_box.findData("text"))
     dialog.destination.setText(str(tmp_path / "clean.log"))
 
-    dialog.run_export()
+    run_and_wait(dialog)
 
     assert "cannot tell you" not in dialog.report.text()
 
@@ -115,7 +132,7 @@ def test_the_report_declares_a_gap_in_the_capture(qt_app: object, tmp_path: Path
     dialog = ExportDialog(open_capture(spool))
     dialog.format_box.setCurrentIndex(dialog.format_box.findData("text"))
     dialog.destination.setText(str(tmp_path / "holed.log"))
-    dialog.run_export()
+    run_and_wait(dialog)
 
     assert "cannot tell you" in dialog.report.text()
     assert "gap" in dialog.report.text()
@@ -143,7 +160,7 @@ def test_the_notes_are_the_same_sentences_the_cli_prints(qt_app: object, tmp_pat
     dialog = ExportDialog(open_capture(spool))
     dialog.format_box.setCurrentIndex(dialog.format_box.findData("text"))
     dialog.destination.setText(str(tmp_path / "out.log"))
-    dialog.run_export()
+    run_and_wait(dialog)
 
     exporter = EXPORTERS["text"]
     outcome = exporter.export(open_capture(spool).items(), tmp_path / "again.log")
@@ -162,7 +179,7 @@ def test_a_failed_export_is_reported_rather_than_raised(
     dialog.format_box.setCurrentIndex(dialog.format_box.findData("markdown"))
     dialog.destination.setText(str(blocked / "child" / "out.md"))
 
-    dialog.run_export()  # must not raise
+    run_and_wait(dialog)
 
     assert dialog.report.text()
 
@@ -238,7 +255,49 @@ class TestItNeverEatsTheCapture:
         dialog = ExportDialog(open_capture(plain_capture))
         dialog.format_box.setCurrentIndex(dialog.format_box.findData("markdown"))
 
-        dialog.run_export()
+        run_and_wait(dialog)
 
         assert dialog.result_path is not None
         assert (plain_capture.parent / "capture.md").is_file()
+
+
+def test_the_export_does_not_block_the_interface(dialog: ExportDialog, tmp_path: Path) -> None:
+    """Measured on a 61,190 record capture off a device: every format takes
+    between 1.5 and 2.3 seconds, and the cap is 200,000.
+
+    Run on the interface thread that is a frozen window with nothing on it to
+    say why, which is what "there is no indication anything happened" means.
+    The dialog says what it is doing, shows a bar, and refuses a second press
+    until the first has landed.
+    """
+    dialog.format_box.setCurrentIndex(dialog.format_box.findData("markdown"))
+    dialog.destination.setText(str(tmp_path / "out.md"))
+
+    dialog.run_export()
+
+    assert dialog._worker is not None, "the export ran on the interface thread"
+    assert dialog.progress.isVisibleTo(dialog)
+    assert not dialog.export_button.isEnabled(), "a second press would start a second export"
+    assert "Writing" in dialog.report.text()
+
+    assert dialog._worker.wait(30_000)
+    QApplication.processEvents()
+
+    assert dialog.progress.isHidden()
+    assert dialog.export_button.isEnabled()
+    assert "3,000 records" in dialog.report.text()
+
+
+def test_closing_mid_export_waits_rather_than_aborting(
+    dialog: ExportDialog, tmp_path: Path
+) -> None:
+    """A `QThread` still running when Python drops its last reference takes the
+    process down without a message."""
+    dialog.format_box.setCurrentIndex(dialog.format_box.findData("text"))
+    dialog.destination.setText(str(tmp_path / "out.log"))
+    dialog.run_export()
+
+    dialog.close()
+
+    assert dialog._worker is not None
+    assert not dialog._worker.isRunning()

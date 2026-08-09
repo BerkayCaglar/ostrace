@@ -12,7 +12,62 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
-Nothing yet.
+All five of these came from ten minutes of somebody actually using 0.1.0.
+
+### Added
+
+- **A dark-mode switch**, in View, remembered between sessions. The viewer
+  followed the operating system and offered no way to disagree with it — which
+  is fine until you are the person reading a log at night on a machine set to
+  light. Reported as "there is no dark mode": there was one, and no way to ask
+  for it. Choosing stops the following; the system remains the default, not the
+  authority.
+
+- **`Esc` lets go of the selected row.** Selecting one stops the tail
+  deliberately, and there was no way to say you had finished reading it — the
+  only route back was `Go to Bottom` pressed twice, which is a thing you have
+  to be told. So a live capture stopped following the first time anybody
+  clicked anything and stayed stopped.
+
+### Fixed
+
+- **The tail never followed a live capture at all.** Appending rows does not
+  move a scrollbar: Qt raises the maximum and leaves the value where it was. So
+  the check for "is the reader at the bottom", made after the insert, saw 0 out
+  of 3,919 and concluded they had scrolled up. Follow died on the first batch
+  and could not restart, because the only thing that could have returned the
+  bar to the bottom was the follow it was refusing to do.
+
+  It is derived from a person scrolling now — `actionTriggered`, which fires
+  for a drag, a wheel, an arrow and a page, and not for `setValue`, which is
+  how everything in the window moves the view. Leaving the bottom is something
+  a user does, and nothing else can now be mistaken for it. The first attempt
+  at this fix read the position immediately *before* each insert instead, which
+  works until the 100 ms scroll throttle skips one — and then reads the skipped
+  scroll as a reader walking away. That version passed a synthetic test that
+  slept between batches and failed against a device on the first try.
+
+- **A trim moved the log out from under whoever was reading it.** The view
+  keeps a pixel offset from the top of its content, so dropping twenty thousand
+  rows above the viewport slides everything under it. On a device emitting
+  three thousand records a second that is every seven seconds, forever, and
+  always while somebody is reading. Measured at a cap of 2,000: a reader on
+  record 989 was looking at record 1,588 afterwards, having pressed nothing.
+
+- **Export gave no sign it was doing anything.** Measured on a 61,190 record
+  capture off a device, every format takes between 1.5 and 2.3 seconds, and the
+  cap is 200,000 — all of it on the interface thread, so the window simply
+  froze. It runs on its own thread now, with a progress bar, the destination
+  named while it works, and a second press refused until the first lands. The
+  bar is indeterminate because an exporter reports no progress, and inventing
+  one would be worse than none.
+
+- **The test suite wrote to the user's own settings.** `closeEvent` saves the
+  layout and one test closes a window, so running the tests put an *offscreen*
+  window's geometry into `HKEY_CURRENT_USER` — which the next real launch
+  restored faithfully, opening where no display could show it. Redirected to a
+  temporary directory now, per test rather than per session: shared, one test
+  toggling the theme left it set for every window built afterwards.
 
 ## [0.1.0] - 2026-08-09
 
