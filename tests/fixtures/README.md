@@ -67,11 +67,21 @@ depend on their presence.
 
 Attach a device and capture through `ostrace` itself. Then, before committing:
 
-1. Drop records from installed third-party applications.
-2. Sweep the *contents* of what is left for the categories in the table above.
-   Grepping for known values is not enough — the audit that produced that table
-   found the `x-apple-mmcs-auth` tokens only after enumerating every
-   high-entropy token in the capture and classifying each one.
-3. Re-read a sample by eye. A capture contains whatever the device happened to
-   be doing at the time, and the next one will contain something this list does
-   not predict.
+```bash
+python tools/audit_capture.py path/to/capture --census
+```
+
+1. **Fix every finding.** Each is either something to redact or something to
+   add to `KNOWN_SYNTHETIC` in that file, with a comment saying why it is safe.
+   CI runs the same check against the committed fixtures, so a finding left
+   unresolved fails the build rather than reaching a release.
+2. **Read the census.** It lists every high-entropy token grouped by the text
+   in front of it. This is the step that finds the category nobody has written
+   a rule for yet: `x-apple-mmcs-auth` was found this way, and so — after the
+   rules had been written and were passing — were the abbreviated `sig:` and
+   `ref:` spellings of two fields whose long names were already covered.
+3. **Re-read a sample by eye.** No rule recognises a *name*. An SSID is a word
+   somebody chose, and the only reason the audit caught one is that an SSID
+   travels next to a BSSID and a BSSID is a MAC address. A capture contains
+   whatever the device happened to be doing at the time, and the next one will
+   contain something none of this predicts.

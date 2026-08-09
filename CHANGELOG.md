@@ -106,6 +106,23 @@ one came from auditing what this repository had already published.
 - **The real device UDID had also been pasted into two unrelated tests** as a
   sample `DeviceInfo` value. Both now use a synthetic one.
 
+- **`tools/audit_capture.py`, and a CI gate on the committed fixtures**, so the
+  next capture cannot repeat this. It has two halves because the incident had
+  two causes. The *rules* catch what is already known — a globally unique MAC,
+  a UDID-shaped token, a DSID in an iCloud content URL, a third-party bundle
+  identifier — and one that generalises: a high-entropy value sitting under a
+  field name that admits it is a secret. Nobody had `x-apple-mmcs-auth` on a
+  list; what gives it away is the word `auth` in front of thirty random
+  characters.
+
+  The *census* (`--census`) lists every high-entropy token grouped by the text
+  preceding it, for a human to classify. That half is not a gate, because a
+  real capture is full of legitimate opaque identifiers — and it is also the
+  half that works. Written after the rules were passing, it immediately found
+  two more fields the rules had missed: `sig:` and `ref:`, MMCS's abbreviations
+  for `signature:` and `reference:`, carrying 42-hex digests of backup chunks.
+  Both are redacted and both spellings are now in the vocabulary.
+
 ## [0.1.0] - 2026-08-09
 
 The first release, and the first entry: everything here is new, so the sections

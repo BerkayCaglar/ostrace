@@ -62,6 +62,17 @@ jobs:
       - name: zizmor
         run: zizmor --persona=regular .github/workflows
 
+      # The fixtures are real device output committed to a public repository,
+      # and the sdist ships tests/. A regenerated fixture that reintroduces an
+      # identifier is the failure this gate exists to make loud. The same check
+      # runs in the test suite; it is here as well so that a lint-only run
+      # cannot miss it.
+      - name: Audit the fixtures for device identifiers
+        run: |
+          python tools/audit_capture.py \
+            tests/fixtures/ios26-mixed.jsonl.gz \
+            tests/fixtures/ios26-errors.jsonl.gz
+
       # Type-check every target platform, not just the runner's. Windows-only
       # and macOS-only branches are otherwise never checked at all: this job
       # runs on Linux, and mypy narrows sys.platform to whatever it is running
