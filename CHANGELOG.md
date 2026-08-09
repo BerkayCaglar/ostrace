@@ -147,7 +147,17 @@ one came from auditing what this repository had already published.
   plainly what the tool still cannot catch: a name, a value pasted into a `.py`
   or a `.md`, and a digest written with no key in front of it.
 
-## [0.1.0] - 2026-08-09
+## 0.1.0 - 2026-08-09 — withdrawn
+
+**This release no longer exists.** Its `sdist` shipped `tests/`, and the
+fixtures inside it carried the capture device's own identifiers — see the
+`Security` entry above. It was deleted from PyPI, and the version number will
+not be reused: PyPI does not allow a deleted version to be re-uploaded, and a
+tag pointing at a release that cannot exist would be worse than no tag. There
+is deliberately no `v0.1.0` tag in this repository. The next release is 0.1.1.
+
+The entry is kept in full because the work in it is real and the reasoning is
+worth having. Only the artifact is gone.
 
 The first release, and the first entry: everything here is new, so the sections
 below are grouped by the phase that built them rather than as a diff against a
@@ -1117,5 +1127,4 @@ have. Most of it is invisible until it is missing:
   or deleting `main` -- with no bypass, since an admin exemption set to "always"
   is the same as not having the rule.
 
-[Unreleased]: https://github.com/BerkayCaglar/ostrace/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/BerkayCaglar/ostrace/releases/tag/v0.1.0
+[Unreleased]: https://github.com/BerkayCaglar/ostrace/commits/main
