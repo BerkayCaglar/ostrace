@@ -169,6 +169,7 @@ class MainWindow(QMainWindow):
     action_clear_marks: QAction
     action_top: QAction
     action_bottom: QAction
+    action_follow: QAction
     action_next_jump: QAction
     action_previous_jump: QAction
     action_next_error: QAction
@@ -496,6 +497,8 @@ class MainWindow(QMainWindow):
         self.action_clear_marks.triggered.connect(self.clear_marks)
         self.action_top.triggered.connect(self.go_to_top)
         self.action_bottom.triggered.connect(self.go_to_bottom)
+        self.action_follow.toggled.connect(lambda on: self.set_following(follow=on))
+        self.status.follow.clicked.connect(self._on_follow_clicked)
         self.action_next_jump.triggered.connect(lambda: self.find_next(self._jump))
         self.action_previous_jump.triggered.connect(
             lambda: self.find_next(self._jump, backwards=True)
@@ -1165,6 +1168,10 @@ class MainWindow(QMainWindow):
         self.action_capture.setEnabled(not capturing)
         self.action_disconnect.setEnabled(capturing)
         self.action_pause.setEnabled(capturing)
+        # There is no tail to follow in a file. The control stays visible and
+        # goes quiet, rather than appearing and disappearing under the cursor.
+        self.action_follow.setEnabled(capturing)
+        self.status.follow.setEnabled(capturing)
         # Choosing a device mid-capture would either do nothing or silently
         # apply to the next one, and both are worse than saying you have to
         # disconnect first. `busy_udid` covers the scan that was already in
@@ -1184,6 +1191,13 @@ class MainWindow(QMainWindow):
     def _on_identified(self, device: object) -> None:
         if isinstance(device, DeviceInfo):
             self.status.set_device(device)
+            if self._capture_thread is not None:
+                # Which device is actually held, rather than which one was
+                # picked. They are the same when the user chose one and they
+                # are not when nobody did -- and the one a scan must leave
+                # alone is the one the capture thread is blocked on reading,
+                # which only the device itself can say.
+                self.device_button.busy_udid = device.udid
             # The title has been saying "Capturing" until now, because until
             # now that was the whole of what was known.
             self._device_name = device.name
@@ -1257,6 +1271,70 @@ class MainWindow(QMainWindow):
         self.table.setCurrentIndex(QModelIndex())
         self.detail.clear()
 
+    @property
+    def following(self) -> bool:
+        """Whether the next batch of records will be scrolled to.
+
+        Derived, and this is the *only* derivation -- `_follow` acts on it and
+        the status bar shows it, so the indicator cannot disagree with the
+        behaviour. `docs/design/gui.md` §4 is explicit that a stored bit can
+        disagree with the view, and Console.app shipped an eleven-month bug of
+        exactly that shape; an indicator computed separately from the thing it
+        indicates is the same mistake with a second face.
+        """
+        last = self.model.rowCount() - 1
+        current = self.table.currentIndex()
+        if last >= 0 and current.isValid() and current.row() < last:
+            # A selection that is not the last row is the evidence of a reader
+            # who has stopped tailing, read from the view rather than stored.
+            return False
+        return self._at_bottom
+
+    def set_following(self, *, follow: bool) -> None:
+        """Turn the tail on or off, from the status bar or the keyboard.
+
+        Selecting a row stops the tail deliberately, and getting back to it
+        meant a key nobody had been told about or a menu item two levels down.
+        Turning it back on therefore lets go of the row as well as returning to
+        the end -- asking to watch the newest records is not asking to keep one
+        old record open while they race past. That is the same thing the second
+        press of `Go to Bottom` does, for the same reason.
+        """
+        self._user_scrolled = False
+        self._at_bottom = follow
+        if follow:
+            self.table.clearSelection()
+            self.table.setCurrentIndex(QModelIndex())
+            self.detail.clear()
+            self.table.scrollToBottom()
+        self._show_follow_state()
+
+    def _on_follow_clicked(self) -> None:
+        """The status bar's control was pressed: do the other thing.
+
+        Derived from `following` rather than from the button's own checked
+        state, which it has already flipped by the time this runs and which is
+        a copy of the answer rather than the answer. Taking no argument is also
+        what binds this to the parameterless ``clicked()`` overload: connecting
+        `setChecked` to it directly bound the same overload and called it with
+        nothing, which PySide reports on stderr and otherwise swallows.
+        """
+        self.set_following(follow=not self.following)
+
+    def _show_follow_state(self) -> None:
+        """Put the indicator and the menu item where the view actually is.
+
+        `setChecked` emits `toggled`, which is wired to `set_following`, so
+        reporting the state would otherwise be indistinguishable from choosing
+        it -- the trap this project has already walked into twice, once with
+        the theme checkbox and once here.
+        """
+        following = self.following
+        self.status.set_following(following=following)
+        self.action_follow.blockSignals(True)
+        self.action_follow.setChecked(following)
+        self.action_follow.blockSignals(False)
+
     def _follow(self) -> None:
         """Stay at the bottom, but only if that is where the user already is.
 
@@ -1272,15 +1350,10 @@ class MainWindow(QMainWindow):
         the other direction.
 
         Still no stored bit. A selection that is no longer the last row *is*
-        the evidence, and it is read from the view like the scrollbar.
+        the evidence, and it is read from the view like the scrollbar. The
+        `following` property is where that reading lives, so the indicator in
+        the status bar and this method cannot come to different conclusions.
         """
-        last = self.model.rowCount() - 1
-        if last < 0:
-            return
-        current = self.table.currentIndex()
-        if current.isValid() and current.row() < last:
-            return
-        bar = self.table.verticalScrollBar()
         if self._user_scrolled:
             # Read once, when a person has just moved the view. Reading it on
             # every tick instead is what broke this: appending raises the
@@ -1288,9 +1361,11 @@ class MainWindow(QMainWindow):
             # been scrolled *yet* -- or one whose scroll had just been skipped
             # by the throttle below -- looked exactly like a reader who had
             # gone up, and follow died on the first batch and stayed dead.
+            bar = self.table.verticalScrollBar()
             self._at_bottom = bar.value() >= bar.maximum() - _FOLLOW_SLACK
             self._user_scrolled = False
-        if not self._at_bottom:
+        self._show_follow_state()
+        if self.model.rowCount() == 0 or not self.following:
             return
         # Throttled apart from the drain. Each tick appends about a hundred
         # rows and the scroll advances by a hundred, but the viewport holds
@@ -1391,10 +1466,13 @@ class MainWindow(QMainWindow):
         if last < 0:
             return
         if self.table.currentIndex().row() == last:
-            self.table.clearSelection()
-            self.table.setCurrentIndex(QModelIndex())
-            self.detail.clear()
-            self.table.scrollToBottom()
+            # Through `set_following`, which is the same request spelled
+            # another way -- and which also puts `_at_bottom` back. Doing the
+            # clearing and the scrolling here without it meant the second press
+            # did not resume anything for a reader who had *scrolled* away
+            # rather than clicked away: the flag stayed false, `_follow`
+            # returned, and the promise in this docstring went unkept.
+            self.set_following(follow=True)
             return
         self.go_to(last)
 
@@ -1557,6 +1635,10 @@ class MainWindow(QMainWindow):
 
     def _on_current_row_changed(self, current: QModelIndex, previous: QModelIndex) -> None:
         del previous
+        # Selecting a row stops the tail, so the indicator has to move with the
+        # selection and not only with the next batch of records -- a capture
+        # that has gone quiet would otherwise still claim to be following.
+        self._show_follow_state()
         if not current.isValid():
             self.detail.clear()
             return

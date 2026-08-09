@@ -13,19 +13,26 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QLabel, QStatusBar
+from PySide6.QtWidgets import QLabel, QStatusBar, QToolButton
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
 
     from ostrace.model import DeviceInfo
 
-__all__ = ["StatusBar"]
+__all__ = ["FOLLOWING", "NOT_FOLLOWING", "StatusBar"]
 
 #: Shown before anything has been captured, so the fields have a resting state
 #: rather than appearing from nowhere on the first record.
 _IDLE = "idle"
 _NO_DEVICE = "no device"
+
+#: The tail control says which state it is in rather than what pressing it
+#: would do. A button labelled with its action has to be read together with
+#: something else to know what is happening now, and "am I still seeing the
+#: newest records" is a question asked at a glance.
+FOLLOWING = "Following"
+NOT_FOLLOWING = "Not following"
 
 
 class StatusBar(QStatusBar):
@@ -45,14 +52,47 @@ class StatusBar(QStatusBar):
         self._volume = QLabel("0 records", self)
         self._gaps = QLabel("", self)
 
+        #: Whether the view is still showing the newest records, and the way
+        #: back when it is not.
+        #:
+        #: `docs/design/gui.md` §4 asked for this indicator and phase 4 did not
+        #: build it, which left the state derived correctly and shown nowhere:
+        #: clicking a row stops the tail on purpose, and the only ways back
+        #: were a key nobody had been told about and a menu item two levels
+        #: down. Logcat, Wireshark, DebugView and klogg all carry the same
+        #: control, and all four put the state on it rather than the verb.
+        self.follow = QToolButton(self)
+        self.follow.setCheckable(True)
+        self.follow.setAutoRaise(True)
+        self.follow.setToolTip("Keep the view on the newest records")
+
         # addPermanentWidget puts these at the right and keeps them there when
         # a transient message is posted on the left, which is what showMessage
         # is for. A readout that a status message can push off the bar is not
         # a readout.
         for widget in (self._rate, self._device, self._shown, self._volume, self._gaps):
             self.addPermanentWidget(widget)
+        # Last, so it sits at the end of the bar where the view's own bottom
+        # is, which is what it is about.
+        self.addPermanentWidget(self.follow)
 
         self.set_gap_count(0)
+        self.set_following(following=True)
+
+    def set_following(self, *, following: bool) -> None:
+        """Show whether the tail is being followed.
+
+        ``setChecked`` does not emit ``clicked``, which is the signal this
+        control is read through, so syncing it from derived state cannot be
+        mistaken for a person pressing it. That distinction is the one this
+        project has already got wrong twice with ``toggled``.
+        """
+        self.follow.setChecked(following)
+        self.follow.setText(FOLLOWING if following else NOT_FOLLOWING)
+
+    @property
+    def follow_text(self) -> str:
+        return self.follow.text()
 
     def set_rate(self, records_per_second: float | None) -> None:
         """Live throughput, or ``None`` when nothing is streaming."""

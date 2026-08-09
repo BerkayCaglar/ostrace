@@ -57,6 +57,21 @@ up, and each of these was found in a state it did not.
   supplied at seven sizes rather than left to Qt to rescale one bitmap into the
   soft edges that read as an unfinished program.
 
+- **A follow indicator in the status bar, which is also the way back.** It says
+  `Following` or `Not following` and pressing it does the other one; `Ctrl+
+  Shift+F` and a View menu item reach the same thing. `docs/design/gui.md` §4
+  asked for this indicator and phase 4 did not build it, so the state was
+  derived correctly and shown nowhere — and since clicking a row stops the tail
+  on purpose, the only routes back were a key nobody had been told about and a
+  menu item two levels down. Reported as "getting back to auto scroll is very
+  hard".
+
+  It is derived from the same `following` the tail itself acts on, so the
+  indicator cannot disagree with the behaviour. Putting the state on screen
+  immediately exposed a promise `Go to Bottom` had not been keeping: its second
+  press resumed nothing for a reader who had *scrolled* away rather than
+  clicked away.
+
 - **A close control on the detail pane.** `Esc` was the only way to let go of a
   record, which is a key you have to be told about. The control asks rather
   than acts — it emits, and the window turns that into a deselect — because a
@@ -117,6 +132,20 @@ up, and each of these was found in a state it did not.
   This is the second bug with that picture. The first was the split-brain
   switch above, which was real and is fixed; every assertion that read
   `table.palette()` passed throughout both. The tests read a pixel now.
+
+- **Opening the device menu chose a device.** The first one found was selected
+  outright, so pressing the button to *see* what was attached changed the label
+  to a device — which reads as the control having connected to it rather than
+  having answered a question. Opening a menu is not picking from it. The button
+  says `Choose device` until something is clicked, and what a capture is
+  actually using is named in the status bar by the device that answered, which
+  is where a fact about the capture belongs.
+
+  A capture with nothing chosen still uses whichever device is attached,
+  exactly as the command line does with no `--udid`. That is also why the udid
+  a scan must leave alone now comes from the device that answered rather than
+  from the selector: the selector is empty in that case, and a second lockdown
+  against the device a capture is blocked on does not raise, it stalls.
 
 - **The window called itself `os_trace_relay` while recording.** That is the
   Apple service the stream arrives on — an implementation detail of the

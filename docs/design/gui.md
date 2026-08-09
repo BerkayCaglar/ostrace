@@ -234,10 +234,32 @@ they had chosen not to be. It is also unnecessary: follow is derived from the
 viewport, so deselecting at the bottom resumes the tail on its own and
 deselecting half way up does not. Only `Ctrl+End` asks for the end.
 
-**Not built in 0.1.0:** the two indicators this section asked for — whether
-follow is on, and how many records have arrived unseen. The status bar has
-four fields and neither is among them. The unseen count is the more useful
-half; a reader who has scrolled up has no idea how far behind they now are.
+**The indicator is built, and it is also the control.** It sits at the end of
+the status bar, says `Following` or `Not following`, and pressing it does the
+other one — Logcat, Wireshark, DebugView and klogg all carry the same thing,
+and all four put the state on it rather than the verb, because "am I still
+seeing the newest records" is asked at a glance. It was missing, and the state
+was therefore derived correctly and shown nowhere: clicking a row stops the
+tail on purpose, and the two ways back were a key nobody had been told about
+and a menu item two levels down.
+
+**One derivation, read by both.** `MainWindow.following` is the whole of it;
+`_follow` acts on it and the status bar shows it, so the indicator cannot come
+to a different conclusion from the behaviour. An indicator computed separately
+would be the Console.app bug with a second face.
+
+Putting the state on screen immediately exposed a promise this section had not
+been keeping: the second press of `Ctrl+End` resumed nothing for a reader who
+had *scrolled* away rather than clicked away, because it cleared the selection
+and scrolled without restoring the at-bottom state. It goes through the same
+`set_following` as the button now.
+
+The control is live only during a capture. There is no tail to follow in a
+file, and a control that is enabled with nothing to do is one that has to be
+tried before it can be understood.
+
+**Still not built:** how many records have arrived unseen. A reader who has
+scrolled up has no idea how far behind they now are.
 
 ---
 

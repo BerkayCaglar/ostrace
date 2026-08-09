@@ -27,7 +27,13 @@ from ostrace.gui import icons
 from ostrace.gui.models import Find
 from ostrace.gui.theme import Scheme, token
 from ostrace.gui.widgets import device_button
-from ostrace.gui.widgets.device_button import NO_DEVICE, SCANNING, DeviceButton, DeviceScanner
+from ostrace.gui.widgets.device_button import (
+    CHOOSE,
+    NO_DEVICE,
+    SCANNING,
+    DeviceButton,
+    DeviceScanner,
+)
 from ostrace.gui.windows.main import MainWindow
 from ostrace.model import DeviceInfo, Level, Platform
 from tests.helpers import make_record
@@ -262,15 +268,36 @@ def test_with_nothing_attached_the_button_says_so(qt_app: object) -> None:
     assert button.udid is None
 
 
-def test_the_first_device_is_chosen_so_that_one_device_is_no_clicks(
-    qt_app: object,
-) -> None:
-    """Which is what the capture did before this existed. The difference is that
-    the name is now on screen rather than implied."""
+def test_finding_a_device_is_not_choosing_it(qt_app: object) -> None:
+    """Opening a menu is not picking from it.
+
+    The first device found used to be chosen outright, so that one device cost
+    no clicks -- and pressing the button to *see* what was attached changed the
+    label to a device, which reads as the control having connected to it. The
+    button asks now and answers only when clicked.
+    """
     del qt_app
     button = DeviceButton()
     button._on_found([DeviceSummary("A-UDID", "usb"), DeviceSummary("B-UDID", "usb")])
-    assert button.udid == "A-UDID"
+
+    assert button.udid is None
+    assert button.text() == CHOOSE
+
+    button.choose("B-UDID")
+    assert button.udid == "B-UDID"
+
+
+def test_unplugging_the_chosen_device_leaves_nothing_chosen(qt_app: object) -> None:
+    """Its replacement is the user's to pick, not the button's to assume."""
+    del qt_app
+    button = DeviceButton()
+    button._on_found([DeviceSummary("A-UDID", "usb"), DeviceSummary("B-UDID", "usb")])
+    button.choose("A-UDID")
+
+    button._on_found([DeviceSummary("B-UDID", "usb")])
+
+    assert button.udid is None
+    assert button.text() == CHOOSE
 
 
 def test_a_name_replaces_the_udid_when_the_device_answers(qt_app: object) -> None:
@@ -280,9 +307,16 @@ def test_a_name_replaces_the_udid_when_the_device_answers(qt_app: object) -> Non
     del qt_app
     button = DeviceButton()
     button._on_found([DeviceSummary("A-UDID", "usb")])
-    assert "A-UDID" in button.text()
+    assert "A-UDID" in button._actions["A-UDID"].text()
 
     button._on_identified("A-UDID", DEVICE)
+
+    assert DEVICE.name in button._actions["A-UDID"].text()
+    # The menu entry carries the name; the button still says what it is for,
+    # because nothing has been chosen.
+    assert button.text() == CHOOSE
+
+    button.choose("A-UDID")
     assert button.text() == DEVICE.name
 
 
@@ -310,6 +344,7 @@ def test_the_selector_is_disabled_while_a_capture_holds_the_device(
     second lockdown against the device the capture thread is blocked on.
     """
     window.device_button._on_found([DeviceSummary("A-UDID", "usb")])
+    window.device_button.choose("A-UDID")
 
     window._set_capturing(capturing=True)
     assert not window.device_button.isEnabled()
@@ -318,6 +353,29 @@ def test_the_selector_is_disabled_while_a_capture_holds_the_device(
     window._set_capturing(capturing=False)
     assert window.device_button.isEnabled()
     assert window.device_button.busy_udid is None
+
+
+def test_the_held_device_is_the_one_that_answered_not_the_one_that_was_picked(
+    window: MainWindow,
+) -> None:
+    """Nobody has to pick one: a capture with no choice uses whichever device
+    is attached, exactly as the command line does with no ``--udid``.
+
+    So the udid a scan must leave alone cannot come from the selector -- it is
+    empty in that case -- and has to come from the device that answered. Left
+    as it was, removing the automatic choice quietly removed this guard too,
+    and a second lockdown against the device a capture is blocked on does not
+    raise: it stalls.
+    """
+    window.device_button._on_found([DeviceSummary("A-UDID", "usb")])
+    assert window.device_button.udid is None, "the selector is supposed to be empty here"
+
+    window._capture_thread = object()  # type: ignore[assignment]
+    try:
+        window._on_identified(DEVICE)
+        assert window.device_button.busy_udid == DEVICE.udid
+    finally:
+        window._capture_thread = None
 
 
 def test_stopping_a_selector_that_never_scanned_is_not_an_error(qt_app: object) -> None:

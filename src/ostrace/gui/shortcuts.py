@@ -169,6 +169,14 @@ BINDINGS: tuple[Binding, ...] = (
         group="ends",
         description="Last row. Press again at the bottom to resume following",
     ),
+    Binding(
+        "follow",
+        "&Follow the Tail",
+        "Ctrl+Shift+F",
+        group="ends",
+        checkable=True,
+        description="Stay on the newest records. The status bar shows whether it is on",
+    ),
     # `F3` is the find-next key on Windows and the one klogg binds, which is
     # exactly the meaning wanted here: *next of whatever I am looking for*. The
     # per-kind bindings below keep their own keys, so choosing a target in the

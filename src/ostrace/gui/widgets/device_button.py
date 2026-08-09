@@ -42,6 +42,18 @@ __all__ = ["DeviceButton", "DeviceScanner"]
 #: with no text reads as a rendering fault rather than as an answer.
 NO_DEVICE = "No device"
 
+#: What it says when devices are attached and the user has not picked one.
+#:
+#: It used to name the first device found, on the reasoning that a capture
+#: would use it and the name should therefore be on screen. That is true and it
+#: is not worth what it cost: pressing the button to *see* the devices changed
+#: the label to a device, which reads as the control having connected to it
+#: rather than having answered a question. Opening a menu is not choosing from
+#: it. What a capture is really using is named in the status bar, by the device
+#: that answered, which is a better place for it -- it is a fact about the
+#: capture rather than about this control.
+CHOOSE = "Choose device"
+
 #: What the menu holds while a scan is in flight. Its job is to exist: an
 #: `InstantPopup` button whose menu has no actions pops up nothing at all, so a
 #: press looked like a control that did not work -- and then the scan landed,
@@ -205,7 +217,6 @@ class DeviceButton(QToolButton):
 
         if not summaries:
             self.udid = None
-            self._show(NO_DEVICE)
             self._place_holder(NONE_ATTACHED)
         else:
             for summary in summaries:
@@ -219,26 +230,35 @@ class DeviceButton(QToolButton):
         for action in stale:
             self._menu.removeAction(action)
 
-        if summaries and self.udid not in self._actions:
-            # First device wins, which is what the capture did before this
-            # existed -- the difference is that its name is now on screen, and
-            # that the menu it happens in front of is on screen too.
-            self.choose(summaries[0].udid)
+        if self.udid is not None and self.udid not in self._actions:
+            # The device that was chosen has been unplugged. Nothing is chosen
+            # now, and picking its replacement is the user's to do.
+            self.udid = None
+        self._refresh_label()
 
     def _on_identified(self, udid: str, info: DeviceInfo) -> None:
         self._names[udid] = info.name
         action = self._actions.get(udid)
         if action is not None:
             action.setText(f"{info.label}")
-        if udid == self.udid:
-            self._show(info.name)
+        self._refresh_label()
 
     def choose(self, udid: str | None) -> None:
+        """Pick a device. The only thing that does -- see `CHOOSE`."""
         self.udid = udid
         for candidate, action in self._actions.items():
             action.setChecked(candidate == udid)
-        self._show(self._names.get(udid or "", udid or NO_DEVICE))
+        self._refresh_label()
         self.chosen.emit(udid)
+
+    def _refresh_label(self) -> None:
+        """What the button says, from what is attached and what is chosen."""
+        if not self._actions:
+            self._show(NO_DEVICE)
+        elif self.udid is None:
+            self._show(CHOOSE)
+        else:
+            self._show(self._names.get(self.udid, self.udid))
 
     def _show(self, label: str) -> None:
         self.setText(label)
