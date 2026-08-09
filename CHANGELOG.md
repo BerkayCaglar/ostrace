@@ -66,6 +66,21 @@ such: the `Record` model and the on-disk export formats documented in
   Export offers **Disconnect** as the way out while a capture is running, which
   is only worth offering now that it leads somewhere.
 
+- **The viewer's Export destroyed the capture it was reading**, in the case it
+  offered by default. `.jsonl` is both an ending `paths` strips from a capture
+  name and the jsonl exporter's suffix, so opening a `.jsonl` capture and
+  pressing Export put *the capture itself* in the destination field. Accepting
+  it truncated the file while the exporter was still iterating over it, and the
+  dialog then reported `0 records` where a success goes. Measured against a
+  capture recorded off a device: 10,718,395 bytes to 0.
+
+  The command line has refused this since the day it did the same thing —
+  `paths.check_export_destination` was written for it, and the dialog reaches
+  the same default through the same `export_path` without ever calling the
+  guard. It calls it now, and the CLI's `TestItNeverEatsTheCapture` has a
+  counterpart on the viewer's side. `DestinationInUseError`'s hint no longer
+  says "pass `--output`", which was not advice a dialog could act on.
+
 - **Disconnect did nothing if the capture had not started yet.** Stopping works
   by cancelling the capture task, and until the device has been identified —
   a round trip to it — there is no task to cancel, so it returned quietly and

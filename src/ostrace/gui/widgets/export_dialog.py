@@ -43,7 +43,7 @@ from ostrace.errors import OstraceError
 from ostrace.exporters import EXPORTERS
 from ostrace.exporters.ai_report import AiReportExporter
 from ostrace.exporters.notes import export_notes
-from ostrace.paths import export_path
+from ostrace.paths import check_export_destination, export_path
 
 if TYPE_CHECKING:
     from ostrace.storage.capture import Capture
@@ -160,6 +160,14 @@ class ExportDialog(QDialog):
 
         destination = Path(self.destination.text())
         try:
+            # Before the exporter opens anything. `.jsonl` is both an ending
+            # `export_stem` strips and the jsonl exporter's suffix, so opening a
+            # `.jsonl` capture and pressing Export offered *the capture itself*
+            # as the destination -- and the export truncated the file it was
+            # still iterating over, then reported "0 records" as success. The
+            # CLI has refused this since the day it did the same thing; this
+            # dialog is the other way in and was never taught about it.
+            check_export_destination(destination, self.capture.path)
             outcome = exporter.export(self.capture.items(), destination, device=self.capture.device)
         except (OstraceError, OSError) as exc:
             # OSError as well as our own: exporting into a path that is not a

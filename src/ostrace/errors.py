@@ -165,7 +165,10 @@ class DestinationInUseError(StorageError):
     allowed to proceed.
     """
 
-    hint = "Pass --output to write somewhere else."
+    # Not "pass --output": the export check has two callers now, and the one
+    # in the viewer has a field to type in rather than a flag to pass. Raise
+    # sites that are only ever reached from the command line say so themselves.
+    hint = "Choose a different destination."
 
 
 # --------------------------------------------------------------------------

@@ -18,7 +18,7 @@ import pytest
 from ostrace.exporters import EXPORTERS
 from ostrace.storage.capture import open_capture
 from ostrace.storage.spool import SpoolWriter
-from tests.helpers import ERRORS, make_gap, make_record
+from tests.helpers import ERRORS, MIXED, make_gap, make_record
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
@@ -175,3 +175,70 @@ def test_the_window_refuses_to_export_nothing(qt_app: object) -> None:
     window.export_capture()
 
     assert "nothing to export" in window.banner.text
+
+
+class TestItNeverEatsTheCapture:
+    """The CLI's `TestItNeverEatsTheCapture`, from the other way in.
+
+    `paths.check_export_destination` was written for the command line and only
+    ever called from it. The dialog computes its default destination through
+    the same `export_path`, so it inherited the same collision and none of the
+    guard: opening a `.jsonl` capture and pressing Export with the offered
+    destination truncated the capture while the exporter was still iterating
+    over it, then reported ``0 records`` in the same place a success goes.
+
+    Measured before the fix, against a capture recorded off the device:
+    10,718,395 bytes to 0, and the dialog said it had worked.
+    """
+
+    @pytest.fixture
+    def plain_capture(self, tmp_path: Path) -> Path:
+        """The fixture uncompressed, so that its name ends in ``.jsonl``."""
+        import gzip
+
+        destination = tmp_path / "capture.jsonl"
+        destination.write_bytes(gzip.decompress(MIXED.read_bytes()))
+        return destination
+
+    def test_the_offered_destination_is_refused_rather_than_taken(
+        self, qt_app: object, plain_capture: Path
+    ) -> None:
+        del qt_app
+        before = plain_capture.read_bytes()
+        dialog = ExportDialog(open_capture(plain_capture))
+        dialog.format_box.setCurrentIndex(dialog.format_box.findData("jsonl"))
+
+        # No edit: this is the destination the dialog itself put in the field.
+        assert dialog.destination.text() == str(plain_capture)
+        dialog.run_export()
+
+        assert plain_capture.read_bytes() == before, "the capture was modified"
+        assert "over the capture" in dialog.report.text()
+        assert dialog.result_path is None, "a refused export must not report a path"
+
+    def test_a_destination_chosen_at_the_capture_is_refused_too(
+        self, qt_app: object, plain_capture: Path
+    ) -> None:
+        """`Choose…` opens a save dialog, which will happily point back."""
+        del qt_app
+        before = plain_capture.read_bytes()
+        dialog = ExportDialog(open_capture(plain_capture))
+        dialog.format_box.setCurrentIndex(dialog.format_box.findData("markdown"))
+        dialog.destination.setText(str(plain_capture))
+
+        dialog.run_export()
+
+        assert plain_capture.read_bytes() == before
+
+    def test_an_ordinary_export_beside_the_capture_still_works(
+        self, qt_app: object, plain_capture: Path
+    ) -> None:
+        """The guard must not refuse the case it was reached through."""
+        del qt_app
+        dialog = ExportDialog(open_capture(plain_capture))
+        dialog.format_box.setCurrentIndex(dialog.format_box.findData("markdown"))
+
+        dialog.run_export()
+
+        assert dialog.result_path is not None
+        assert (plain_capture.parent / "capture.md").is_file()
