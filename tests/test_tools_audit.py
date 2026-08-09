@@ -10,6 +10,7 @@ leak detector must not itself contain a leak.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import sys
 from pathlib import Path
@@ -165,6 +166,13 @@ class TestTheCensus:
         record = make_record(message="requestUUID:11111111-2222-4333-8444-555555555555")
         assert audit_capture.census([record]) == {}
 
+    def test_it_reads_every_field_not_just_the_message(self) -> None:
+        """An earlier version censused ``message`` alone, so a token in a
+        subsystem, a category or a path was seen by nothing at all."""
+        record = make_record(message="nothing here")
+        record = dataclasses.replace(record, category="Kx7Vn2Mq8Rw4Zt6Yb1Pd")
+        assert audit_capture.census([record]) != {}
+
     def test_a_path_is_not(self) -> None:
         """Paths clear the entropy floor easily, and a capture is mostly paths."""
         record = make_record(message="/System/Library/PrivateFrameworks/CloudKitDaemon.framework")
@@ -178,6 +186,41 @@ class TestTheCensus:
         """The exclusions must not swallow the thing the census is for."""
         record = make_record(message="x-apple-mmcs-auth:Zm9vYmFyMTIzNDU2Nzg5MHF3ZXJ0eXVpb3A")
         assert audit_capture.census([record]) != {}
+
+
+class TestRepeatedUuids:
+    """A UUID seen once is noise. A UUID seen hundreds of times is an identifier."""
+
+    def test_a_uuid_repeated_past_the_threshold_is_reported(self) -> None:
+        """The shape that hid a backup snapshot id 947 records deep."""
+        uuid = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
+        records = [
+            make_record(message=f"recordName=A:adaf:{uuid}:<redacted>:{i}")
+            for i in range(audit_capture.UUID_REPEAT_THRESHOLD + 1)
+        ]
+        assert audit_capture.repeated_uuids(records) == {
+            uuid: audit_capture.UUID_REPEAT_THRESHOLD + 1
+        }
+
+    def test_a_uuid_below_it_is_not(self) -> None:
+        record = make_record(message="requestUUID:11111111-2222-4333-8444-555555555555")
+        assert audit_capture.repeated_uuids([record]) == {}
+
+    def test_a_known_synthetic_uuid_is_never_reported(self) -> None:
+        """Including Apple's own sentinels, which recur in every real capture."""
+        uuid = "FEEDEEEE-DDDD-CCCC-BBBB-0000000001F5"
+        records = [
+            make_record(message=f"currentPersona=Personal({uuid})")
+            for _ in range(audit_capture.UUID_REPEAT_THRESHOLD + 5)
+        ]
+        assert audit_capture.repeated_uuids(records) == {}
+
+
+def test_a_dsid_outside_a_url_is_a_finding() -> None:
+    """A DSID is 10-12 digits: too short and too low-entropy for the key/value
+    rule's floors, so it needs a rule of its own or it is invisible."""
+    record = make_record(message="Match by altDSID - altDSID: 12345678902")
+    assert [f.rule for f in audit_capture.audit([record])] == ["icloud-dsid"]
 
 
 def test_the_tool_exits_non_zero_when_it_finds_something(

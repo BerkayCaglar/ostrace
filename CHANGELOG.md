@@ -123,6 +123,28 @@ one came from auditing what this repository had already published.
   for `signature:` and `reference:`, carrying 42-hex digests of backup chunks.
   Both are redacted and both spellings are now in the vocabulary.
 
+- **A second, independent audit then found three more**, after all of the above
+  was written and passing clean. MMCS chunk signatures written positionally as
+  `chunk ==> <hex>`; container capability handles written as
+  `mmcs put container 1:\t<handle>`; and the backup snapshot UUID — 947
+  occurrences, inside a `recordName=` whose neighbouring digest had already
+  been replaced with `<redacted>`. The first two had been in the census output
+  all along, below the point somebody stopped scrolling. The third was
+  invisible because the census discarded UUIDs wholesale.
+
+  So the tool changed too. `_searchable` never included `subsystem` or
+  `category`, which means no rule and no census had ever read either field. The
+  census now covers every field; its floor drops to 16 characters so that
+  nothing falls between it and the key/value rule's own floor; and a new pass
+  reports UUIDs recurring more than 25 times, on the principle that a UUID seen
+  once is per-operation noise while one seen hundreds of times identifies
+  something a human should name. A DSID gets its own rule, being too short and
+  too low-entropy for the generic one to ever fire on it. Apple's own sentinel
+  UUIDs are documented as such, so the next auditor need not re-derive that
+  they are not somebody's redaction. And the module docstring now states
+  plainly what the tool still cannot catch: a name, a value pasted into a `.py`
+  or a `.md`, and a digest written with no key in front of it.
+
 ## [0.1.0] - 2026-08-09
 
 The first release, and the first entry: everything here is new, so the sections

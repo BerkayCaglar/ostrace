@@ -31,10 +31,25 @@ not a gate -- a real capture is full of legitimate opaque UUIDs -- but it is the
 step that finds the category nobody thought of. Run it when regenerating
 fixtures, and read it.
 
-What this cannot do is recognise a *name*. An SSID is a word somebody chose;
-there is no shape to match. The tripwire is that an SSID travels next to a
-BSSID, and a BSSID is a MAC -- so the network rule fires and a human reads the
-line. Nothing here replaces reading a sample.
+What this cannot do, stated plainly, because a gate whose limits are unwritten
+gets trusted for things it never checked:
+
+* **It cannot recognise a name.** An SSID is a word somebody chose; a device
+  name is another. There is no shape to match. The tripwire for an SSID is that
+  it travels next to a BSSID and a BSSID is a MAC, so the network rule fires
+  and a human reads the line. Nothing covers a device name at all.
+* **It only reads captures.** CI points it at the fixtures. It cannot see a
+  real identifier pasted into a ``.py`` or a ``.md`` -- which has happened, in
+  this repository, twice.
+* **A digest written positionally has no key to key on.** ``chunk ==> <hex>``
+  and ``mmcs put container 1:\\t<handle>`` both carry values of exactly the kind
+  the key/value rule exists for, with no word in front of them. Both were found
+  in the census, and only after somebody read past the top of it.
+* **A colon-less MAC, a 40-hex legacy UDID and a bare device serial** have no
+  rule, because every pattern that matches them also matches thousands of QUIC
+  connection ids and inode numbers. The census is where they would surface.
+
+Nothing here replaces reading a sample by eye.
 """
 
 from __future__ import annotations
@@ -62,7 +77,15 @@ MIN_ENTROPY = 3.0
 MIN_SECRET_LENGTH = 16
 
 #: Tokens shorter than this are not worth a human's attention in the census.
-MIN_CENSUS_LENGTH = 20
+#: 16 rather than 20 because the key/value rule's own floor is 16: anything
+#: between the two would otherwise be invisible to both halves at once.
+MIN_CENSUS_LENGTH = 16
+
+#: A UUID repeated more often than this is not per-operation noise. It is a
+#: stable identifier for *something*, and a human should say what. This is the
+#: shape that hid a backup-snapshot id 947 records deep behind a `<redacted>`
+#: that had already been written beside it.
+UUID_REPEAT_THRESHOLD = 25
 
 #: Placeholders. Apple writes the first; this project writes the second.
 PLACEHOLDERS = frozenset({"<private>", "<redacted>", "(null)", "null", "nil", "none", ""})
@@ -73,8 +96,17 @@ KNOWN_SYNTHETIC = frozenset(
         "00008030-001A2B3C4D5E6F70",  # stand-in device UDID
         "10000000001",  # stand-in iCloud DSID
         "00000000-0000-4000-8000-000000000001",  # stand-in CloudKit account
+        "00000000-0000-4000-8000-000000000002",  # stand-in backup snapshot id
         "00000000000000000000000000000001",  # stand-in container user id
         "redacted-ssid",
+        # Apple's own sentinels, present verbatim in real captures. Listed so
+        # that the next auditor does not have to re-derive that they are not
+        # somebody's redaction: the persona family appears in five variants.
+        "FEEDEEEE-DDDD-CCCC-BBBB-0000000001F5",
+        "FEEDEEEE-DDDD-CCCC-BBBB-3333000001F5",
+        "FEEDEEEE-DDDD-CCCC-BBBB-5555000001F5",
+        "FFFFEEEE-DDDD-CCCC-BBBB-AAAA00000000",
+        "FFFFEEEE-DDDD-CCCC-BBBB-AAAA000001F5",
     }
 )
 
@@ -139,6 +171,10 @@ _DSID_URL = re.compile(r"icloud\.com[^\s\"']*?/content/(?P<dsid>\d{6,})")
 _BUNDLE = re.compile(r"\b(?:" + TLDS + r")\.(?:[A-Za-z0-9_-]+\.)+[A-Za-z0-9_-]+\b", re.IGNORECASE)
 _TOKEN = re.compile(rf"[A-Za-z0-9+/=_-]{{{MIN_CENSUS_LENGTH},}}")
 _UUID = re.compile(r"^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$")
+_ANY_UUID = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
+#: A DSID is 10-12 digits: too short for MIN_SECRET_LENGTH and too low-entropy
+#: for MIN_ENTROPY, so the key/value rule can never see one. It needs its own.
+_DSID_KEYED = re.compile(r"\b(?:alt)?dsid\b\s*[:=]\s*(?P<dsid>\d{6,})", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -195,7 +231,21 @@ def _is_locally_administered(mac: str) -> bool:
 
 
 def _searchable(record: Record) -> str:
-    parts = [record.message, record.process, record.process_path, record.image_path or ""]
+    """Every field a value could hide in.
+
+    ``subsystem`` and ``category`` were missing from this list, so nothing --
+    neither the rules nor the census -- ever looked at them. They are the two
+    fields a reader is least likely to check by eye, being short and repetitive
+    and usually ``com.apple.something``.
+    """
+    parts = [
+        record.message,
+        record.process,
+        record.process_path,
+        record.image_path or "",
+        record.subsystem or "",
+        record.category or "",
+    ]
     return "\n".join(parts)
 
 
@@ -216,6 +266,9 @@ def _check_identifiers(text: str) -> Iterator[tuple[str, str, int]]:
         if match.group(0) not in KNOWN_SYNTHETIC:
             yield "device-udid", match.group(0), match.start()
     for match in _DSID_URL.finditer(text):
+        if match.group("dsid") not in KNOWN_SYNTHETIC:
+            yield "icloud-dsid", match.group("dsid"), match.start("dsid")
+    for match in _DSID_KEYED.finditer(text):
         if match.group("dsid") not in KNOWN_SYNTHETIC:
             yield "icloud-dsid", match.group("dsid"), match.start("dsid")
 
@@ -271,19 +324,46 @@ def census(records: Iterable[Record]) -> dict[str, set[str]]:
     Grouped by context rather than listed flat because that is how a human
     classifies them: forty tokens after ``protectionInfoTag=`` are one decision,
     not forty.
+
+    Every searchable field, not just the message. An earlier version read only
+    ``message``, which left ``subsystem``, ``category`` and both paths censused
+    by nothing at all.
     """
     groups: dict[str, set[str]] = defaultdict(set)
     for record in records:
-        message = record.message
-        for match in _TOKEN.finditer(message):
+        text = _searchable(record)
+        for match in _TOKEN.finditer(text):
             token = match.group(0)
             if token in KNOWN_SYNTHETIC or _UUID.match(token) or _is_prose(token):
                 continue
             if entropy(token) < MIN_ENTROPY:
                 continue
-            before = message[max(0, match.start() - 34) : match.start()]
+            before = text[max(0, match.start() - 34) : match.start()]
             groups[before.replace("\n", " ").strip() or "(line start)"].add(token)
     return groups
+
+
+def repeated_uuids(records: Iterable[Record]) -> dict[str, int]:
+    """UUIDs occurring more than :data:`UUID_REPEAT_THRESHOLD` times.
+
+    The census drops UUIDs, and it is right to: a capture is full of them and
+    a UUID seen once is a per-operation correlation value that means nothing
+    off the device. A UUID seen *hundreds* of times is a different animal --
+    it is a stable identifier for a thing the capture keeps referring to, and
+    the human has to say what that thing is.
+
+    This exists because the previous audit missed exactly one: a backup
+    snapshot id, 947 occurrences, sitting inside a ``recordName=`` whose
+    neighbouring digest had already been replaced with ``<redacted>``. Dropping
+    it from the census meant it was never once offered for a decision.
+    """
+    counts: Counter[str] = Counter()
+    for record in records:
+        for match in _ANY_UUID.finditer(_searchable(record)):
+            token = match.group(0)
+            if token not in KNOWN_SYNTHETIC:
+                counts[token] += 1
+    return {u: n for u, n in counts.items() if n > UUID_REPEAT_THRESHOLD}
 
 
 def read(path: Path) -> list[Record]:
@@ -318,10 +398,19 @@ def main(argv: list[str] | None = None) -> int:
         for finding in findings:
             print(finding)
         if args.census:
+            repeats = repeated_uuids(records)
+            if repeats:
+                print(
+                    f"\n  UUIDs repeated more than {UUID_REPEAT_THRESHOLD} times "
+                    f"-- stable identifiers, say what each one is:"
+                )
+                for uuid, count in sorted(repeats.items(), key=lambda kv: -kv[1]):
+                    print(f"    {count:5d}x  {uuid}")
             groups = census(records)
             print(
                 f"\n  census: {sum(len(v) for v in groups.values())} tokens "
-                f"in {len(groups)} contexts"
+                f"in {len(groups)} contexts. Read all of it -- the last two "
+                f"findings were below the point somebody stopped scrolling."
             )
             for before, tokens in sorted(groups.items(), key=lambda kv: -len(kv[1])):
                 sample = sorted(tokens)[0]

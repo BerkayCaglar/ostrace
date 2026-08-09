@@ -40,8 +40,17 @@ redacted in place:
 | Device UDID, `X-CloudKit-DeviceID` | Permanent hardware identifiers; neither can be reset. |
 | iCloud DSID, CloudKit account and container user IDs | Resolve to one Apple ID. |
 | `x-apple-mmcs-auth`, upload receipts, presigned S3 signing material | Capability tokens for the owner's iCloud storage. |
-| ETags, `protectionInfoTag`, CloudKit record digests, SHA-512 digests | Derived from the owner's own backup content. |
+| ETags, `protectionInfoTag`, CloudKit record digests, SHA-512 digests, MMCS chunk signatures | Derived from the owner's own backup content. |
 | Third-party bundle identifiers reaching system daemons | An inventory of what is installed. |
+| The backup snapshot UUID | Not linkable to a person from outside, but it recurs 947 times and a redactor had already replaced the digest beside it. Half-scrubbing one string is how the next thing hides. |
+
+Three of those rows were added by a **second, independent audit** run after the
+first had finished and its tool was passing clean. It found MMCS chunk
+signatures written as `chunk ==> <hex>` and container handles written as
+`mmcs put container 1:\t<handle>` — the same classes as values already removed,
+in a syntax with no key word in front of them, so no rule fired. Both were
+sitting in the census output, below the point the first auditor stopped
+scrolling. **Read all of the census, not the top of it.**
 
 Redacted **in place**, not dropped: the record counts above are load-bearing in
 a dozen assertions, and the level and subsystem distributions are what several
