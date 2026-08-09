@@ -106,6 +106,29 @@ up, and each of these was found in a state it did not.
   icons stayed put: a dark window with a white log in the middle of it. The
   window owns the switch now and `gui.app` connects nothing.
 
+- **The dark theme rendered as white stripes through a dark table, and an empty
+  table as a white sheet.** A scroll area paints its background from the
+  *viewport's* palette, and the viewport ends up holding one of its own with
+  every role explicitly resolved — after which nothing set on the view reaches
+  it again. Measured with the table's `Base` correctly at `#1b1e24` and the
+  viewport still painting `#ffffff`: rows carrying `AlternateBase` came out
+  dark and the ones showing the background stayed white.
+
+  This is the second bug with that picture. The first was the split-brain
+  switch above, which was real and is fixed; every assertion that read
+  `table.palette()` passed throughout both. The tests read a pixel now.
+
+- **The columns did not fit the window, so an empty table scrolled sideways.**
+  `stretchLastSection` only *grows* the last section into space left over, and
+  the columns before it had used the window: measured on the shipped budgets at
+  1,280 pixels, five fixed columns of 91 characters came to 1,183 of a 1,254
+  pixel viewport, leaving the message 71 — about five characters — and
+  overflowing the window by 59 besides. The budgets are what a column wants;
+  the message now has a floor of 30 characters that wins, and the shortfall
+  comes out of the three identifier columns in proportion, never out of Time or
+  Level, whose contents have a known length. Measured after: 1,254 of 1,254,
+  no scrollbar, and the message went from 100 pixels to 372.
+
 - **Applying a theme that is already applied re-polished every widget in the
   process.** `setStyle` and `setStyleSheet` do that by definition, and nothing
   checked first. One window is the whole of production so it never showed, but
