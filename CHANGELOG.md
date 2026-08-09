@@ -37,6 +37,18 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Fixed
 
+- **A device name the terminal could not spell killed the command printing
+  it.** Redirected output does not get UTF-8; it gets the locale's encoding —
+  a code page on Windows, ASCII under `LANG=C` anywhere. Apple names a phone
+  after whoever set it up, so the stock name already carries a curly
+  apostrophe and a great many carry a script no code page covers. The
+  `UnicodeEncodeError` came from inside `print`, past every handler, so
+  `ostrace doctor > report.txt` stopped after four checks and left a traceback
+  where the diagnostics belonged — in the one situation the redirect is for.
+  Characters the encoding cannot carry are now escaped, as Python already does
+  on stderr: an escaped name still identifies the device, and a traceback
+  identifies nothing.
+
 - **Export was a dead end after a live capture.** Capture from the device,
   press Export, and the viewer said to disconnect to finish the recording.
   Disconnect, press Export again, and it said exactly the same thing: nothing

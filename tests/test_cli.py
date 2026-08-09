@@ -4,7 +4,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
+import io
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -86,6 +89,43 @@ class TestTopLevel:
         stderr = capsys.readouterr().err
         assert "not paired" in stderr
         assert "Trust This Computer" in stderr
+
+    def test_a_name_the_output_encoding_cannot_carry_is_escaped_not_fatal(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_devices: list[DeviceSummary],
+    ) -> None:
+        """`ostrace doctor > report.txt` used to die on the device's own name.
+
+        A redirected stream is not UTF-8: it takes the locale's encoding, which
+        is a code page on Windows and ASCII under `LANG=C` anywhere. Apple names
+        a phone after whoever set it up, so the default already carries a curly
+        apostrophe and plenty carry a script no code page covers. The
+        `UnicodeEncodeError` was raised inside `print` itself, past every
+        handler here, so the command stopped halfway through and left a
+        traceback where the diagnostics belonged -- in the one situation a
+        redirect is for.
+        """
+        del stub_devices
+        # Spelled as escapes so the name and the assertion below read the same:
+        # a Japanese given name, the curly apostrophe Apple puts in the stock
+        # name, and an emoji, which people do use.
+        exotic = dataclasses.replace(DEVICE, name="\u5915\u5b50\u2019s \U0001f34e")
+
+        async def fake_info(lockdown: object, connection: str = "usb") -> DeviceInfo:
+            return exotic
+
+        monkeypatch.setattr("ostrace.devices.discovery.read_device_info", fake_info)
+        raw = io.BytesIO()
+        monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="ascii"))
+
+        assert cli.main(["devices", "--verbose"]) == cli.EXIT_OK
+
+        sys.stdout.flush()
+        written = raw.getvalue().decode("ascii")
+        assert DEVICE.udid in written
+        assert "\\u5915\\u5b50" in written, "the name was escaped rather than dropped"
+        assert "iPhone18,2" in written, "the rest of the line survived"
 
 
 class TestDevices:

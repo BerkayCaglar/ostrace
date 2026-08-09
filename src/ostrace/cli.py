@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import sys
 from typing import TYPE_CHECKING
 
@@ -145,7 +146,34 @@ def _non_negative_int(raw: str) -> int:
     return value
 
 
+def _tolerate_unencodable_output() -> None:
+    """Escape characters the output encoding cannot carry, rather than dying.
+
+    A device is named by the person holding it, and the name comes back
+    verbatim: an emoji, a Japanese given name, the curly apostrophe Apple puts
+    in "Berkay's iPhone" by default. A redirected stream does not get UTF-8 --
+    it gets the locale's encoding, which on Windows is a code page and under
+    `LANG=C` anywhere is ASCII. Printing a name that encoding cannot represent
+    raised `UnicodeEncodeError` from inside the print itself, so `ostrace
+    doctor > report.txt` stopped halfway through its checks and exited with a
+    traceback where the diagnostics should have been -- in exactly the
+    situation the redirect exists for.
+
+    An escaped character still identifies the device. A traceback identifies
+    nothing, and this is what Python already does for stderr.
+    """
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is None:  # pragma: no cover - a stdout that is not a text stream
+        return
+    # A detached or already closed stream. Nothing here is worth failing over:
+    # the command has not started yet, and its own output will report the same
+    # broken stream in a way that names what the user was trying to do.
+    with contextlib.suppress(OSError, ValueError):
+        reconfigure(errors="backslashreplace")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _tolerate_unencodable_output()
     parser = build_parser()
     args = parser.parse_args(argv)
 
