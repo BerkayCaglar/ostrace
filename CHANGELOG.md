@@ -12,7 +12,8 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
-All five of these came from ten minutes of somebody actually using 0.1.0.
+Five of these came from ten minutes of somebody actually using 0.1.0. The last
+one came from auditing what this repository had already published.
 
 ### Added
 
@@ -68,6 +69,42 @@ All five of these came from ten minutes of somebody actually using 0.1.0.
   restored faithfully, opening where no display could show it. Redirected to a
   temporary directory now, per test rather than per session: shared, one test
   toggling the theme left it set for every window built afterwards.
+
+### Security
+
+- **The committed fixtures carried the capture device's own identifiers.**
+  `tests/fixtures/README.md` claimed a privacy filter, and there was one — but
+  it selected on the process a record came *from*. It dropped records emitted
+  by installed third-party applications and never read the contents of what
+  system daemons logged, which is exactly where a device's identifiers travel.
+  A system daemon logging your Wi-Fi BSSID is still logging your Wi-Fi BSSID.
+
+  Auditing all 8,000 records turned up the home Wi-Fi SSID and BSSID, which
+  resolves to a street address through public wardriving databases; the device
+  UDID and `X-CloudKit-DeviceID`, neither of which can be reset; the iCloud
+  DSID and CloudKit account identifiers; `x-apple-mmcs-auth` capability tokens
+  scoped to the owner's iCloud backup chunks; ETags, `protectionInfoTag` values
+  and digests derived from backup content; paired Bluetooth addresses; and a
+  list of installed applications. No password, session key or account
+  credential was among it — a capture contains none — but all of it identifies
+  a person, a device or a place.
+
+  1,085 records are redacted. Counts, levels and subsystem distributions are
+  unchanged, because a dozen assertions rest on them; each value became
+  `<redacted>`, or a same-shaped synthetic where the shape is what the parser
+  sees. The rewrite ran through this project's own `SpoolReader` and
+  `SpoolWriter`, verified byte-identical on a no-op pass before any
+  substitution was made. `tests/fixtures/README.md` now records what was
+  removed and the rule that would have prevented it: **filter on what a record
+  says, not on who said it.**
+
+  Because the `sdist` ships `tests/`, 0.1.0 carried the unredacted fixtures to
+  PyPI. That release has been deleted and 0.1.0 will not be reused; the git
+  history was rewritten and the repository recreated, so no commit here has
+  ever contained the data.
+
+- **The real device UDID had also been pasted into two unrelated tests** as a
+  sample `DeviceInfo` value. Both now use a synthetic one.
 
 ## [0.1.0] - 2026-08-09
 
