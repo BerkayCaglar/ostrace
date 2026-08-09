@@ -12,7 +12,27 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
-### Added
+Nothing yet.
+
+## [0.1.0] - 2026-08-09
+
+The first release, and the first entry: everything here is new, so the sections
+below are grouped by the phase that built them rather than as a diff against a
+version that does not exist. Where a measurement contradicted a decision, the
+entry says so rather than quietly adopting the new number.
+
+What you get is a command line (`devices`, `capture`, `doctor`, `export` with
+six formats) and a graphical viewer (`ostrace-gui`), on Windows, macOS and
+Linux, reading Apple's unified log over `os_trace_relay` — subsystem, category,
+thread and emitting library included, at DEBUG level and above.
+
+**Every `Fixed` entry below fixes something that never shipped.** There is no
+earlier version to have shipped it: the last phase was an audit that read the
+whole thing back against its own documentation and ran it against a real
+iPhone, and what that turned up is recorded here because the reasoning is worth
+keeping — not because any of it is a live risk to a reader of 0.1.0.
+
+### Added (phase 5, the pre-release audit and the redesign)
 
 - **`gaps.tsv` in the agent bundle.** Every other export states a gap inside
   the thing a reader reads; the bundle said it only in `CLAUDE.md`, which is
@@ -88,14 +108,14 @@ such: the `Record` model and the on-disk export formats documented in
 - **Help ▸ About**, which is now the only place the viewer says which version
   it is. The application has always known — nothing displayed it.
 
-### Removed
+### Removed (phase 5, the pre-release audit)
 
 - **Edit ▸ Settings…**, which opened nothing. Nothing in this release is
   configurable, and an inert Preferences item is worst on the platform its
   menu-role machinery exists for: macOS moves it into the application menu,
   where it is the item people press without looking.
 
-### Fixed
+### Fixed (phase 5, the pre-release audit)
 
 - **A device name the terminal could not spell killed the command printing
   it.** Redirected output does not get UTF-8; it gets the locale's encoding —
@@ -219,7 +239,7 @@ such: the `Record` model and the on-disk export formats documented in
   silence, in the last window — the one a reader studies, where an absent
   aftermath reads as "the device went quiet after the error".
 
-### Changed
+### Changed (phase 5, the pre-release audit)
 
 - **The viewer has a colour system rather than a palette.** Every colour is now
   a named token in `theme.TOKENS` — `surface`, `text-muted`, `level-error` —
@@ -294,18 +314,6 @@ such: the `Record` model and the on-disk export formats documented in
   record is corrected in place with a dated note, while a *decision* is still
   only reversed by a superseding ADR. ADR 0004 had already been edited twice
   under a rule that forbade it; the rule was the thing that was wrong.
-
-## [0.1.0] - 2026-08-09
-
-The first release, and the first entry: everything here is new, so the sections
-below are the order it was built in rather than a diff against a version that
-does not exist. Where a measurement contradicted a decision, the entry says so
-rather than quietly adopting the new number.
-
-What you get is a command line (`devices`, `capture`, `doctor`, `export` with
-six formats) and a graphical viewer (`ostrace-gui`), on Windows, macOS and
-Linux, reading Apple's unified log over `os_trace_relay` — subsystem, category,
-thread and emitting library included, at DEBUG level and above.
 
 ### Added
 
