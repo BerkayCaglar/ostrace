@@ -26,6 +26,7 @@ from ostrace.gui.columns import Column
 from ostrace.gui.filters import Filter
 from ostrace.gui.models import Find, RecordModel
 from ostrace.gui.theme import Scheme
+from ostrace.gui.widgets.status_bar import FOLLOWING, NOT_FOLLOWING
 from ostrace.gui.windows.main import MainWindow
 from ostrace.storage.capture import open_capture
 
@@ -443,6 +444,112 @@ def test_escape_lets_go_of_a_row_and_the_tail_resumes(window: MainWindow) -> Non
     window._follow()
     bar = window.table.verticalScrollBar()
     assert bar.value() >= bar.maximum() - 4, "the tail did not resume"
+
+
+class TestTheFollowIndicator:
+    """`docs/design/gui.md` §4 asked for this and phase 4 did not build it.
+
+    So the state was derived correctly and shown nowhere: clicking a row stops
+    the tail on purpose, and the ways back were a key nobody had been told
+    about and a menu item two levels down. Reported as "getting back to auto
+    scroll is very hard", which is exactly right.
+    """
+
+    def test_it_says_following_until_a_row_is_selected(self, window: MainWindow) -> None:
+        window.model.append([make_record(i) for i in range(50)])
+        assert window.status.follow_text == FOLLOWING
+
+        window.go_to(5)
+
+        assert window.status.follow_text == NOT_FOLLOWING
+        assert not window.following
+
+    def test_it_is_live_only_while_a_capture_is(self, window: MainWindow) -> None:
+        """There is no tail to follow in a file. The control stays where it is
+        and goes quiet, rather than appearing and disappearing."""
+        assert not window.status.follow.isEnabled()
+
+        window._set_capturing(capturing=True)
+        assert window.status.follow.isEnabled()
+
+        window._set_capturing(capturing=False)
+        assert not window.status.follow.isEnabled()
+
+    def test_pressing_it_lets_go_of_the_row_and_returns_to_the_end(
+        self, window: MainWindow
+    ) -> None:
+        """Asking to watch the newest records is not asking to keep one old
+        record open while they race past."""
+        window._set_capturing(capturing=True)
+        window.model.append([make_record(i) for i in range(50)])
+        window.go_to(5)
+        # Read into a local each time. `following` is a property, and a type
+        # checker keeps a narrowing of one across the call in between -- so
+        # asserting the same expression twice reads as a contradiction rather
+        # than as a before and an after.
+        stopped = window.following
+
+        window.status.follow.click()
+        resumed = window.following
+
+        assert not stopped
+        assert resumed
+        assert not window.table.currentIndex().isValid()
+        assert window.status.follow_text == FOLLOWING
+
+    def test_pressing_it_again_stops_the_tail(self, window: MainWindow) -> None:
+        window._set_capturing(capturing=True)
+        window.model.append([make_record(i) for i in range(50)])
+        before = window.following
+
+        window.status.follow.click()
+        after = window.following
+
+        assert before
+        assert not after
+        assert window.status.follow_text == NOT_FOLLOWING
+
+    def test_the_indicator_cannot_disagree_with_the_behaviour(self, window: MainWindow) -> None:
+        """One derivation, read by both.
+
+        An indicator computed separately from the thing it indicates is the
+        Console.app bug with a second face -- and this window had already been
+        bitten once by a follow state that disagreed with the view.
+        """
+        window.model.append([make_record(i) for i in range(200)])
+        window.table.resize(600, 300)
+        window.table.show()
+        QApplication.processEvents()
+
+        for shown in (True, False, True):
+            window.set_following(follow=shown)
+            assert window.following is shown
+            assert window.status.follow_text == (FOLLOWING if shown else NOT_FOLLOWING)
+            assert window.action_follow.isChecked() is shown
+
+    def test_go_to_bottom_twice_resumes_after_scrolling_away(self, window: MainWindow) -> None:
+        """The promise in `go_to_bottom`'s own docstring, which it did not keep.
+
+        Its second press cleared the selection and scrolled, but left
+        ``_at_bottom`` false -- so for a reader who had *scrolled* away rather
+        than clicked away, nothing resumed. Invisible until the state was put
+        on screen.
+        """
+        window.model.append([make_record(i) for i in range(200)])
+        window.table.resize(600, 300)
+        window.table.show()
+        QApplication.processEvents()
+
+        bar = window.table.verticalScrollBar()
+        bar.actionTriggered.emit(QAbstractSlider.SliderAction.SliderPageStepSub.value)
+        bar.setValue(0)
+        window._follow()
+        assert not window.following, "scrolling up did not stop the tail"
+
+        window.go_to_bottom()
+        window.go_to_bottom()
+
+        assert window.following
 
 
 def test_escape_does_not_move_the_view(window: MainWindow) -> None:
