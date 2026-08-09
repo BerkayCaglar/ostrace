@@ -52,7 +52,7 @@ from ostrace.gui.loader import CaptureLoader
 from ostrace.gui.models import Find, RecordModel
 from ostrace.gui.pump import Pump
 from ostrace.gui.shortcuts import BINDINGS, key_table, sequences
-from ostrace.gui.theme import Scheme
+from ostrace.gui.theme import Scheme, scheme_for
 from ostrace.gui.widgets.banner import Banner
 from ostrace.gui.widgets.detail_pane import DetailPane
 from ostrace.gui.widgets.export_dialog import ExportDialog
@@ -171,7 +171,41 @@ class MainWindow(QMainWindow):
         self._build_menus()
 
         self._connect_actions()
+        self._follow_color_scheme()
         self._set_capturing(capturing=False)
+
+    def _follow_color_scheme(self) -> None:
+        """Track the operating system's light/dark setting while this window lives.
+
+        A bound method rather than a lambda closing over ``self``: Qt drops a
+        connection whose receiver is a destroyed ``QObject``, and a lambda would
+        instead keep this window alive for as long as the application and then
+        call into a deleted C++ object.
+        """
+        app = QApplication.instance()
+        if not isinstance(app, QApplication):  # pragma: no cover - no app, no signal
+            return
+        app.styleHints().colorSchemeChanged.connect(self._on_color_scheme_changed)
+
+    def _on_color_scheme_changed(self, colour_scheme: Qt.ColorScheme) -> None:
+        self.set_scheme(scheme_for(colour_scheme))
+
+    def set_scheme(self, scheme: Scheme) -> None:
+        """Move the colours this window prebuilt for itself to ``scheme``.
+
+        `theme.apply_theme` moves the *palette*, which is everything Qt draws.
+        It does not reach the severity foregrounds or the minimap's bands,
+        which are resolved once and held, so a theme switch used to repaint the
+        window in the new scheme and leave every record's colour in the old
+        one. Measured on the shipped palette, `Info` and `Notice` -- most of any
+        capture -- landed at **1.14:1** against the new background: near-black
+        on near-black, or near-white on white. `docs/design/gui.md` §10 says the
+        switch is the same function called again, and this is the fan-out that
+        was missing rather than a second way of doing it.
+        """
+        self.scheme = scheme
+        self.model.set_scheme(scheme)
+        self.minimap.set_scheme(scheme)
 
     def _build_layout(self) -> None:
         """Assemble the widgets. No behaviour, no state."""

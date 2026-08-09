@@ -17,7 +17,12 @@ from tests.helpers import ERRORS, MIXED
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPalette
+from PySide6.QtWidgets import QApplication
+
 from ostrace.gui.columns import Column
+from ostrace.gui.theme import Scheme, contrast_ratio, palette_for, severity_for
 from ostrace.gui.windows.main import MainWindow
 
 pytestmark = pytest.mark.gui
@@ -201,6 +206,70 @@ def test_selection_falls_back_to_the_nearest_survivor(window: MainWindow) -> Non
     assert landed is not dropped, "the anchored record was supposed to be filtered out"
     assert current.row() > 0, "row zero would mean the anchor was thrown away"
     assert window.model.source_index(current.row()) >= anchor, "landed before where they were"
+
+
+class TestTheThemeSwitchReachesTheRecords:
+    """`apply_theme` moves the palette. It cannot move what was resolved once.
+
+    The severity foregrounds and the minimap's bands are built from the scheme
+    when the model is, and both carry a `set_scheme` that nothing in `src/`
+    called: an operating-system theme switch repainted the window in the new
+    scheme and left every record's colour in the old one. Measured on the
+    shipped palette, `Info` and `Notice` -- most of any capture -- came out at
+    **1.14:1** against the new background.
+
+    `docs/design/gui.md` §10 calls the switch "the same function called again",
+    so the document was right and the wiring was the bug.
+    """
+
+    def test_a_switch_recolours_the_records(self, window: MainWindow) -> None:
+        load(window, ERRORS)
+        assert window.scheme is Scheme.LIGHT
+
+        window.set_scheme(Scheme.DARK)
+
+        assert window.model.scheme is Scheme.DARK
+        assert window.minimap.scheme is Scheme.DARK, "the overview kept the old scheme"
+
+    def test_every_level_stays_legible_across_the_switch(self, window: MainWindow) -> None:
+        """The consequence, asserted rather than inferred.
+
+        A model holding one scheme against a background drawn in the other is
+        not merely inconsistent -- it is unreadable, which is the failure the
+        contrast tests exist to prevent and the only one they could not see,
+        because they only ever compare a scheme with itself.
+        """
+        load(window, ERRORS)
+        window.set_scheme(Scheme.DARK)
+        background = palette_for(Scheme.DARK).color(QPalette.ColorRole.Base)
+
+        for level in Level:
+            foreground = severity_for(level, window.model.scheme).foreground
+            ratio = contrast_ratio(foreground, background)
+            assert ratio >= 4.5, f"{level.name} is {ratio:.2f}:1 after the switch"
+
+    def test_the_window_is_connected_to_the_platform(self, window: MainWindow) -> None:
+        """Driven through the signal itself, not by calling the slot.
+
+        The offscreen plugin's `setColorScheme` is a no-op, so the hints never
+        move and a slot that re-read them could only ever be observed doing
+        nothing. Carrying the new value as the signal's argument is what makes
+        the connection testable at all -- emitting it by hand is exactly what
+        the platform does.
+        """
+        app = QApplication.instance()
+        assert isinstance(app, QApplication)
+
+        # Both directions in one loop rather than two statements: asserting on
+        # the same attribute twice narrows it to the first answer, and the
+        # second comparison is then unreachable as far as a type checker knows.
+        hints = app.styleHints()
+        for emitted, expected in (
+            (Qt.ColorScheme.Dark, Scheme.DARK),
+            (Qt.ColorScheme.Light, Scheme.LIGHT),
+        ):
+            hints.colorSchemeChanged.emit(emitted)
+            assert window.scheme is expected
 
 
 def test_the_table_shows_what_the_model_says(window: MainWindow) -> None:

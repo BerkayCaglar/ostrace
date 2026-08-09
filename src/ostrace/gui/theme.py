@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import QToolTip
 
 from ostrace.model import Level
 
@@ -52,6 +53,7 @@ __all__ = [
     "mark_tint",
     "palette_for",
     "resolve_scheme",
+    "scheme_for",
     "severity_for",
 ]
 
@@ -213,15 +215,29 @@ def severity_for(level: Level, scheme: Scheme) -> Severity:
     )
 
 
-def resolve_scheme(hints: QStyleHints) -> Scheme:
-    """Which scheme the platform is asking for.
+def scheme_for(colour_scheme: Qt.ColorScheme) -> Scheme:
+    """Which scheme one of Qt's answers means.
 
     ``Unknown`` is the honest answer under the offscreen plugin and on any
     platform theme Qt does not recognise, and it is not an error -- it means
-    nobody expressed a preference, so the light scheme wins. This is the only
-    place the operating system gets a say in how anything looks.
+    nobody expressed a preference, so the light scheme wins.
+
+    Separate from :func:`resolve_scheme` because ``colorSchemeChanged`` carries
+    the new value as its argument, and a slot that re-read the hints instead
+    would be untestable: the offscreen plugin's ``setColorScheme`` is a no-op,
+    so the hints never move and the signal could only ever be observed doing
+    nothing.
     """
-    return Scheme.DARK if hints.colorScheme() == Qt.ColorScheme.Dark else Scheme.LIGHT
+    return Scheme.DARK if colour_scheme == Qt.ColorScheme.Dark else Scheme.LIGHT
+
+
+def resolve_scheme(hints: QStyleHints) -> Scheme:
+    """Which scheme the platform is asking for.
+
+    This is the only place the operating system gets a say in how anything
+    looks.
+    """
+    return scheme_for(hints.colorScheme())
 
 
 def apply_theme(app: QApplication, scheme: Scheme) -> None:
@@ -230,9 +246,18 @@ def apply_theme(app: QApplication, scheme: Scheme) -> None:
     The style is set first and the palette second, and the order is load-
     bearing: ``QApplication`` resets the palette to the style's defaults when
     the style changes, so setting the palette first silently discards it.
+
+    ``QToolTip`` keeps a palette of its own that the application's does not
+    reach, so the ``ToolTipBase`` and ``ToolTipText`` roles set two functions up
+    arrived nowhere: tooltips stayed on the platform's own colours in both
+    schemes -- measured as Windows' ``#ffffe1`` under the dark theme as well as
+    the light one. Qt 6 removed the class-specific ``setPalette`` overload that
+    used to cover this, and ``QToolTip.setPalette`` is what replaced it.
     """
+    palette = palette_for(scheme)
     app.setStyle(STYLE)
-    app.setPalette(palette_for(scheme))
+    app.setPalette(palette)
+    QToolTip.setPalette(palette)
 
 
 def contrast_ratio(first: QColor, second: QColor) -> float:

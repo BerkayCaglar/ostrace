@@ -119,6 +119,30 @@ such: the `Record` model and the on-disk export formats documented in
 - **The keyboard sheet assumed a monospaced font.** Padded columns in a
   `QMessageBox` label, which is proportional on every platform.
 
+- **Switching the operating system's theme made the log unreadable.**
+  `apply_theme` moves the palette, which is everything Qt draws — but the
+  severity foregrounds and the minimap's bands are resolved from the scheme
+  once and held, and both `set_scheme` methods were called only from tests. So
+  a switch repainted the window in the new scheme and left every record's
+  colour in the old one. Measured on the shipped palette: **all twelve**
+  level-and-scheme pairs fall below 3:1, and `Info` and `Notice` — most of any
+  capture — land at **1.14:1**, near-black on near-black.
+
+  Invisible to the contrast tests, which compare a scheme against itself and so
+  could never see a window holding two at once. `docs/design/gui.md` §10 already
+  said the switch is "the same function called again"; the fan-out that would
+  have made that true was missing. The signal's own argument is what the window
+  reads now, rather than re-reading the hints — which also makes the path
+  testable, since the offscreen plugin's `setColorScheme` is a no-op and the
+  hints never move.
+
+- **Tooltips ignored the theme entirely.** `QToolTip` keeps a palette of its
+  own that the application's does not reach, so the `ToolTipBase` and
+  `ToolTipText` roles `theme.py` has always set arrived nowhere — tooltips
+  stayed on Windows' `#ffffe1` under the dark theme as well as the light one,
+  a bright yellow card on a dark window. Qt 6 removed the class-specific
+  `setPalette` overload that used to cover this and nothing replaced the call.
+
 - **`ai-report` named the wrong section as verbatim**, and at a small budget
   claimed "the most frequent are shown" above an empty code fence — or "the 0
   most frequent are shown", which is not a sentence. The subsystem placeholder

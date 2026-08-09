@@ -7,10 +7,13 @@ unusually testable: `palette_for` is a pure function of a scheme, so the
 offscreen lane can assert the actual numbers on all three operating systems
 without a display, a platform theme or a font.
 
-That matters because the alternative check does not exist. ``setColorScheme()``
-is a no-op under the offscreen plugin, so *switching* themes cannot be
-exercised in CI at all -- only the colour maths can, and only because the
-theme was built as a function rather than as a reading of the platform.
+That matters because the alternative check is only half available.
+``setColorScheme()`` is a no-op under the offscreen plugin, so nothing here can
+make the *platform* change its mind. What a switch does once it arrives is
+testable -- `colorSchemeChanged` carries the new value, so emitting it by hand
+drives the same path the platform does, which is where
+``test_gui_wiring.TestTheThemeSwitchReachesTheRecords`` picks this up. What
+remains unreachable in CI is only the platform's own delivery of that signal.
 """
 
 from __future__ import annotations
@@ -164,3 +167,22 @@ def test_apply_theme_sets_the_style_before_the_palette(qt_app: object) -> None:
     assert qt_app.palette().base().color() == palette_for(Scheme.DARK).base().color()
     apply_theme(qt_app, Scheme.LIGHT)
     assert qt_app.palette().base().color() == palette_for(Scheme.LIGHT).base().color()
+
+
+def test_the_theme_reaches_tooltips(qt_app: object) -> None:
+    """`QToolTip` keeps its own palette, which the application's does not reach.
+
+    So the two tooltip roles this module sets arrived nowhere and tooltips
+    stayed on the platform's colours in both schemes -- Windows' `#ffffe1`,
+    which under the dark theme is a bright yellow card on a dark window. Qt 6
+    removed the class-specific `setPalette` overload that used to cover it, and
+    nothing replaced the call.
+    """
+    from PySide6.QtWidgets import QApplication, QToolTip
+
+    assert isinstance(qt_app, QApplication)
+    for scheme in (Scheme.DARK, Scheme.LIGHT):
+        apply_theme(qt_app, scheme)
+        intended = palette_for(scheme)
+        for role in (QPalette.ColorRole.ToolTipBase, QPalette.ColorRole.ToolTipText):
+            assert QToolTip.palette().color(role) == intended.color(role), role.name
