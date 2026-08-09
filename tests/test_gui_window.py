@@ -14,8 +14,6 @@ being eligible, and there is no Mac here to notice.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
@@ -29,6 +27,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QAction, QPalette
 from PySide6.QtWidgets import (
+    QApplication,
     QHeaderView,
     QStyle,
     QStyleOptionHeader,
@@ -36,11 +35,12 @@ from PySide6.QtWidgets import (
     QTableView,
 )
 
-from ostrace.gui.columns import Column
+from ostrace.gui.columns import COLUMNS, Column
 from ostrace.gui.models import RecordModel
 from ostrace.gui.shortcuts import BINDINGS, RELOCATED
-from ostrace.gui.theme import Scheme, palette_for, selection_row, severity_for
+from ostrace.gui.theme import Scheme, palette_for, selection_row, severity_for, token
 from ostrace.gui.widgets.log_table import (
+    MESSAGE_MINIMUM,
     FastHeader,
     LogTable,
     MiddleElidingDelegate,
@@ -49,9 +49,6 @@ from ostrace.gui.widgets.log_table import (
 from ostrace.gui.windows.main import MainWindow
 from ostrace.model import Level
 from tests.helpers import ERRORS, make_record
-
-if TYPE_CHECKING:
-    from PySide6.QtWidgets import QApplication
 
 pytestmark = pytest.mark.gui
 
@@ -63,6 +60,95 @@ _Index = QModelIndex | QPersistentModelIndex
 def window(qt_app: QApplication) -> MainWindow:
     del qt_app  # required so that exactly one QApplication exists first
     return MainWindow()
+
+
+@pytest.mark.parametrize("scheme", list(Scheme))
+def test_the_table_paints_the_scheme_it_was_given(qt_app: QApplication, scheme: Scheme) -> None:
+    """A pixel, not a palette, because the palette was right and the paint was
+    not.
+
+    A scroll area paints its background from the *viewport's* palette, and the
+    viewport ends up holding one of its own with every role explicitly
+    resolved -- after which nothing set on the view reaches it. Measured with
+    the table's ``Base`` correctly at ``#1b1e24`` and the viewport still
+    painting ``#ffffff``: rows carrying `AlternateBase` came out dark and the
+    ones showing the background stayed white, so the dark theme rendered as
+    white stripes through a dark table. Every assertion that read
+    ``table.palette()`` passed throughout.
+    """
+    del qt_app
+    table = LogTable(scheme=scheme)
+    table.resize(400, 200)
+    table.show()
+    QApplication.processEvents()
+
+    painted = table.viewport().grab().toImage().pixelColor(20, 20)
+
+    assert painted == token("surface-raised", scheme)
+
+
+def test_a_theme_switch_reaches_the_paint(qt_app: QApplication) -> None:
+    """And it has to keep reaching it after the table has been built."""
+    del qt_app
+    table = LogTable(scheme=Scheme.LIGHT)
+    table.resize(400, 200)
+    table.show()
+    QApplication.processEvents()
+
+    table.set_scheme(Scheme.DARK)
+    QApplication.processEvents()
+
+    painted = table.viewport().grab().toImage().pixelColor(20, 20)
+    assert painted == token("surface-raised", Scheme.DARK)
+
+
+class TestTheColumnsFitTheWindow:
+    """`stretchLastSection` only grows the last section into space left over.
+
+    When the columns before it have used the window there is nothing left, so
+    it keeps its default hundred pixels and the table scrolls sideways -- with
+    no rows in it, which is how this was noticed. Measured on the shipped
+    budgets at a 1,280-pixel window: five fixed columns of 91 characters came
+    to 1,183 pixels of a 1,254-pixel viewport, leaving the message 71.
+    """
+
+    @pytest.fixture
+    def table(self, qt_app: QApplication) -> LogTable:
+        del qt_app
+        table = LogTable()
+        table.setModel(RecordModel())
+        table.resize(1280, 400)
+        table.show()
+        QApplication.processEvents()
+        return table
+
+    def test_the_message_keeps_room_to_be_read(self, table: LogTable) -> None:
+        unit = table.fontMetrics().horizontalAdvance("0")
+        message = table.columnWidth(int(Column.MESSAGE))
+        assert message >= MESSAGE_MINIMUM * unit, f"the message got {message // unit} characters"
+
+    def test_nothing_overflows_the_window(self, table: LogTable) -> None:
+        widths = sum(table.columnWidth(index) for index in range(len(COLUMNS)))
+        assert widths <= table.viewport().width()
+        assert table.horizontalScrollBar().maximum() == 0
+
+    def test_the_two_columns_with_a_known_length_are_not_trimmed(self, table: LogTable) -> None:
+        """A timestamp missing its last digits is a timestamp nobody can use,
+        and `Level` has to fit ``User Action`` and its glyph."""
+        unit = table.fontMetrics().horizontalAdvance("0")
+        for column in (Column.TIME, Column.LEVEL):
+            budget = COLUMNS[int(column)].characters
+            assert budget is not None
+            assert table.columnWidth(int(column)) >= budget * unit
+
+    def test_restored_widths_are_not_overruled(self, table: LogTable) -> None:
+        """They are a decision the user already made."""
+        wanted = [300, 300, 300, 300, 300, 300]
+        table.restore_column_widths(wanted)
+        table.resize(900, 400)
+        QApplication.processEvents()
+
+        assert table.columnWidth(int(Column.TIME)) == 300
 
 
 def test_no_action_shows_an_icon_in_a_menu(window: MainWindow) -> None:

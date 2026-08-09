@@ -678,8 +678,9 @@ class MainWindow(QMainWindow):
             self._split.restoreState(split)
         widths = settings.value("table/columns")
         if isinstance(widths, list) and len(widths) == len(COLUMNS):
-            for index, width in enumerate(widths):
-                self.table.setColumnWidth(index, int(width))
+            # Through the table rather than column by column, so that it knows
+            # these are the user's widths and stops fitting its own.
+            self.table.restore_column_widths([int(width) for width in widths])
         return True
 
     # -- actions ---------------------------------------------------------
