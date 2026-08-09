@@ -12,17 +12,24 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
-Almost all of this came from somebody actually using the program against a
-phone, in two rounds. The security entry came from auditing what this
-repository had already published.
+## 0.1.1 - 2026-08-10
+
+The first release that exists. 0.1.0 was published and withdrawn the day
+before — see its entry below — so this is the same program with the reason for
+that withdrawal fixed, plus everything three rounds of using it against a phone
+turned up.
+
+Almost all of this came from somebody actually running the program. The
+security entry came from auditing what this repository had already published.
 
 Worth stating plainly, because it is the pattern: **every one of these bugs was
 reachable in a minute of real use, and the test suite covered the code they
 were in.** The follow tests scrolled to the bottom by hand before appending —
 the one thing a real capture never does. The trim tests never showed the
 window, so nothing could scroll. The export tests ran on the interface thread
-and never noticed the freeze. A green suite is evidence about the states it set
-up, and each of these was found in a state it did not.
+and never noticed the freeze. The theme tests read a palette where the bug was
+in the paint. A green suite is evidence about the states it set up, and every
+one of these was found in a state it did not.
 
 ### Added
 
