@@ -177,6 +177,35 @@ class TestSessionLifecycle:
         asyncio.run(run())
         assert seam.opened[0].closed is True
 
+    def test_aclose_releases_the_service_before_the_lockdown(self) -> None:
+        """The order, which is the whole of this project's hardest-won rule.
+
+        A device stream is two sockets: the lockdown session, and the
+        `os_trace_relay` service connection lockdown merely starts. The service
+        is what the generator is blocked reading, so it has to be closed first
+        or the close cannot interrupt the read it is trying to end.
+
+        Nothing asserted the *order* -- deleting the service close, or swapping
+        the two, left the whole suite green, and the device test only checks
+        that both fields end up `None`. `aclose()` itself is bookkeeping over
+        two objects, so it needs no hardware to pin down.
+        """
+        closed: list[str] = []
+
+        class FakeService:
+            async def close(self) -> None:
+                closed.append("service")
+
+        source = OsTraceSource(reconnect=ReconnectPolicy.disabled())
+        source._stream_service = FakeService()
+        source._active = types.SimpleNamespace(close=lambda: closed.append("lockdown"))
+
+        asyncio.run(source.aclose())
+
+        assert closed == ["service", "lockdown"]
+        assert source._stream_service is None
+        assert source._active is None  # type: ignore[unreachable]
+
     def test_a_deliberate_stop_is_not_reported_as_an_outage(
         self,
         seam: types.SimpleNamespace,
@@ -383,3 +412,69 @@ def entry(pid: int, filename: str, *, level: str = "NOTICE") -> Any:
         message="m",
         level=types.SimpleNamespace(name=level),
     )
+
+
+class TestStoppingDuringAnOutage:
+    def test_a_stop_during_a_reconnect_does_not_reopen_the_device(
+        self,
+        seam: types.SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The two-sockets rule, arriving through the path it did not cover.
+
+        `stream()` guards its own reconnect delay, but the retry loop inside
+        `_connect` slept up to thirty times of its own and checked nothing. A
+        stop that landed there returned in a millisecond reporting success --
+        there was no service socket to close at that moment -- and the loop
+        went on to open a fresh lockdown *and* a fresh relay, delivering more
+        records into a stream nobody was reading.
+        """
+        source = OsTraceSource(reconnect=ReconnectPolicy(delay=0.01, max_retries=30))
+        emitting(
+            [record(0), StreamInterruptedError("cable pulled")],
+            [record(1)],
+            monkeypatch=monkeypatch,
+        )
+
+        async def run() -> list[Record | Gap]:
+            async def stop_soon() -> None:
+                await asyncio.sleep(0.015)
+                await source.aclose()
+
+            collected: list[Record | Gap] = []
+            stopper: asyncio.Future[None] | None = None
+            async for item in source.stream():
+                collected.append(item)
+                if stopper is None:
+                    # Armed from inside the loop, while the generator is
+                    # suspended at its yield: the first connect has to succeed,
+                    # and only the reconnects after it fail. The attempt after
+                    # the third failure would succeed, which is what makes the
+                    # session count meaningful.
+                    seam.open_errors.extend(NoDeviceFoundError("gone") for _ in range(3))
+                    stopper = asyncio.ensure_future(stop_soon())
+            if stopper is not None:
+                await stopper
+            return collected
+
+        items = asyncio.run(run())
+
+        assert len(seam.opened) == 1, f"reopened the device after a stop: {len(seam.opened)}"
+        assert not any(isinstance(item, Gap) for item in items), "a stop is not an outage"
+
+
+def test_a_source_that_forgets_aclose_is_loud_rather_than_leaky() -> None:
+    """`SourceCloseMixin.aclose` raises rather than defaulting to a no-op.
+
+    A default that quietly did nothing would give a future source a working
+    `async with` that releases nothing, and the failure would show up as
+    sockets accumulating under load rather than as an error. Replacing the
+    raise with `return` left the whole suite green.
+    """
+    from ostrace.sources.base import SourceCloseMixin
+
+    class Forgetful(SourceCloseMixin):
+        name = "forgetful"
+
+    with pytest.raises(NotImplementedError):
+        asyncio.run(Forgetful().aclose())

@@ -1,8 +1,9 @@
 # ostrace
 
-Cross-platform iOS log viewer. Done: phases 0 and 1 (model, sources, storage),
-phase 2 (`analysis/` plus all six exporters) and phase 3 (`devices`, `capture`,
-`doctor`, `export`). Not built: the GUI (phase 4) and the release (phase 5).
+Cross-platform iOS log viewer, complete through 0.1.0: the model, sources and
+storage (phases 0-1), `analysis/` plus all six exporters (phase 2), the command
+line — `devices`, `capture`, `doctor`, `export` (phase 3), and the PySide6
+viewer in `gui/` (phase 4).
 
 Read when relevant, rather than up front: `docs/adr/` for why decisions were
 taken, `docs/formats/` for the on-disk contracts, `CONTRIBUTING.md` for setup,
@@ -120,5 +121,8 @@ Conventional-ish commit subjects. One logical change per pull request.
      exported capture* to orient an agent investigating that log. That is a
      build artifact and has nothing to do with this file. -->
 
-`docs/formats/` specifies contracts before they are implemented, and the README
-documents CLI subcommands that do not exist yet. Neither is a bug to fix.
+`docs/design/gui.md` is a behaviour contract written before the code, and parts
+of it describe things phase 4 deliberately did not build — its own §13 lists
+some, and a few more are recorded there where the implementation went a
+different way with a reason. A mismatch between that document and the code is
+worth reading before assuming either side is wrong.

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ostrace import __version__
-from ostrace.errors import StorageError, UnsupportedFormatVersionError
+from ostrace.errors import DestinationInUseError, StorageError, UnsupportedFormatVersionError
 from ostrace.model import DeviceInfo, Platform
 from ostrace.paths import with_session_suffix
 from ostrace.storage.codec import parse_timestamp
@@ -144,6 +144,15 @@ class SessionWriter:
         flags: dict[str, Any] | None = None,
     ) -> None:
         self.path = with_session_suffix(Path(path))
+        spool_path = self.path / SPOOL_NAME
+        if spool_path.exists():
+            # `gzip.open(..., "wb")` truncates, so a second `capture -o
+            # ~/logs/today` used to replace the first one's records with no
+            # warning and exit successfully. A capture is not reproducible --
+            # the device has moved on -- so overwriting one is the single most
+            # expensive thing this package can do by accident.
+            msg = f"{self.path.name} already holds a capture"
+            raise DestinationInUseError(msg, hint="Choose another --output, or move it aside.")
         self.path.mkdir(parents=True, exist_ok=True)
         self.meta = SessionMeta(
             device=device,

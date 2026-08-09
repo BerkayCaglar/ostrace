@@ -20,11 +20,11 @@ from tests.helpers import make_record
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtGui import QImage, QMouseEvent
 
 from ostrace.gui.filters import Filter
 from ostrace.gui.models import BUCKET_ROWS, Band, RecordModel
-from ostrace.gui.theme import Scheme
+from ostrace.gui.theme import Scheme, severity_for
 from ostrace.gui.widgets.minimap import Minimap
 
 pytestmark = pytest.mark.gui
@@ -229,3 +229,99 @@ def test_the_summary_describes_records_not_rows(model: RecordModel) -> None:
     )
     assert any(band & Band.ERROR for band in model.overview(BANDS))
     assert isinstance(model.row_at(1), Record)
+
+
+# -- the trim keeps the summary honest ---------------------------------------
+
+
+def test_trimming_leaves_the_same_summary_as_a_full_rebuild(model: RecordModel) -> None:
+    """The safety net under an optimisation that could drift silently.
+
+    One trim drops 20,000 rows and cost 118 ms, most of it recomputing every
+    bucket -- twice. It now reuses the buckets that survive, which is only
+    correct while the cut lands on a bucket boundary and nothing has shifted
+    the view rows underneath them. A summary that drifts out of step does not
+    fail loudly: it points at the wrong part of the log, which is worse than
+    no strip at all.
+
+    So the assertion is equivalence with the slow path, not a timing.
+    """
+    model._row_cap = 2_000
+    rows: list[object] = []
+    for index in range(6_000):
+        rows.append(make_record(index, level=Level.ERROR if index % 97 == 0 else Level.DEBUG))
+        if index % 1_500 == 0:
+            rows.append(gap_at(index))
+    model.append(rows)  # type: ignore[arg-type]
+
+    assert len(model._rows) <= int(2_000 * 1.1) + 1, "the cap did not bite"
+    fast = model.overview(BANDS)
+
+    model._rebuild_buckets()
+    assert model.overview(BANDS) == fast
+
+
+def test_the_gap_count_survives_trimming(model: RecordModel) -> None:
+    """It is read once per pump tick, so it is maintained rather than scanned
+    -- and a maintained counter is one that can drift."""
+    model._row_cap = 500
+    rows: list[object] = []
+    for index in range(3_000):
+        rows.append(make_record(index))
+        if index % 250 == 0:
+            rows.append(gap_at(index))
+    model.append(rows)  # type: ignore[arg-type]
+
+    assert model.gaps == sum(1 for row in model._rows if isinstance(row, Gap))
+
+
+def test_the_gap_count_matches_after_every_batch(model: RecordModel) -> None:
+    model.append([make_record(0), gap_at(1), make_record(1)])
+    assert model.gaps == 1
+    model.append([gap_at(2), gap_at(3)])
+    assert model.gaps == 3
+    model.set_filter(Filter(minimum_level=Level.FAULT))
+    assert model.gaps == 3, "a filter hides rows; it does not discard the capture"
+
+
+def test_the_strip_actually_draws_its_bands(qt_app: object) -> None:
+    """Every other test here asserts `overview()` -- the data, not the picture.
+
+    Making `paintEvent` return straight after filling the background left all
+    of them green. That is the shape of the `FastHeader` bug this project
+    already paid for: the suite passed, the benchmark improved, and only a
+    screenshot showed an empty strip. Colour is not a font metric, so a render
+    is safe offscreen.
+    """
+    del qt_app
+    model = RecordModel(Scheme.LIGHT)
+    model.append([make_record(index, level=Level.ERROR) for index in range(1000)])
+
+    strip = Minimap(Scheme.LIGHT)
+    strip.resize(10, 200)
+    strip.set_model(model)
+
+    image = QImage(strip.size(), QImage.Format.Format_ARGB32)
+    strip.render(image)
+
+    painted = {image.pixelColor(5, y).name() for y in range(200)}
+    wanted = severity_for(Level.ERROR, Scheme.LIGHT).foreground.name()
+    assert wanted in painted, f"the error colour {wanted} was never drawn"
+
+
+def test_the_drawn_colours_follow_the_scheme(qt_app: object) -> None:
+    """`set_scheme` rebuilds the prebuilt colours; nothing checked they reach
+    the paint."""
+    del qt_app
+    model = RecordModel(Scheme.LIGHT)
+    model.append([make_record(index, level=Level.ERROR) for index in range(1000)])
+
+    def painted(scheme: Scheme) -> set[str]:
+        strip = Minimap(scheme)
+        strip.resize(10, 200)
+        strip.set_model(model)
+        image = QImage(strip.size(), QImage.Format.Format_ARGB32)
+        strip.render(image)
+        return {image.pixelColor(5, y).name() for y in range(200)}
+
+    assert painted(Scheme.LIGHT) != painted(Scheme.DARK)

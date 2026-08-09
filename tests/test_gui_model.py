@@ -407,3 +407,25 @@ def test_is_record_and_is_marker_are_complements(records: list[Record]) -> None:
     )
     for row in (records[0], gap, Eviction(count=1, through=records[0].timestamp)):
         assert is_record(row) != is_marker(row)
+
+
+def test_trimming_removes_rows_rather_than_resetting_the_model(qt_app: object) -> None:
+    """A reset throws away the selection and the scroll position.
+
+    On a live capture the cap is reached every couple of minutes, forever, and
+    always while somebody is reading something -- which is why `_trim` is
+    written as a removal. Nothing asserted it: swapping the removal for
+    `beginResetModel`/`endResetModel` left the whole suite green, because the
+    existing tests check row counts and eviction text.
+    """
+    del qt_app
+    model = RecordModel(Scheme.LIGHT, row_cap=50)
+    resets: list[int] = []
+    removals: list[int] = []
+    model.modelAboutToBeReset.connect(lambda: resets.append(1))
+    model.rowsAboutToBeRemoved.connect(lambda *_: removals.append(1))
+
+    model.append([make_record(index) for index in range(200)])
+
+    assert resets == [], "trimming must not reset the model"
+    assert removals, "trimming must remove rows"

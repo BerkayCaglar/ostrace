@@ -276,6 +276,12 @@ class OsTraceSource(SourceCloseMixin):
                 # more useful thing to report than the last attempt's error.
                 raise StreamInterruptedError(pending_gap[1]) from exc
 
+            if lockdown is None:
+                # Stopped while reconnecting. Returning here is what stops the
+                # loop from opening a fresh lockdown *and* a fresh relay for a
+                # capture that has already been released.
+                return
+
             connected_once = True
 
             # Identity comes from the session we just opened, and is refreshed
@@ -302,43 +308,66 @@ class OsTraceSource(SourceCloseMixin):
                     self._last_seen = record.timestamp
                     yield record
             except OstraceError as exc:
-                # `aclose()` closes the socket out from under the pending read,
-                # so a deliberate stop arrives here looking exactly like an
-                # outage. It is not one: reconnecting would be the opposite of
-                # what was asked, and reporting an error would make every stop
-                # button look like a failure.
-                if self._stopped():
-                    return
-                # Otherwise one question, asked the same way here as at connect
-                # time: is waiting going to help? Matching on a specific
-                # exception type instead would miss a recoverable outage that
-                # arrives wearing a different class.
-                if not (self.reconnect.enabled and exc.recoverable):
-                    raise
-                reason = exc.message
+                outage = self._outage_reason(exc)
             else:
-                # A live stream does not end by itself. If it did, the device
-                # went away quietly, which is the same outage in a politer form.
-                if self._stopped() or not self.reconnect.enabled:
-                    return
-                reason = "stream ended"
+                outage = self._outage_reason(None)
+            if outage is None:
+                return
 
-            pending_gap = (self._last_seen or self._device_now(), reason)
+            pending_gap = (self._last_seen or self._device_now(), outage)
             await asyncio.sleep(self.reconnect.delay)
             # Checked again after the wait: a stop that lands during the
             # reconnect delay must not be answered by reconnecting.
             if self._stopped():
                 return
 
-    async def _connect(self, *, resuming: bool) -> Any:  # noqa: ANN401 - LockdownClient
+    def _outage_reason(self, exc: OstraceError | None) -> str | None:
+        """What to write in the gap, or ``None`` to end the stream.
+
+        ``exc`` is what the connection raised, or ``None`` when it simply ran
+        out. Both arrive here because both mean the same thing: this connection
+        is over, and the only question is whether another one should be opened.
+        """
+        # `aclose()` closes the socket out from under the pending read, so a
+        # deliberate stop arrives looking exactly like an outage. It is not
+        # one: reconnecting would be the opposite of what was asked, and
+        # reporting an error would make every stop button look like a failure.
+        if self._stopped() or not self.reconnect.enabled:
+            return None
+        if exc is None:
+            # A live stream does not end by itself. If it did, the device went
+            # away quietly, which is the same outage in a politer form.
+            return "stream ended"
+        # One question, asked the same way here as at connect time: is waiting
+        # going to help? Matching on a specific exception type instead would
+        # miss a recoverable outage that arrives wearing a different class.
+        if not exc.recoverable:
+            raise exc
+        return exc.message
+
+    async def _connect(self, *, resuming: bool) -> Any | None:  # noqa: ANN401 - LockdownClient
         """Open a session, retrying only when retrying could plausibly work.
 
         The first connect never retries: there is no capture to resume, and a
         device that was never trusted will not become trusted by waiting. The
         hint is the whole answer, and sitting on it for a minute helps nobody.
+
+        A stop lands here too, and until it was checked for, it was ignored:
+        `stream()` guards its own reconnect delay, but this loop sleeps up to
+        thirty times of its own and looked at nothing. `aclose()` during an
+        outage returned in a millisecond reporting success -- there was no
+        service socket to close at that moment -- and this loop then went on to
+        open a fresh lockdown *and* a fresh relay and deliver more records into
+        a stream nobody was reading. The same failure the two-sockets rule
+        exists for, arriving through the one path the rule did not cover.
         """
         retries = 0
         while True:
+            if self._stopped():
+                # `None` rather than an exception: a deliberate stop is not an
+                # outage, and reporting one would make every stop during a
+                # reconnect look like a failure.
+                return None
             try:
                 return await self._open()
             except OstraceError as exc:

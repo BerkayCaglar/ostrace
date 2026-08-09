@@ -49,7 +49,8 @@ install.
 | --- | --- |
 | Python | 3.11 or newer |
 | Windows | **Apple Mobile Device Service** must be installed. It ships with iTunes from apple.com — *not* the Microsoft Store build. See [docs/troubleshooting.md](docs/troubleshooting.md). |
-| macOS / Linux | Nothing beyond the pip install; `usbmuxd` is already present on macOS. |
+| macOS | Nothing beyond the pip install; `usbmuxd` is already present. The graphical viewer needs **macOS 13 or newer**, which is Qt 6.11's floor; the command line does not. |
+| Linux | Nothing beyond the pip install, plus a running `usbmuxd`. |
 | Device | Connected over USB and paired (tap **Trust** on the device). |
 
 A note on install size: `ostrace` depends on `pymobiledevice3`, which pulls in
@@ -135,7 +136,7 @@ beside it, named after it.
 
 | `--format` | What it is for |
 | --- | --- |
-| `agent-bundle` *(default)* | A directory of tab-separated text to investigate with `grep` and bounded line reads. The only format that loses nothing — see [docs/formats/agent-bundle.md](docs/formats/agent-bundle.md). |
+| `agent-bundle` *(default)* | A directory of eight tab-separated text files to investigate with `grep` and bounded line reads. The only format that loses nothing — see [docs/formats/agent-bundle.md](docs/formats/agent-bundle.md). |
 | `text` | Aligned columns, one record per line, for reading in a terminal. |
 | `markdown` | A document with a summary and the records verbatim, to paste into an issue. |
 | `jsonl` | One JSON object per record — the session format without the gzip. |

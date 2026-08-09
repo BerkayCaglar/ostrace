@@ -14,9 +14,16 @@ Why the code looks the way it does. Format is [MADR 4.0.0](https://adr.github.io
 ## Adding one
 
 Copy the structure of an existing record, take the next number, and open it with
-`status: proposed`. Once a decision is accepted the file is not edited again —
-if it changes, write a new ADR that supersedes it and mark the old one
+`status: proposed`. Once a decision is accepted, the *decision* is not edited
+again — if it changes, write a new ADR that supersedes it and mark the old one
 `superseded by NNNN`. The history is the point.
+
+A *measurement* inside an accepted ADR is different, and is corrected where it
+stands with a dated note that keeps the original figure visible. A number that
+has been disproved does not become history by being left alone; it becomes a
+wrong number in the document a future reader trusts. See
+[ADR 0001](0001-record-architecture-decisions.md) and the correction in ADR
+0004.
 
 Write an ADR when a decision is one an outside reader would plausibly question,
 or when it was taken against a serious alternative. Not for every choice.

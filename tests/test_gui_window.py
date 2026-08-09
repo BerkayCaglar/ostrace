@@ -20,12 +20,24 @@ import pytest
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QMetaMethod,
+    QModelIndex,
+    QPersistentModelIndex,
+    Qt,
+)
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QHeaderView, QStyleOptionHeader, QTableView
+from PySide6.QtWidgets import (
+    QHeaderView,
+    QStyleOptionHeader,
+    QStyleOptionViewItem,
+    QTableView,
+)
 
-from ostrace.gui.shortcuts import BINDINGS
-from ostrace.gui.widgets.log_table import FastHeader, LogTable
+from ostrace.gui.columns import Column
+from ostrace.gui.shortcuts import BINDINGS, RELOCATED
+from ostrace.gui.widgets.log_table import FastHeader, LogTable, MiddleElidingDelegate
 from ostrace.gui.windows.main import MainWindow
 
 if TYPE_CHECKING:
@@ -63,16 +75,38 @@ def test_no_menu_item_is_left_on_the_text_heuristic(window: MainWindow) -> None:
     assert not stragglers
 
 
-def test_the_three_items_macos_should_relocate_say_so(window: MainWindow) -> None:
+def test_the_items_macos_should_relocate_say_so(window: MainWindow) -> None:
     """Opting out everywhere would be as wrong as opting in everywhere.
 
-    Quit, About and Settings genuinely belong in the application menu on
-    macOS; suppressing that would make the program feel foreign there. The
-    rule is *explicit*, not *never move*.
+    Quit and About genuinely belong in the application menu on macOS;
+    suppressing that would make the program feel foreign there. The rule is
+    *explicit*, not *never move*.
+
+    There is no Settings. Nothing in this release is configurable, and an
+    inert Preferences item is worst on the very platform this role machinery
+    exists for -- Qt moves it into the application menu, where it is the item
+    people press without looking.
     """
     assert window.action_quit.menuRole() == QAction.MenuRole.QuitRole
     assert window.action_about.menuRole() == QAction.MenuRole.AboutRole
-    assert window.action_settings.menuRole() == QAction.MenuRole.PreferencesRole
+    assert not hasattr(window, "action_settings")
+
+
+def test_every_menu_item_actually_does_something(window: MainWindow) -> None:
+    """The gap the menu audit found: two items were connected to nothing.
+
+    An enabled menu entry that fires no slot is indistinguishable from a broken
+    program, and it was the *only* place the viewer could have told anyone its
+    version. Asserted by counting receivers rather than by pressing each one,
+    because pressing them opens modal dialogs.
+    """
+    unwired = [
+        action.text()
+        for action in window.menu_items()
+        if not action.isSeparator()
+        and not action.isSignalConnected(QMetaMethod.fromSignal(action.triggered))
+    ]
+    assert not unwired
 
 
 def test_the_menus_outlive_the_method_that_built_them(window: MainWindow) -> None:
@@ -89,9 +123,9 @@ def test_the_menus_outlive_the_method_that_built_them(window: MainWindow) -> Non
 
     gc.collect()
     assert all(shiboken6.isValid(menu) for menu in window.menus.values())
-    # Derived rather than a literal: every binding becomes one item, plus the
-    # three whose menu roles rather than their keys are the point.
-    assert len(window.menu_items()) == len(BINDINGS) + 3
+    # Derived rather than a literal: every binding becomes one item, plus Quit
+    # and About, whose menu roles rather than their keys are the point.
+    assert len(window.menu_items()) == len(BINDINGS) + len(RELOCATED)
 
 
 def test_pause_and_disconnect_are_separate_actions(window: MainWindow) -> None:
@@ -195,8 +229,13 @@ def test_the_fast_header_stops_selection_being_quadratic(qt_app: QApplication) -
     whole column is selected -- and a wall-clock threshold on a shared CI
     runner is a flaky test wearing a performance test's clothes.
 
-    Measured separately at 200k rows: 3.896 s and 1,200,689 calls with the
-    stock header, 0.007 s and 683 with this one.
+    The counts below are from this same stand-in model, and that is the whole
+    reason the *time* is not asserted anywhere. Measured at 200k rows against
+    a `_CountingModel`, the header is worth 4.06 s → 0.008 s; against the real
+    `RecordModel` it is 5.98 s → 2.92 s, about 2x, because the remaining time
+    is the selection model and the repaint. A model that does nothing makes
+    the header look like the whole cost. The call counts are the mechanism and
+    they hold either way.
     """
 
     def flag_calls(*, fast: bool) -> int:
@@ -290,3 +329,27 @@ def test_clearing_the_filter_emits_once_not_once_per_field(window: MainWindow) -
     window.filter_bar.changed.connect(lambda: emissions.append(1))
     window.filter_bar.clear()
     assert len(emissions) == 1
+
+
+def test_the_process_column_keeps_the_pid_when_it_does_not_fit(qt_app: QApplication) -> None:
+    """`docs/design/gui.md` §2: the `[pid]` is never the part that gets
+    truncated. The table elided right, which drops exactly that.
+
+    The pid is what tells eight instances of one process apart, and the
+    plaintext exporter already takes trouble to keep it. Asserted through the
+    elide mode the delegate sets rather than by measuring a rendered string:
+    the offscreen font database is empty on Windows, so a width in pixels there
+    describes a face nobody sees.
+    """
+    del qt_app
+    table = LogTable()
+    delegate = table.itemDelegateForColumn(int(Column.PROCESS))
+    assert isinstance(delegate, MiddleElidingDelegate)
+
+    option = QStyleOptionViewItem()
+    delegate.initStyleOption(option, QModelIndex())
+    assert option.textElideMode == Qt.TextElideMode.ElideMiddle
+
+    assert table.textElideMode() == Qt.TextElideMode.ElideRight, (
+        "the message column still wants its beginning"
+    )

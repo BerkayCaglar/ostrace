@@ -28,6 +28,11 @@ __all__ = [
     "require_device",
 ]
 
+#: What `datetime.timezone` will accept, in seconds. Anything at or beyond a
+#: day is not an offset any device has; carrying one forward turns a bad
+#: lockdown value into an exception from the first timestamp that uses it.
+_MAX_UTC_OFFSET_SECONDS = 24 * 60 * 60
+
 _WANTED = (
     "DeviceName",
     "ProductType",
@@ -107,7 +112,16 @@ async def read_device_info(
     # fall back, never a reason to abort a capture with a bare ValueError that
     # carries none of the guidance the rest of this layer provides.
     offset_seconds = _as_float(values.get("TimeZoneOffsetFromUTC"))
-    utc_offset = timedelta(seconds=offset_seconds) if offset_seconds is not None else None
+    # Range-checked as well as parsed. `timedelta` accepts any number of
+    # seconds but `timezone` does not, so an out-of-range value survived this
+    # function and detonated later in `DeviceInfo.tzinfo` -- reached from
+    # `device.now()` at the top of `capture()`, before a single record, as a
+    # bare ValueError naming neither the device nor the key.
+    utc_offset = (
+        timedelta(seconds=offset_seconds)
+        if offset_seconds is not None and abs(offset_seconds) < _MAX_UTC_OFFSET_SECONDS
+        else None
+    )
 
     device_epoch = _as_float(values.get("TimeIntervalSince1970"))
     clock_skew = None

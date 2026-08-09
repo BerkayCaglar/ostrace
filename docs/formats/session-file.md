@@ -1,6 +1,6 @@
 # Format: session file
 
-**Version:** 1 (draft — the writer lands in phase 1)
+**Version:** 1 (shipped in 0.1.0)
 
 A session file is the raw capture: what `ostrace capture` writes and what every
 exporter reads. It is the archival format. The
@@ -137,14 +137,18 @@ Uncompressed metadata sidecar, written at capture start and updated at the end:
   "ended_at": "2026-08-08T02:10:00+00:00",
   "record_count": 4218331,
   "gap_count": 2,
-  "flags": { "historical": false }
+  "flags": { "max_records": null, "duration": null }
 }
 ```
 
-`source` matters for interpretation: a session captured over the fallback
-`syslog_relay` contains only the NOTICE tier and has no subsystem or category on
-any record. An export must be able to say so rather than let a reader conclude
-the device emitted nothing at DEBUG.
+`flags` records the limits the capture was asked for, and is open: a reader
+must ignore keys it does not know rather than reject the sidecar.
+
+`source` matters for interpretation. `ostrace` writes `os_trace_relay` and
+nothing else, but the field is not decorative — a session produced by another
+tool over the legacy `syslog_relay` contains only the NOTICE tier and has no
+subsystem or category on any record, and an export must be able to say so
+rather than let a reader conclude the device emitted nothing at DEBUG.
 
 If `session.json` is missing or truncated — a capture killed mid-write —
 `session.jsonl.gz` alone is still fully readable. The sidecar is metadata, never

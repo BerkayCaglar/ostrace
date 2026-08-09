@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ostrace.errors import StorageError, UnsupportedFormatVersionError
+from ostrace.errors import (
+    DestinationInUseError,
+    StorageError,
+    UnsupportedFormatVersionError,
+)
 from ostrace.storage.session import (
     FORMAT_VERSION,
     META_NAME,
@@ -239,3 +243,24 @@ class TestReader:
             writer.close()
 
         assert SessionReader(writer.path).truncated is False
+
+
+def test_a_second_capture_refuses_to_overwrite_the_first(
+    tmp_path: Path, device: DeviceInfo
+) -> None:
+    """`gzip.open(..., "wb")` truncates, so `capture -o ~/logs/today` run twice
+    replaced the first run's records with no warning and exited successfully.
+
+    A capture is the one thing here that cannot be regenerated -- the device has
+    moved on -- so overwriting one by accident is the most expensive thing this
+    package can do.
+    """
+    session = tmp_path / "today.ostrace"
+
+    with SessionWriter(session, device=device, source="scripted", started_at=STARTED) as writer:
+        writer.write(make_record(0))
+
+    with pytest.raises(DestinationInUseError, match="already holds a capture"):
+        SessionWriter(session, device=device, source="scripted", started_at=STARTED)
+
+    assert len(list(SessionReader(session).records())) == 1, "the first capture survived"

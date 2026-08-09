@@ -24,13 +24,22 @@ if TYPE_CHECKING:
 __all__ = ["export_notes"]
 
 
-def export_notes(result: ExportResult, *, truncated: bool) -> list[str]:
+def export_notes(result: ExportResult, *, truncated: bool, malformed: int = 0) -> list[str]:
     """Everything about this export a reader would otherwise assume away."""
     notes: list[str] = []
     if truncated:
         notes.append(
-            "the capture has no gzip trailer -- it was still being written, or the "
-            "process was killed. Whatever decoded is complete; the tail may not be."
+            "the capture has no gzip trailer -- it was still being written, the "
+            "process was killed, or it is not a gzip file at all. Whatever decoded "
+            "is complete; the tail may not be."
+        )
+    if malformed:
+        # The reader counts these and, until this note existed, nothing read the
+        # count -- so the one number saying "records are missing from this
+        # export" was the only omission the package did not declare.
+        notes.append(
+            f"{malformed:,} line(s) in the capture could not be decoded and are "
+            f"missing from this export."
         )
     scan = result.scan
     if scan is None:

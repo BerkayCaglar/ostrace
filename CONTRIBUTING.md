@@ -32,9 +32,19 @@ shallow clone builds as `0.0.0`.
 ruff check .
 ruff format --check .
 zizmor --persona=regular .github/workflows
-mypy
-pytest -m "not device"
+mypy --platform linux && mypy --platform win32 && mypy --platform darwin
+pytest -m "not device and not gui"
+QT_QPA_PLATFORM=offscreen pytest -m gui
 ```
+
+`mypy` runs three times on purpose: it narrows `sys.platform` to whatever it is
+running on, so a single pass leaves the other platforms' branches unchecked —
+which is where the bugs would be, since only Windows can be tested here.
+
+The GUI tests are a job of their own, on all three operating systems at one
+Python version, because what they verify is portability across platforms rather
+than across interpreters — and Qt is a 78–110 MB download per job. Everything
+else sweeps Python 3.11–3.14 on Linux.
 
 `ruff`, `mypy` and `zizmor` are pinned to exact versions in
 `[dependency-groups]`. New releases of any of them regularly add diagnostics,
@@ -84,8 +94,12 @@ most useful contribution available. The concrete rules — Qt menu roles,
 [docs/](docs/).
 
 **Do not use `QSortFilterProxyModel`.** Filtering 100k rows through it measures
-around 6 seconds per filter change against 0.09 seconds for a direct predicate
-over our own index list. See
+0.607 s per filter change against 0.130 s for a direct predicate over our own
+index list — about 4.7×. (An earlier figure of 6 s against 0.09 s, "roughly
+66×", did not survive re-measurement on PySide6 6.11.1; nothing froze.) The
+decision holds on the smaller margin plus control of the row cap, the eviction
+notice and the marker exemption. See
+[docs/design/gui.md §11](docs/design/gui.md) and
 [docs/adr/0004](docs/adr/0004-pyside6-with-custom-filtered-model.md).
 
 ## Licence headers
@@ -111,8 +125,8 @@ The full licence text lives in `LICENSE` once, not repeated in every file.
 
 ## Reporting a bug
 
-Include the output of `ostrace doctor` once that exists; until then, your OS,
-Python version, `ostrace --version`, device model and iOS version.
+Include the output of `ostrace doctor`, plus your device model and iOS version.
+`doctor` already reports the OS, the Python version and `ostrace --version`.
 
 **Redact before you paste.** A capture can contain account identifiers, file
 paths and anything an app decided to log.

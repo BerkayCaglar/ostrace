@@ -26,6 +26,11 @@ keywords = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
+    # Declared again in 0.1.0: phase 4 ships a Qt viewer, so the classifier is
+    # now a true statement rather than an advertisement for something absent.
+    "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: Qt",
     "Intended Audience :: Developers",
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: Microsoft :: Windows",

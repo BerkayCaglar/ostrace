@@ -8,7 +8,9 @@ decision-makers: Berkay ÇAĞLAR
 
 ## Context and Problem Statement
 
-The viewer must display a live log stream at roughly 1,200 records per second,
+The viewer must display a live log stream at roughly 1,200 records per second
+(measured at 1,600 once the device was driven properly — see the note in
+`gui.md` §11; the argument below is unaffected),
 retain on the order of 200,000 rows, colour rows by severity, filter
 interactively without a visible stall, and allow copying. It has to look and
 behave the same on Windows and macOS — and the author has no Mac, so anything
@@ -87,8 +89,11 @@ itself rescans.
 > **Superseded.** The table below is kept as the record of what was decided and
 > why. Before phase 4 the claims were re-measured on PySide6 6.11.1 and half did
 > not survive: `multiData()` is *marginally slower* in PySide6, the `flags()`
-> figure was overstated by about 15×, and hiding the horizontal header — a
-> footnote here — is worth about 1000×. Use
+> figure was overstated by about 15×, and the horizontal header — a footnote
+> here — is worth about **2×** once `initStyleOptionForIndex` is overridden
+> rather than the header hidden. (That last figure was itself published as
+> 541× before a second measurement showed it had been taken against a stand-in
+> model; see `gui.md` §11.) Use
 > [`docs/design/gui.md` §11](../design/gui.md) instead. The choice of PySide6
 > and of a hand-written filtered model is unaffected.
 

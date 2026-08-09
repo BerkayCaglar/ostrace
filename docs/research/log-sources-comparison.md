@@ -130,8 +130,15 @@ time if `sys.flags.optimize` is set, because a silent corruption is worse than a
 refusal to start.
 
 **`HISTORICAL` is on by default** in the upstream stream flags, producing a
-backlog burst at connect. Correct for a capture, wrong for a live view; it is
-off by default here and exposed as a capture option.
+backlog burst at connect. It stays on.
+
+> **Correction, 0.1.0.** This said the flag was "off by default here and
+> exposed as a capture option", on the assumption that a live view wants only
+> what arrives next. Measured on the device: with the flag, roughly 1,600
+> records a second; without it, 65 a second, in bursts separated by up to forty
+> seconds of complete silence. Turning it off starves the stream rather than
+> trimming it, and a viewer defaulting to that would look broken. There is no
+> capture option, and `DEFAULT_STREAM_FLAGS` keeps it set.
 
 ## A methodological note that cost real time
 

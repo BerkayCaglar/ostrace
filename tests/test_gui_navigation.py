@@ -19,6 +19,7 @@ from tests.helpers import ERRORS, make_record
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
+from PySide6.QtCore import QModelIndex
 from PySide6.QtWidgets import QApplication
 
 from ostrace.gui.columns import Column
@@ -70,16 +71,28 @@ def test_next_error_wraps_rather_than_stopping(window: MainWindow) -> None:
     assert window.table.currentIndex().row() < last_error
 
 
-def test_previous_error_goes_backwards(window: MainWindow) -> None:
-    window.go_to(window.model.rowCount() - 1)
-    window.find_next(Find.ERROR)
-    forwards = window.table.currentIndex().row()
+def test_previous_error_goes_backwards_and_lands_on_an_error(window: MainWindow) -> None:
+    """It used to assert only that backwards and forwards differed.
 
-    window.go_to(window.model.rowCount() - 1)
+    Making `find(backwards=True)` return the immediately preceding row --
+    whatever kind it was -- left that assertion true and the whole suite green.
+    Half the contract is the direction; the other half is that the thing it
+    lands on is the kind that was asked for.
+    """
+    start = window.model.rowCount() - 1
+    window.go_to(start)
     window.find_next(Find.ERROR, backwards=True)
-    backwards = window.table.currentIndex().row()
+    row = window.table.currentIndex().row()
 
-    assert backwards != forwards
+    landed = window.model.row_at(row)
+    assert isinstance(landed, Record), "not a record"
+    assert landed.is_error, "not an error"
+    expected = max(
+        candidate
+        for candidate in range(start)
+        if isinstance(record := window.model.row_at(candidate), Record) and record.is_error
+    )
+    assert row == expected, "not the nearest error behind the cursor"
 
 
 def test_finding_nothing_leaves_the_selection_alone(qt_app: object) -> None:
@@ -114,15 +127,53 @@ def test_go_to_bottom_twice_resumes_following(window: MainWindow) -> None:
 
     Conflating them is what leaves Wireshark's users with "Ctrl End is close,
     but doesn't resume auto scroll".
+
+    Observed through the selection rather than through a flag, because the flag
+    is gone: a caret on a row that is no longer the last one is exactly how
+    `_follow` recognises a reader who has stopped tailing, so "resume" has to
+    mean letting go of the row. It used to set a boolean nothing ever read.
     """
+    last = window.model.rowCount() - 1
     window.go_to(0)
-    window._following = False
 
     window.go_to_bottom()
-    assert not window._following, "the first press only travels"
+    assert window.table.currentIndex().row() == last, "the first press travels"
 
     window.go_to_bottom()
-    assert window._following, "the second press stays"
+    assert not window.table.currentIndex().isValid(), "the second press lets go and tails"
+
+
+def test_a_selected_row_is_not_dragged_away_by_the_tail(window: MainWindow) -> None:
+    """The Console.app bug, from the direction that actually bites.
+
+    Follow is derived, never stored -- but it was derived from the scrollbar
+    alone, and clicking a row does not move the scrollbar. So a reader who
+    selected a record mid-capture had it yanked off screen by the next batch.
+    `docs/design/gui.md` §4 calls breaking follow on selection "not optional",
+    and with a detail pane it is the primary interaction.
+    """
+    window.table.scrollToBottom()
+    window.go_to(5)
+
+    window.model.append([make_record(i) for i in range(500, 600)])
+    window._follow()
+
+    assert window.table.currentIndex().row() == 5, "the selection moved"
+    bar = window.table.verticalScrollBar()
+    assert bar.value() < bar.maximum(), "the tail dragged the view off the selected row"
+
+
+def test_with_nothing_selected_the_tail_still_follows(window: MainWindow) -> None:
+    """The other half: breaking follow on selection must not break follow."""
+    window.table.clearSelection()
+    window.table.setCurrentIndex(QModelIndex())
+    window.table.scrollToBottom()
+
+    window.model.append([make_record(i) for i in range(500, 600)])
+    window._follow()
+
+    bar = window.table.verticalScrollBar()
+    assert bar.value() >= bar.maximum() - 4
 
 
 def test_stepping_works_without_the_table_having_focus(window: MainWindow) -> None:

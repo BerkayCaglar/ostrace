@@ -48,7 +48,7 @@ class CaptureResult:
         return (self.ended_at - self.started_at).total_seconds()
 
 
-async def capture(  # noqa: PLR0913 -- five knobs and a source, all keyword-only
+async def capture(  # noqa: PLR0913 -- six knobs and a source, all keyword-only
     source: LogSource,
     *,
     destination: Path | None = None,
@@ -56,6 +56,7 @@ async def capture(  # noqa: PLR0913 -- five knobs and a source, all keyword-only
     max_records: int | None = None,
     on_progress: Callable[[int, int], None] | None = None,
     on_item: Callable[[Record | Gap], None] | None = None,
+    on_open: Callable[[Path], None] | None = None,
 ) -> CaptureResult:
     """Stream from ``source`` into a session file until told to stop.
 
@@ -74,6 +75,12 @@ async def capture(  # noqa: PLR0913 -- five knobs and a source, all keyword-only
     understands its lifecycle, and one session file. It is called on whatever
     thread is running this coroutine, so an implementation that hands work to
     another thread should do the cheapest possible thing here.
+
+    ``on_open`` is called once, with the session path, as soon as there is one.
+    Only the result carries it otherwise -- and a cancelled capture has no
+    result, which left a caller that stopped one with no way to find the file
+    it had just finished writing. Where that file goes is `paths`' decision,
+    and a caller working it out for itself would be making the decision twice.
     """
     device = await source.device_info()
     started_at = device.now()
@@ -90,6 +97,10 @@ async def capture(  # noqa: PLR0913 -- five knobs and a source, all keyword-only
         started_at=started_at,
         flags={"max_records": max_records, "duration": duration},
     )
+    if on_open is not None:
+        # `writer.path` rather than `path`: the writer is what settles the
+        # suffix, and it is what the result reports.
+        on_open(writer.path)
     try:
         async with source, contextlib.aclosing(source.stream()) as stream:
             try:

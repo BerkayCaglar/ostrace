@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QElapsedTimer, QObject, QTimer, Signal
 
 from ostrace.model import Record
 
@@ -77,6 +77,12 @@ class Pump(QObject):
         self._timer = QTimer(self)
         self._timer.setInterval(interval_ms)
         self._timer.timeout.connect(self.drain)
+        #: Time actually elapsed between drains. `QTimer` defaults to a coarse
+        #: timer, and on Windows that snaps to the 15.625 ms scheduler tick:
+        #: a 50 ms interval measured 62.5 ms. Deriving the rate from the
+        #: nominal interval therefore over-read a 1,600 rec/s device as 2,000.
+        self._since = QElapsedTimer()
+        self._since.start()
 
     def start(self) -> None:
         self._timer.start()
@@ -104,6 +110,7 @@ class Pump(QObject):
             self._enforce_pause_limit()
             return
 
+        elapsed_ms = self._since.restart()
         batch: list[Row] = []
         queue = self.queue
         while queue:
@@ -114,7 +121,7 @@ class Pump(QObject):
 
         self.model.append(batch)
         self.delivered += sum(1 for item in batch if isinstance(item, Record))
-        self.rate_changed.emit(len(batch) * (1000.0 / max(self._timer.interval(), 1)))
+        self.rate_changed.emit(len(batch) * (1000.0 / max(elapsed_ms, 1)))
 
     def _enforce_pause_limit(self) -> None:
         """Bound what a pause may hold, and say so when it bites."""

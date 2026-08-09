@@ -24,10 +24,11 @@ consequence.
 
 from __future__ import annotations
 
+from html import escape as escape_html
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QModelIndex, Qt, QTimer
+from PySide6.QtCore import QElapsedTimer, QModelIndex, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -42,6 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ostrace import __version__
 from ostrace.errors import OstraceError
 from ostrace.exporters.base import escape
 from ostrace.gui.filters import Filter
@@ -86,6 +88,14 @@ _STOP_TIMEOUT_MS = 5_000
 #: pixels of slack, because a scrollbar rarely lands exactly on its maximum.
 _FOLLOW_SLACK = 4
 
+#: How often the tail may actually scroll. Ten times a second still reads as
+#: continuous, and it is the difference between a third of the GUI thread going
+#: into repaints and a fifth: at device throughput every drain scrolls further
+#: than the viewport is tall, so each one is a full repaint of every visible
+#: cell. `docs/design/gui.md` §9 asks for this to be a preference; a measured
+#: constant is what 0.1.0 ships.
+_FOLLOW_MIN_MS = 100
+
 #: How long the filter waits for the typing to stop. Long enough that a word is
 #: one rescan rather than five, short enough that the table does not feel
 #: detached from the keyboard.
@@ -129,7 +139,6 @@ class MainWindow(QMainWindow):
     action_keys: QAction
     action_quit: QAction
     action_about: QAction
-    action_settings: QAction
 
     def __init__(self, scheme: Scheme = Scheme.LIGHT, parent: QWidgetType | None = None) -> None:
         super().__init__(parent)
@@ -141,9 +150,8 @@ class MainWindow(QMainWindow):
         self.capture: Capture | None = None
         self._loader: CaptureLoader | None = None
         self._showing_filter_notice = False
-        #: Auto-follow. Set when the user asks to resume it, cleared as soon as
-        #: they scroll away -- see `_follow`, which derives the rest.
-        self._following = True
+        #: When the tail last scrolled. See `_follow`.
+        self._scrolled = QElapsedTimer()
         self._capture_thread: CaptureThread | None = None
         #: Capture threads that outlived their stop wait. See `_park`.
         self._parked: list[CaptureThread] = []
@@ -318,13 +326,9 @@ class MainWindow(QMainWindow):
             "&Quit", QKeySequence.StandardKey.Quit, role=QAction.MenuRole.QuitRole
         )
         self.action_about = self._action("&About ostrace", role=QAction.MenuRole.AboutRole)
-        self.action_settings = self._action(
-            "&Settings…",
-            QKeySequence.StandardKey.Preferences,
-            role=QAction.MenuRole.PreferencesRole,
-        )
 
         self.action_quit.triggered.connect(self.close)
+        self.action_about.triggered.connect(self.show_about)
 
     def _action(
         self,
@@ -372,8 +376,6 @@ class MainWindow(QMainWindow):
 
         self.menus["capture"].addSeparator()
         self.menus["capture"].addAction(self.action_quit)
-        self.menus["edit"].addSeparator()
-        self.menus["edit"].addAction(self.action_settings)
         self.menus["help"].addSeparator()
         self.menus["help"].addAction(self.action_about)
 
@@ -554,13 +556,45 @@ class MainWindow(QMainWindow):
         # Bounded: the capture's own teardown is a socket close, not a network
         # round trip. Waiting at all is what stops a second capture starting
         # while the first still holds the device.
-        if not thread.wait(_STOP_TIMEOUT_MS):
+        if thread.wait(_STOP_TIMEOUT_MS):
+            # Only once it has really ended: until then the session file is
+            # still being written and the sidecar is not finalised.
+            self._adopt_session(thread.path)
+        else:
             self._park(thread)
         if self._pump is not None:
             self._pump.stop()
         self.minimap.stop()
         self._capture_thread = None
         self._set_capturing(capturing=False)
+
+    def _adopt_session(self, path: Path | None) -> None:
+        """Make the capture that was just recorded the one Export offers.
+
+        A live capture writes every record through the same
+        `ostrace.capture.capture` the CLI runs, and its ``finally`` finalises
+        the session on every exit path -- including the cancellation that
+        Disconnect performs. So the moment the thread ends there is a complete
+        capture on disk, and the only thing missing was anything in this window
+        knowing where it went. Without this, Export told the user to disconnect
+        and then said exactly the same thing after they had.
+
+        The file rather than the model, deliberately: the view holds a bounded
+        number of rows and the file holds all of them.
+        """
+        if path is None:
+            return  # cancelled before it opened one: there is genuinely nothing
+        try:
+            self.capture = open_capture(path)
+        except OstraceError as exc:
+            self.banner.show_message(
+                f"The capture was written to {path.name}, but it cannot be reopened: {exc}",
+                "Dismiss",
+            )
+            return
+        # The one place the window says where the capture went. The CLI prints
+        # it; until now the GUI never said at all.
+        self.setWindowTitle(f"{path.name} — {_TITLE}")
 
     def _park(self, thread: CaptureThread) -> None:
         """Keep a capture thread that outlived the wait above.
@@ -630,40 +664,98 @@ class MainWindow(QMainWindow):
         )
 
     def _on_capture_failed(self, message: str) -> None:
-        self.banner.show_message(f"Capture stopped: {message}", "Dismiss")
-        self._set_capturing(capturing=False)
+        """The capture died. Wind the machinery down as if Disconnect had been
+        pressed, because from here on nothing is going to press it.
+
+        Retry rather than Dismiss: the message is almost always "no device", and
+        the answer to that is to plug one in and go again. Dismissing it just
+        clears the sentence off the screen.
+        """
+        self.stop_capture()
+        if self.capture is None:
+            # Nothing was recorded, so the title still names a source that is
+            # not producing anything.
+            self.setWindowTitle(_TITLE)
+        self.banner.show_message(
+            f"Capture stopped: {message}",
+            "Retry",
+            on_action=self.capture_from_device,
+        )
 
     def _on_capture_finished(self, result: object) -> None:
-        del result
-        self._set_capturing(capturing=False)
+        """The capture ended by itself -- the device was unplugged, or a limit
+        was reached.
+
+        The same wind-down as Disconnect, and for the same reasons: the pump
+        and the overview timer are still running against a stream that has
+        stopped, and the session on disk is finished and worth picking up. The
+        thread has already ended by the time this queued signal arrives, so the
+        wait inside `stop_capture` returns at once.
+        """
+        del result  # `stop_capture` reads the path off the thread, which is the same one
+        self.stop_capture()
 
     def _follow(self) -> None:
         """Stay at the bottom, but only if that is where the user already is.
 
-        Derived from the scrollbar on every tick rather than stored as a mode.
-        A stored flag can disagree with the view -- Console.app kept one and
-        shipped an eleven-month bug where selecting a row silently stopped the
-        tail.
+        Derived on every tick rather than stored as a mode. A stored flag can
+        disagree with the view -- Console.app kept one and shipped an
+        eleven-month bug where selecting a row silently stopped the tail.
+
+        Two ways to leave the bottom, and both have to count. Scrolling up is
+        the obvious one. **Selecting a row is the other, and it is not
+        optional here**: this window has a detail pane, so selection is the
+        primary interaction, and a tail that survived it would drag the row out
+        from under whoever just clicked it -- which is the Console.app bug from
+        the other direction.
+
+        Still no stored bit. A selection that is no longer the last row *is*
+        the evidence, and it is read from the view like the scrollbar.
         """
+        last = self.model.rowCount() - 1
+        if last < 0:
+            return
+        current = self.table.currentIndex()
+        if current.isValid() and current.row() < last:
+            return
         bar = self.table.verticalScrollBar()
-        if bar.value() >= bar.maximum() - _FOLLOW_SLACK:
-            self.table.scrollToBottom()
+        if bar.value() < bar.maximum() - _FOLLOW_SLACK:
+            return
+        # Throttled apart from the drain. Each tick appends about a hundred
+        # rows and the scroll advances by a hundred, but the viewport holds
+        # forty -- so there is nothing to blit and every tick costs a full
+        # repaint, measured at 20 ms, 15 times a second, a third of the GUI
+        # thread. Draining stays at 50 ms so the queue never builds; only the
+        # scrolling is coalesced, and no record is lost by coalescing it.
+        if self._scrolled.isValid() and self._scrolled.elapsed() < _FOLLOW_MIN_MS:
+            return
+        self._scrolled.restart()
+        self.table.scrollToBottom()
 
     def export_capture(self) -> None:
-        """Offer to write the open capture out.
+        """Offer to write the finished capture out.
 
-        Only a capture read from disk can be exported: a live one is still
-        being written, and exporting a file that is growing under the exporter
-        produces a report whose end is arbitrary. Disconnect first -- which is
-        also when the sidecar is finalised.
+        A capture still being recorded is excluded: exporting a file that is
+        growing under the exporter produces a report whose end is arbitrary.
+        Disconnect first, which is also when the session is finalised -- and
+        the export is then available, which it was not until `_adopt_session`
+        existed.
         """
         if self.capture is None:
-            self.banner.show_message(
-                "There is nothing to export yet. Open a capture, or disconnect "
-                "to finish the one being recorded.",
-                "Open capture…",
-                on_action=self.choose_capture,
-            )
+            if self._capture_thread is not None:
+                self.banner.show_message(
+                    "The capture is still running, and a file growing under the "
+                    "exporter would produce a report whose end is arbitrary. "
+                    "Disconnect to finish it.",
+                    "Disconnect",
+                    on_action=self.stop_capture,
+                )
+            else:
+                self.banner.show_message(
+                    "There is nothing to export yet. Open a capture, or record one from a device.",
+                    "Open capture…",
+                    on_action=self.choose_capture,
+                )
             return
         ExportDialog(self.capture, self).exec()
 
@@ -687,12 +779,23 @@ class MainWindow(QMainWindow):
         takes you to the bottom, the second says *stay* there. Conflating them
         into one is what leaves Wireshark's users with "Ctrl End is close, but
         doesn't resume auto scroll".
+
+        The second press *clears the selection*, which is what "stay" means
+        here rather than a flag saying so: a row that is no longer the last one
+        is exactly how `_follow` recognises a reader who has stopped tailing,
+        so a caret parked on the bottom would break the tail again on the very
+        next record. Asking to follow is asking to watch the end, not to keep
+        one record open while it races past.
         """
         last = self.model.rowCount() - 1
         if last < 0:
             return
         if self.table.currentIndex().row() == last:
-            self._following = True
+            self.table.clearSelection()
+            self.table.setCurrentIndex(QModelIndex())
+            self.detail.clear()
+            self.table.scrollToBottom()
+            return
         self.go_to(last)
 
     def find_next(self, kind: Find, *, backwards: bool = False) -> None:
@@ -749,9 +852,43 @@ class MainWindow(QMainWindow):
             clipboard.setText("\n".join(lines))
 
     def show_keys(self) -> None:
-        """The key sheet, rendered from the same table the bindings come from."""
-        rows = "\n".join(f"{keys:<28} {label} — {why}" for label, keys, why in key_table())
-        QMessageBox.information(self, "Keyboard shortcuts", rows)
+        """The key sheet, rendered from the same table the bindings come from.
+
+        A table rather than padded text: the padding lined the columns up only
+        in a monospaced font, and a `QMessageBox` label is proportional on
+        every platform, so what shipped was ragged everywhere.
+        """
+        rows = "".join(
+            f"<tr><td style='padding-right:1.5em'><b>{escape_html(keys)}</b></td>"
+            f"<td style='padding-right:1em'>{escape_html(label)}</td>"
+            f"<td>{escape_html(why)}</td></tr>"
+            for label, keys, why in key_table()
+        )
+        box = QMessageBox(self)
+        box.setWindowTitle("Keyboard shortcuts")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(f"<table cellspacing='0'>{rows}</table>")
+        box.exec()
+
+    def show_about(self) -> None:
+        """Which version this is, and what it is built on.
+
+        The application already knows its version -- `app.build_application`
+        sets it -- and until this existed there was nowhere in the viewer that
+        said it out loud. A bug report against "the GUI" with no version in it
+        costs a round trip.
+        """
+        QMessageBox.about(
+            self,
+            "About ostrace",
+            f"<h3>ostrace {escape_html(__version__)}</h3>"
+            "<p>Stream, inspect and export iOS device logs on Windows, macOS and Linux.</p>"
+            "<p>GPL-3.0-or-later. Built on "
+            "<a href='https://github.com/doronz88/pymobiledevice3'>pymobiledevice3</a>"
+            " and Qt for Python.</p>"
+            "<p><a href='https://github.com/BerkayCaglar/ostrace'>"
+            "github.com/BerkayCaglar/ostrace</a></p>",
+        )
 
     # -- filtering, selection, state -------------------------------------
 
@@ -824,11 +961,12 @@ class MainWindow(QMainWindow):
         self.detail.show_item(self.model.row_at(current.row()))
 
     def _update_banner(self) -> None:
-        """The two states that look exactly like a quiet device.
+        """The states that look exactly like a quiet device.
 
-        A filter that matches nothing and a device that is saying nothing
-        produce the same empty table. Only one of them is the user's own doing,
-        and only one has a way out.
+        A filter that matches nothing, a capture with nothing in it, and a
+        device that is saying nothing all produce the same empty table. Only
+        some of them are the user's own doing, and they need different answers,
+        so an empty table has to say which one it is.
         """
         if self.model.rowCount() == 0 and self.model.retained > 0:
             self.banner.show_message(
@@ -837,9 +975,16 @@ class MainWindow(QMainWindow):
                 on_action=self.filter_bar.clear,
             )
             self._showing_filter_notice = True
-        elif self._showing_filter_notice:
+            return
+        if self._showing_filter_notice:
             self.banner.hide()
             self._showing_filter_notice = False
-        #: Auto-follow. Set when the user asks to resume it, cleared as soon as
-        #: they scroll away -- see `_follow`, which derives the rest.
-        self._following = True
+        if self.capture is not None and self.model.retained == 0:
+            # An empty capture is a fact about the capture, not about the
+            # filter and not about the device. Saying nothing here leaves the
+            # reader to work out which of the three they are looking at.
+            self.banner.show_message(
+                "This capture contains no records.",
+                "Open another…",
+                on_action=self.choose_capture,
+            )

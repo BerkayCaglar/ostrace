@@ -156,6 +156,18 @@ class UnsupportedFormatVersionError(StorageError):
     hint = "This session was written by a newer ostrace. Upgrade and try again."
 
 
+class DestinationInUseError(StorageError):
+    """Writing here would destroy something that is already there.
+
+    Its own class rather than a message, because there are two ways to reach
+    it -- an export whose default name lands on its own input, and a capture
+    reusing a destination -- and both are silent data loss if the write is
+    allowed to proceed.
+    """
+
+    hint = "Pass --output to write somewhere else."
+
+
 # --------------------------------------------------------------------------
 # Translation from pymobiledevice3
 # --------------------------------------------------------------------------

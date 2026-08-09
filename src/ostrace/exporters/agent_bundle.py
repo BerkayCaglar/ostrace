@@ -92,6 +92,14 @@ class AgentBundleExporter:
             errors = stack.enter_context(self._open(errors_log))
 
             line = 0
+            # Measured while writing, not estimated afterwards. The search
+            # advice below divides a tool's 30,000-character output limit by
+            # this, and it used to add a flat 60 to the *raw* message length --
+            # understating a real record by around 20 characters, which put the
+            # advertised match limit 11-22% above the truth. Erring high is the
+            # unsafe direction: the whole note exists to stop a silent
+            # truncation.
+            written = 0
             for item in items:
                 if not isinstance(item, Record):
                     scan.add_gap(item)
@@ -100,9 +108,11 @@ class AgentBundleExporter:
                 scan.add(item, line)
                 rendered = row(item)
                 log.write(rendered + "\n")
+                written += len(rendered) + 1
                 if item.is_error:
                     errors.write(f"{line}\t{rendered}\n")
 
+        mean_line = written // line if line else 0
         files = [session_log, errors_log]
         files.append(self._write_patterns(destination, scan))
         files.append(
@@ -116,7 +126,8 @@ class AgentBundleExporter:
             )
         )
         files.append(self._write_timeline(destination, scan))
-        files.append(self._write_documentation(destination, scan, device))
+        files.append(self._write_gaps(destination, scan))
+        files.append(self._write_documentation(destination, scan, device, mean_line))
 
         return ExportResult(destination=destination, files=files, scan=scan)
 
@@ -181,18 +192,46 @@ class AgentBundleExporter:
                 )
         return path
 
+    def _write_gaps(self, destination: Path, scan: ScanResult) -> Path:
+        """Where the capture has holes, as data rather than as prose.
+
+        Every other export states a gap inside the thing a reader reads: the
+        text and markdown exporters draw a rule across the log, jsonl writes a
+        `{"gap": true}` line, ai-report gives it a section. The bundle said it
+        only in `CLAUDE.md` -- which is explicitly outside the format contract
+        -- so `session.log`, `errors.log`, `timeline.tsv` and `patterns.tsv`
+        all read straight across the hole, and every `grep` an agent runs is
+        answered as though the device had simply been quiet.
+
+        Its own file rather than a marker line in `session.log`, because that
+        file's contract is one record per line and every recipe in the bundle
+        depends on it. Always written, including with no gaps: a file that
+        appears only on bad news cannot be told from a file nobody wrote --
+        Wireshark bug 12005, which the status bar already answers for.
+        """
+        path = destination / "gaps.tsv"
+        with self._open(path) as handle:
+            handle.write("start\tend\tseconds\treason\n")
+            for gap in scan.gaps:
+                handle.write(
+                    f"{gap.start.isoformat()}\t{gap.end.isoformat()}\t"
+                    f"{gap.duration.total_seconds():.3f}\t{escape(gap.reason)}\n"
+                )
+        return path
+
     def _write_documentation(
         self,
         destination: Path,
         scan: ScanResult,
         device: DeviceInfo | None,
+        mean_line: int,
     ) -> Path:
         # Named CLAUDE.md deliberately: Claude Code loads a CLAUDE.md found in a
         # subdirectory as soon as it reads a file there, so the column spec and
         # the traps arrive without anyone having to know to ask for them.
         path = destination / "CLAUDE.md"
         with self._open(path) as handle:
-            handle.write("\n".join(_documentation(scan, device)) + "\n")
+            handle.write("\n".join(_documentation(scan, device, mean_line)) + "\n")
         return path
 
 
@@ -213,7 +252,7 @@ def _inline_code(text: str) -> str:
     return f"{fence}{padding}{text}{padding}{fence}"
 
 
-def _documentation(scan: ScanResult, device: DeviceInfo | None) -> Iterator[str]:
+def _documentation(scan: ScanResult, device: DeviceInfo | None, mean_line: int) -> Iterator[str]:
     """The generated CLAUDE.md, as lines.
 
     Bounded by construction: every list below has a fixed limit, so the length
@@ -235,6 +274,8 @@ def _documentation(scan: ScanResult, device: DeviceInfo | None) -> Iterator[str]
     yield "| `processes.tsv` | Records and errors per process. |"
     yield "| `subsystems.tsv` | Records and errors per subsystem. |"
     yield "| `timeline.tsv` | Per-minute counts, with a line to jump to. |"
+    yield "| `gaps.tsv` | Where the capture has holes. Empty means none. |"
+    yield "| `CLAUDE.md` | This file. |"
     yield ""
 
     yield "## Columns"
@@ -260,7 +301,7 @@ def _documentation(scan: ScanResult, device: DeviceInfo | None) -> Iterator[str]
 
     yield from _statistics(scan, device)
     yield from _error_patterns(scan)
-    yield from _recipes(scan)
+    yield from _recipes(scan, mean_line)
     yield from _traps()
 
 
@@ -322,14 +363,12 @@ def _error_patterns(scan: ScanResult) -> Iterator[str]:
     yield ""
 
 
-def _recipes(scan: ScanResult) -> Iterator[str]:
+def _recipes(scan: ScanResult, mean_line: int) -> Iterator[str]:
     yield "## Searching"
     yield ""
-    # The 60 is the five fixed columns; the message is the rest of the line.
-    per_match = scan.average_message_length + 60
     yield "**Count before you read.** Tool output is truncated at 30,000"
     yield "characters, silently. At this capture's average record length that is"
-    yield f"reached at roughly {max(1, 30_000 // max(1, per_match))} matches."
+    yield f"reached at roughly {max(1, 30_000 // max(1, mean_line))} matches."
     yield ""
     yield "```bash"
     yield "# how many, before asking for any content"

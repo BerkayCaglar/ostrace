@@ -39,6 +39,7 @@ BUNDLE_FILES = {
     "processes.tsv",
     "subsystems.tsv",
     "timeline.tsv",
+    "gaps.tsv",
 }
 
 
@@ -251,6 +252,32 @@ class TestDocumentation:
         doc = (result.destination / "CLAUDE.md").read_text(encoding="utf-8")
         assert "gap" in doc.lower()
         assert result.records == 2
+
+    def test_a_gap_is_in_the_data_and_not_only_in_the_prose(self, tmp_path: Path) -> None:
+        """`CLAUDE.md` is outside the format contract, and it was the only file
+        that mentioned a gap.
+
+        So `session.log`, `errors.log`, `timeline.tsv` and `patterns.tsv` all
+        read straight across the hole, and every search an agent runs is
+        answered as though the device had simply been quiet -- which is the one
+        conclusion this project exists to prevent.
+        """
+        result = AgentBundleExporter().export(
+            [make_record(0), make_gap(0), make_record(1)], tmp_path / "gappy"
+        )
+
+        rows = lines(result.destination / "gaps.tsv")
+        assert rows[0] == "start\tend\tseconds\treason"
+        assert len(rows) == 2
+        assert make_gap(0).reason in rows[1]
+        assert len(rows[1].split("\t")) == 4
+
+    def test_the_gap_file_is_written_even_with_no_gaps(self, bundle: ExportResult) -> None:
+        """A file that appears only on bad news cannot be told from a file
+        nobody wrote -- Wireshark bug 12005, which the status bar already
+        answers for."""
+        rows = lines(bundle.destination / "gaps.tsv")
+        assert rows == ["start\tend\tseconds\treason"]
 
     def test_a_message_containing_a_backtick_does_not_break_the_markdown(
         self, tmp_path: Path

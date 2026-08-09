@@ -223,3 +223,125 @@ class TestSessionsAndSpools:
         shutil.copy(ERRORS, destination)
         assert cli.main(["export", str(destination), "-f", "trace", "-q"]) == cli.EXIT_OK
         assert (tmp_path / "ios26-errors-trace.md").exists()
+
+
+class TestItNeverEatsTheCapture:
+    """The worst thing this package can do, and it did it silently.
+
+    ``.jsonl`` is both an ending `paths` strips from a capture name and the
+    jsonl exporter's suffix, so the default destination for
+    ``ostrace export capture.jsonl -f jsonl`` was the input path. The exporter
+    opened it for writing while the reader was still a lazy iterator over it.
+    Measured before the fix: a 2.2 MB capture became zero bytes, the command
+    printed ``0 records -> jsonl`` and exited successfully.
+    """
+
+    @pytest.fixture
+    def plain_capture(self, tmp_path: Path) -> Path:
+        """The same fixture, uncompressed, so its name ends in ``.jsonl``."""
+        import gzip
+
+        destination = tmp_path / "capture.jsonl"
+        destination.write_bytes(gzip.decompress(MIXED.read_bytes()))
+        return destination
+
+    def test_the_default_destination_never_lands_on_the_input(
+        self, plain_capture: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        before = plain_capture.read_bytes()
+
+        assert cli.main(["export", str(plain_capture), "-f", "jsonl"]) == cli.EXIT_ERROR
+
+        assert plain_capture.read_bytes() == before, "the capture was modified"
+        assert "over the capture" in plain(capsys.readouterr().err)
+
+    def test_an_explicit_output_at_the_input_is_refused_too(self, plain_capture: Path) -> None:
+        before = plain_capture.read_bytes()
+
+        assert (
+            cli.main(["export", str(plain_capture), "-f", "markdown", "-o", str(plain_capture)])
+            == cli.EXIT_ERROR
+        )
+
+        assert plain_capture.read_bytes() == before
+
+    def test_the_same_file_spelled_differently_is_still_the_same_file(
+        self, plain_capture: Path
+    ) -> None:
+        """A relative path and an absolute one name one file, and truncating it
+        does not care which spelling asked."""
+        indirect = plain_capture.parent / "." / plain_capture.name
+        assert (
+            cli.main(["export", str(plain_capture), "-f", "markdown", "-o", str(indirect)])
+            == cli.EXIT_ERROR
+        )
+
+    def test_a_different_format_beside_the_same_capture_still_works(
+        self, plain_capture: Path
+    ) -> None:
+        """The guard must not refuse the ordinary case."""
+        assert cli.main(["export", str(plain_capture), "-f", "markdown", "-q"]) == cli.EXIT_OK
+        assert (plain_capture.parent / "capture.md").is_file()
+
+
+class TestItSaysWhatItCouldNotRead:
+    def test_a_damaged_line_is_declared(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The one omission the package did not declare.
+
+        The readers have always counted lines they could not decode, and until
+        now nothing read the count -- so an export quietly missing records was
+        indistinguishable from a device that had been quiet.
+        """
+        import gzip
+
+        good = gzip.decompress(MIXED.read_bytes()).split(b"\n")[:40]
+        damaged = tmp_path / "damaged.jsonl.gz"
+        damaged.write_bytes(gzip.compress(b"\n".join([*good[:20], b"{not json", *good[20:]])))
+
+        assert cli.main(["export", str(damaged), "-f", "markdown"]) == cli.EXIT_OK
+
+        assert "could not be decoded" in plain(capsys.readouterr().err)
+
+    def test_quiet_still_says_the_capture_was_incomplete(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`--quiet` means "print only the destination", which is a statement
+        about stdout. Silencing the notes made the quiet form the one that
+        hides the bad news."""
+        import gzip
+
+        good = gzip.decompress(MIXED.read_bytes()).split(b"\n")[:40]
+        damaged = tmp_path / "damaged.jsonl.gz"
+        damaged.write_bytes(gzip.compress(b"\n".join([*good[:20], b"{not json", *good[20:]])))
+
+        cli.main(["export", str(damaged), "-f", "markdown", "-q"])
+
+        captured = capsys.readouterr()
+        assert "could not be decoded" in plain(captured.err)
+        assert captured.out.strip().endswith("damaged.md")
+
+
+class TestRefusalsRatherThanTracebacks:
+    def test_an_impossible_destination_is_an_error_not_a_traceback(
+        self, capture: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Every command here writes files, so the filesystem's refusals are
+        ordinary. They arrived as a twelve-frame traceback."""
+        blocked = capture.parent / "in-the-way"
+        blocked.write_text("not a directory", encoding="utf-8")
+
+        assert (
+            cli.main(["export", str(capture), "-f", "markdown", "-o", str(blocked / "out.md")])
+            == cli.EXIT_ERROR
+        )
+        assert plain(capsys.readouterr().err).startswith("error:")
+
+    @pytest.mark.parametrize("value", ["0", "-3"])
+    def test_a_meaningless_record_limit_is_rejected(self, value: str) -> None:
+        """``--max-records 0`` captured exactly one record: the limit is tested
+        after a record has been written, so the first comparison was 1 >= 0."""
+        with pytest.raises(SystemExit) as exit_info:
+            cli.main(["capture", "--max-records", value])
+        assert exit_info.value.code == 2

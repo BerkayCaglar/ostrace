@@ -157,6 +157,19 @@ def _identity(scan: ScanResult, device: DeviceInfo | None) -> Iterator[str]:
     yield ""
 
 
+def _shown(count: int) -> str:
+    """How to describe what survived the budget, including none of it.
+
+    "the most frequent are shown" above an empty code fence, and "the 0 most
+    frequent are shown", were both statements about nothing.
+    """
+    if count == 0:
+        return "none of them fitted"
+    if count == 1:
+        return "only the most frequent is shown"
+    return f"the {count:,} most frequent are shown"
+
+
 def _guidance(scan: ScanResult) -> Iterator[str]:
     yield "## 2. How to read it"
     yield ""
@@ -174,7 +187,7 @@ def _guidance(scan: ScanResult) -> Iterator[str]:
     yield "  what distinguishes a fault from normal behaviour."
     yield "- `<private>` is the device redacting its own logs before they left it."
     yield "  It was never available to this tool and cannot be recovered."
-    yield "- Section 5 is verbatim; sections 3 and 4 are templated."
+    yield "- Section 6 is verbatim; sections 3, 4 and 5 are templated."
     yield ""
     if scan.gaps:
         yield "This capture has holes in it. Nothing can be concluded from the"
@@ -209,8 +222,11 @@ def _distribution(scan: ScanResult) -> Iterator[str]:
     yield "| Subsystem | Records | Errors |"
     yield "| --- | ---: | ---: |"
     for name, count in scan.subsystems.most_common(_SUBSYSTEM_ROWS):
-        label = name if name != ABSENT else "_(none)_"
-        yield f"| `{label}` | {count:,} | {scan.subsystem_errors.get(name, 0):,} |"
+        # The placeholder is italic markup, so it is not wrapped in a code span
+        # the way a real subsystem name is -- inside backticks it renders as
+        # literal underscores.
+        label = f"`{name}`" if name != ABSENT else "_(none)_"
+        yield f"| {label} | {count:,} | {scan.subsystem_errors.get(name, 0):,} |"
     if len(scan.subsystems) > _SUBSYSTEM_ROWS:
         yield ""
         yield f"_{len(scan.subsystems) - _SUBSYSTEM_ROWS:,} further subsystems._"
@@ -237,9 +253,12 @@ def _errors(scan: ScanResult, dropped: list[str], budget: int | None) -> Iterato
             f"<{level.title}> {subsystem} {escape(template)[:300]}"
         )
         if budget is not None and spent + len(entry) > budget:
+            # `index` is how many rows have been written, because the check runs
+            # before the row is emitted. Saying "the most frequent are shown"
+            # when it is zero was a claim about an empty code fence.
             dropped.append(
                 f"Section 4: {len(top) - index:,} of {len(top):,} error patterns "
-                f"did not fit the budget; the most frequent are shown."
+                f"did not fit the budget; {_shown(index)}."
             )
             break
         yield entry
@@ -271,7 +290,7 @@ def _patterns(scan: ScanResult, dropped: list[str], budget: int | None) -> Itera
         if budget is not None and spent + len(entry) > budget:
             dropped.append(
                 f"Section 5: {len(ordered) - shown:,} of {len(ordered):,} patterns "
-                f"did not fit the budget; the {shown:,} most frequent are shown."
+                f"did not fit the budget; {_shown(shown)}."
             )
             break
         yield entry

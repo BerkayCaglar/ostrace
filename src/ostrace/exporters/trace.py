@@ -17,7 +17,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ostrace.analysis.scan import ScanResult
-from ostrace.analysis.trace import TracePolicy, TraceResult, is_error, trace
+from ostrace.analysis.trace import (
+    DEFAULT_AFTER,
+    TracePolicy,
+    TraceResult,
+    is_error,
+    trace,
+)
 from ostrace.exporters.base import ExportResult, register
 from ostrace.exporters.plaintext import line as plain_line
 from ostrace.model import Record
@@ -145,6 +151,18 @@ def _window(number: int, window: Window) -> Iterator[str]:
             "This window hit the size limit, so it ends mid-sequence rather than "
             "where the interesting records stopped. Read on from the next line "
             "of the capture itself."
+        )
+    elif anchors and window.anchors[-1] + DEFAULT_AFTER >= len(window.records):
+        # The other way a window ends early, and it said nothing at all: the
+        # capture ran out. Silence there reads as "the device went quiet after
+        # the error", which is the conclusion this format exists to prevent --
+        # and it is the *last* window, which is the one a reader studies.
+        after = len(window.records) - window.anchors[-1] - 1
+        yield ""
+        yield (
+            f"The capture ends here, so this window carries {after:,} record(s) "
+            f"after its last anchor rather than {DEFAULT_AFTER}. What follows is "
+            f"unknown, not absent."
         )
     yield ""
     yield "```log"

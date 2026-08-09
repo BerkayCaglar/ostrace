@@ -55,11 +55,16 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument(
         "--duration",
         "-d",
-        type=float,
+        type=_positive_float,
         metavar="SECONDS",
         help="stop after this long",
     )
-    capture.add_argument("--max-records", "-n", type=int, help="stop after this many records")
+    capture.add_argument(
+        "--max-records",
+        "-n",
+        type=_positive_int,
+        help="stop after this many records",
+    )
     capture.add_argument(
         "--no-reconnect",
         action="store_true",
@@ -99,12 +104,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export.add_argument(
         "--budget-tokens",
-        type=int,
+        type=_non_negative_int,
         metavar="N",
         help="token budget for 'ai-report'; 0 means no limit",
     )
     export.add_argument("--quiet", "-q", action="store_true", help="print only the destination")
     return parser
+
+
+def _positive_int(raw: str) -> int:
+    """A count that has to mean something.
+
+    ``--max-records 0`` used to capture exactly one record: the limit is tested
+    after a record has been written, so the first comparison was ``1 >= 0``.
+    Negative values behaved the same. Rejected at the boundary rather than
+    reinterpreted, because there is no sensible reading of "capture at most
+    minus three records".
+    """
+    value = int(raw)
+    if value < 1:
+        msg = f"must be 1 or more, not {value}"
+        raise argparse.ArgumentTypeError(msg)
+    return value
+
+
+def _positive_float(raw: str) -> float:
+    value = float(raw)
+    if value <= 0:
+        msg = f"must be greater than zero, not {value:g}"
+        raise argparse.ArgumentTypeError(msg)
+    return value
+
+
+def _non_negative_int(raw: str) -> int:
+    """Zero is legal here: it spells "no limit" for ``--budget-tokens``."""
+    value = int(raw)
+    if value < 0:
+        msg = f"must be zero or more, not {value}"
+        raise argparse.ArgumentTypeError(msg)
+    return value
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -126,6 +164,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OstraceError as exc:
         # The hint is the actionable half, and __str__ carries it.
         print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except OSError as exc:
+        # Every command here writes files, so the filesystem's refusals are
+        # ordinary: a destination inside a file, a read-only volume, a full
+        # disk, a name the platform will not take. They arrived as a twelve
+        # frame traceback, which reads as a crash rather than as "that path
+        # will not work".
+        print(f"error: {exc.strerror or exc} ({exc.filename or 'no path'})", file=sys.stderr)
         return EXIT_ERROR
     except KeyboardInterrupt:  # pragma: no cover - needs a real signal
         return EXIT_INTERRUPTED
@@ -192,7 +238,7 @@ def _export(args: argparse.Namespace) -> int:
     from ostrace.exporters import EXPORTERS  # noqa: PLC0415
     from ostrace.exporters.ai_report import AiReportExporter  # noqa: PLC0415
     from ostrace.exporters.notes import export_notes  # noqa: PLC0415
-    from ostrace.paths import export_path  # noqa: PLC0415
+    from ostrace.paths import check_export_destination, export_path  # noqa: PLC0415
     from ostrace.storage.capture import open_capture  # noqa: PLC0415
 
     # A session directory carries device metadata and a bare spool does not.
@@ -207,22 +253,28 @@ def _export(args: argparse.Namespace) -> int:
     exporter = EXPORTERS[args.format]
     if args.budget_tokens is not None:
         if args.format != "ai-report":
-            print(
-                f"note: --budget-tokens does not apply to '{args.format}'; ignoring it.",
-                file=sys.stderr,
-            )
+            if not args.quiet:
+                print(
+                    f"note: --budget-tokens does not apply to '{args.format}'; ignoring it.",
+                    file=sys.stderr,
+                )
         else:
             # 0 spells "no limit" because argparse has no natural way to say it
             # and `--budget-tokens 0` reads better than a magic word.
             exporter = AiReportExporter(budget_tokens=args.budget_tokens or None)
 
     destination = Path(args.output) if args.output else export_path(session, exporter.suffix)
+    check_export_destination(destination, session)
     result = exporter.export(items, destination, device=device)
 
     if not args.quiet:
         print(f"{result.records:,} records -> {exporter.name}")
-        for warning in export_notes(result, truncated=truncated):
-            print(f"note: {warning}", file=sys.stderr)
+    # Not gated on --quiet. These say the export is missing data -- a truncated
+    # capture, a hole in it, a damaged line -- and "print only the destination"
+    # is a statement about stdout, which these were never on. Suppressing them
+    # would make the quiet form the one that hides the bad news.
+    for warning in export_notes(result, truncated=truncated, malformed=capture.malformed):
+        print(f"note: {warning}", file=sys.stderr)
     print(result.destination)
     return EXIT_OK
 

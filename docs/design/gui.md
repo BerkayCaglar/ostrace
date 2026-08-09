@@ -18,20 +18,28 @@ attributed to a tool that shipped the mistake. Nothing here is taste.
 ## 1. The window
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  ▶ Capture   ⏸ Pause   ⏏ Disconnect │ device ▾ │ Export ▾  Open │
-├─────────────────────────────────────────────────────────────────┤
-│ Level ▾  Process [____]  Subsystem [____]  Search [____] □ Regex│
-├──────────┬───────┬────────────┬──────────────┬──────────────────┤
-│ Time     │ Level │ Process    │ Subsystem    │ Message          │
-├──────────┼───────┼────────────┼──────────────┼──────────────────┤
-│ 01:10:31 │ ERROR │ dasd[83]   │ com.apple.d… │ Unable to dereg… │
-├──────────┴───────┴────────────┴──────────────┴──────────────────┤
-│ detail pane — every field of the selected record                │
-├─────────────────────────────────────────────────────────────────┤
-│ ● 1,204 rec/s │ iPhone · iOS 26.5.2 │ 1.2M records · 61 MB │ 0 gaps│
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│ Capture  Edit  View  Help                                              │
+├────────────────────────────────────────────────────────────────────────┤
+│ Level ▾  Process [____]  Subsystem [____]  Search [____] □ Regex       │
+├──────────┬───────┬──────────┬────────────┬──────────┬─────────────────┤
+│ Time     │ Level │ Process  │ Subsystem  │ Category │ Message         │
+├──────────┼───────┼──────────┼────────────┼──────────┼─────────────────┤
+│ 01:10:31 │ ERROR │ dasd[83] │ com.apple… │ default  │ Unable to dere… │
+├──────────┴───────┴──────────┴────────────┴──────────┴─────────────────┤
+│ detail pane — every field of the selected record                       │
+├────────────────────────────────────────────────────────────────────────┤
+│ ● 1,204 rec/s │ iPhone · iOS 26.5.2 │ 1.2M records │ 0 gaps            │
+└────────────────────────────────────────────────────────────────────────┘
 ```
+
+**0.1.0 has no toolbar and no device selector**, which this sketch drew before
+either was decided. Capture, Pause, Disconnect, Open and Export are menu items
+and shortcuts; the viewer captures from the first USB device, where the command
+line takes `--udid`. Both are gaps rather than choices — a toolbar is the
+larger of the two for a program whose main verbs are otherwise two clicks deep.
+There are six columns, not five: `Category` was in §2's table from the start
+and missing from here.
 
 The status bar always shows the gap count, **including when it is zero**.
 Wireshark bug 12005: a `Dropped` counter rendered only when non-zero silently
@@ -43,7 +51,7 @@ bad news is not.
 
 ## 2. Columns, and what the detail pane is for
 
-`Record` has thirteen fields and the table shows six. The split is not about
+`Record` has eleven fields and the table shows six. The split is not about
 width. The table carries what you *scan* for; the detail pane carries what you
 *confirm* once something has caught your eye.
 
@@ -96,20 +104,26 @@ a marker, including any that arrives looking like an ordinary record.
 No surveyed product guarantees this for loss markers. It is unclaimed ground,
 and it is cheap.
 
-### The four marker kinds are not one kind
+### The marker kinds are not one kind
 
 | Marker | Means | Recoverable? |
 | --- | --- | --- |
 | **Gap** | Records the device emitted and nothing received. `Gap(start, end, reason)`, written to the session file | **No.** Gone forever |
 | **Evicted** | The view hit its row cap and dropped its own oldest rows | **Yes.** Still in the capture on disk |
-| **Connected** / **Disconnected** | The device arrived or left | n/a |
+
+Connect and disconnect were listed here as a third kind and are **not rows**.
+They are lifecycle, not discontinuity: nothing is missing from the log because
+a capture started, and the invariant above is about whether an absence can be
+trusted. They surface as banner and status-bar state instead. A device that
+*leaves mid-capture* does produce a discontinuity, and that is a `Gap`.
 
 **Gap and Evicted must not render as the same row.** They look alike and mean
 opposite things: one says the data is gone, the other says the data is on disk
 and merely not on screen. Rendering an eviction as a `Gap` would make the GUI
 lie about the session file. The eviction row says so in its own words — *"…
-earlier records are in the capture but not in this view"* — and offers to jump
-into the session file.
+earlier records are in the capture but not in this view"*. It says where the
+records are; it does not offer to take you there, and an earlier draft of this
+paragraph promised a jump that was never built.
 
 Every tool surveyed gets the eviction case wrong by saying nothing at all:
 Logcat's `trimToSize()` is silent, the AWS toolkit silently trims 10,000 lines
@@ -118,8 +132,15 @@ more than a few seconds of data before it starts throwing away old lines" —
 that last one at exactly this project's throughput. Copy Logcat's one good
 habit: cut on a record boundary.
 
-Gap wording follows the plaintext exporter, because `docs/formats/` wins:
-`---- gap {start} to {end} ({reason}) ----`.
+Gap wording follows the plaintext exporter, so the same event reads the same
+in both places: `---- gap {start} to {end} ({reason}) --------------------`,
+built by `exporters.plaintext.gap_line`, which the table calls rather than
+spelling out. The exporter's line is not itself specified in `docs/formats/` —
+an earlier version of this sentence cited that rule for it, which was a
+citation to nothing — so the rule is simply that there is one spelling and the
+exporter owns it. The table passes full timestamps where the exporter passes
+times of day, because a table has a Time column beside it and a text file does
+not.
 
 ### Validation from Apple's own model
 
@@ -187,9 +208,15 @@ jumps; pressing it again at the bottom resumes following. Wireshark's
 unresolved *"Ctrl End is close, but doesn't resume auto scroll"* is the cost of
 conflating them.
 
-Two indicators, because they are two different facts: whether follow is on, and
-how many records have arrived unseen. Prefer text — klogg's issue #100 is an
-icon nobody could decode.
+Resuming *clears the selection*, which is what "stay" means once selection
+breaks follow: a caret parked on the last row is exactly the evidence of a
+reader who has stopped tailing, so leaving it there would break the tail again
+on the very next record.
+
+**Not built in 0.1.0:** the two indicators this section asked for — whether
+follow is on, and how many records have arrived unseen. The status bar has
+four fields and neither is among them. The unseen count is the more useful
+half; a reader who has scrolled up has no idea how far behind they now are.
 
 ---
 
@@ -232,13 +259,19 @@ Logcat clears its document and re-appends, so **every keystroke in the filter
 field throws the user to the bottom**. This is the clearest opportunity in the
 whole phase to be better than the established tools, and it is worth real time.
 
-The filter expression is **one text field whose contents are copy-pasteable**.
-Google's stated reason for rewriting Logcat's filters in 2023 was that a
-dialog-built filter cannot be shared and there was no history. Ship history,
-with a match count on each entry so an over-narrow filter is visible before it
-is applied. `level:` is a **threshold**, with a separate exact form — and note
-that Apple's level values are not severity-ordered, so the threshold is over
-our own enum.
+**0.1.0 ships the fielded bar, not an expression language.** This section
+argued for one copy-pasteable text field with history, citing Google's stated
+reason for rewriting Logcat's filters in 2023 — that a dialog-built filter
+cannot be shared. §1's own sketch drew a level combo and three fields, and that
+is what exists: `Level ▾  Process  Subsystem  Search □ Regex`. The two halves of
+this document never agreed with each other.
+
+The fielded version is defensible for four terms over a fixed schema, and it
+is what a first release can be sure is right. What it gives up is real and is
+the reason to revisit: a filter that cannot be pasted into an issue, and no
+history. The threshold semantics survive either way — Apple's level values are
+not severity-ordered, so it is a threshold over our own enum, expressed here as
+a combo rather than as `level:`.
 
 ---
 
@@ -248,16 +281,25 @@ A paused stream looks exactly like a quiet device. An over-narrow filter looks
 exactly like a dead one. Every invisible state gets a **persistent in-view
 banner with a recovery action**, not a toolbar icon:
 
-| State | Banner | Action |
-| --- | --- | --- |
-| Paused | Capture is paused. *N* records buffered | Resume |
-| Everything filtered out | All records are hidden by the filter | Clear filter |
-| No device | No device connected | Retry |
-| Disconnected mid-capture | Device disconnected — reconnecting | Disconnect |
-| Empty capture | This capture contains no records | — |
+| State | Banner | Action | 0.1.0 |
+| --- | --- | --- | --- |
+| Paused | Capture is paused | Resume | ships, without the *N* buffered |
+| Everything filtered out | All *N* records are hidden by the filter | Clear filter | ships |
+| No device | wording from the error | Retry | ships |
+| Empty capture | This capture contains no records | Open another | ships |
+| Disconnected mid-capture | Device disconnected — reconnecting | Disconnect | **not built** |
+| Capture stopped | wording from the error | Retry | ships (not listed here originally) |
+| Paused queue overflowed | *N* records did not fit; they are in the file | Resume | ships (not listed here originally) |
+| Truncated capture opened | the tail is missing | Dismiss | ships (not listed here originally) |
 
 Logcat ships the first two with a one-click **Clear filter**; they are the two
 that generate support questions everywhere else.
+
+The missing one is the reconnect. `sources/os_trace.py` retries an outage for
+up to a minute and the viewer says nothing while it does — the user sees a
+stream that has stopped, and finds out what happened only when a `Gap` row
+appears or the capture gives up. That is precisely the invisible state this
+section exists for.
 
 ---
 
@@ -281,11 +323,26 @@ marker, is the anti-pattern.
 theirs to "Exit live mode" precisely because "Stop" was ambiguous against
 "Pause". Ours releases the device, and the name should say so.
 
+**Disconnecting finishes the capture, and a finished capture is exportable.**
+Export is refused while records are still arriving — a file growing under the
+exporter produces a report whose end is arbitrary — so the refusal has to name
+the control that resolves it and that control has to actually resolve it. The
+window adopts the session file the moment the capture thread ends, whether it
+ended because the user disconnected or because the device went away. Anything
+less makes the refusal a dead end: told to disconnect, the user disconnects and
+is told to disconnect.
+
 ostrace spools to disk, so pause can keep its promise honestly and needs no
 ring buffer. Grafana promises "no gap" while backing it with a 1,000-line ring
 that silently overwrites; CloudWatch buffers about ten seconds and then drops
 the *oldest*, tearing a hole in the middle of the timeline rather than
-truncating the tail. **If a bound is ever introduced here, it emits a `Gap`.**
+truncating the tail.
+
+A bound *was* introduced — 100,000 records, in `gui.pump` — and it emits an
+**`Eviction`**, not the `Gap` this paragraph originally promised. That promise
+contradicted §3: those records are in the session file, and calling their
+absence from the view a gap would be the lie §3 forbids. Same for the model's
+own row cap.
 
 ---
 
@@ -329,26 +386,39 @@ mark and flag it unverified.
 
 ## 9. Detail pane
 
-A **bottom panel**, plus a separate cheap **in-row expansion** on
-`Right`/`Left`. Console.app does both for exactly this record type.
-
-Their stream semantics are borrowed from CloudWatch and are worth stating
-because they are not obvious: **row expansion keeps the stream running; opening
-the detail panel pauses it.** Expansion is a glance, the panel is a study.
+A **bottom panel**. 0.1.0 does not have the separate cheap **in-row expansion**
+on `Right`/`Left` that Console.app pairs it with, and therefore has neither of
+the stream semantics that would have gone with it — *row expansion keeps the
+stream running; opening the detail panel pauses it*. Here the panel is always
+present and neither of them pauses anything, which is consistent, if less
+expressive than the pair.
 
 Do not budget performance work for the detail pane. Wireshark's own guidance
 names real-time list update, **colouring rules** and name resolution as the
-cost centres. The delegate is what to optimise. Also from Wireshark: expose an
-*interval between updates* preference, and never recompute the whole list on a
-selection change — that is what made its auto-scroll jump (bug 12130).
+cost centres. The delegate is what to optimise. Also from Wireshark: never
+recompute the whole list on a selection change — that is what made its
+auto-scroll jump (bug 12130).
+
+The *interval between updates* preference this section asked for is not
+exposed. It exists as two measured constants instead: `pump.TICK_MS` (50 ms,
+draining) and `main._FOLLOW_MIN_MS` (100 ms, scrolling). Splitting those two
+apart is what stopped the tail repainting the whole viewport fifteen times a
+second; making either one a setting is a later decision.
 
 ---
 
 ## 10. Theme
 
-**The theme is a function from a colour scheme to a `QPalette`, seeded from the
-OS palette at run time.** It is not a set of colours read out of the palette,
-and it is not a stylesheet.
+**The theme is a function from a colour scheme to a `QPalette`.** It is not a
+set of colours read out of the platform, and it is not a stylesheet.
+
+This originally said "seeded from the OS palette at run time", and the
+implementation deliberately does the opposite: `gui/theme.py` holds sixteen
+hex literals per scheme. Seeding from the platform would make the output
+depend on the platform, which is the one thing a GUI that cannot be run on
+macOS must not do — the same argument ADR 0004 used to choose Qt. Determinism
+is what lets CI assert every severity colour against WCAG AA on all three
+operating systems and lets the screenshot job force either scheme anywhere.
 
 That shape is forced by measurement, and it happens to solve three problems at
 once — which is how you know it is the right one:
@@ -403,9 +473,9 @@ did not survive.
 
 | Rule | Status |
 | --- | --- |
-| **Override `QHeaderView.initStyleOptionForIndex`** | **The single biggest lever**, and it does not cost the column titles. The header asks the selection model, per section, whether the whole column is selected; QTBUG-59478 has been open since 2017 and its fix was *abandoned* the same year. Measured at 200k rows × 6, `selectAll()`, best of three: **4.064 s → 0.008 s, 541×**, `flags()` calls 1,200,689 → 683, titles still on screen. Implemented as `gui.widgets.log_table.FastHeader`, which reimplements the cheap half of the base method — skipping `super()` outright is faster still and paints a header with no titles, since that is also what fills in the section text. Hiding the header entirely is the cruder version of the same fix |
+| **Override `QHeaderView.initStyleOptionForIndex`** | **Keep, and the figure corrected — twice.** The header asks the selection model, per section, whether the whole column is selected; QTBUG-59478 has been open since 2017 and its fix was *abandoned* the same year. Measured at 200k rows × 6, `selectAll()` plus its repaint, best of three: **5.98 s → 2.92 s, about 2×**, `flags()` calls 1,200,689 → 683, titles still on screen. This row previously read *"the single biggest lever… 4.064 s → 0.008 s, 541×"*. That measurement is reproducible but it used a stand-in model whose `flags()` returns a constant and whose `data()` returns `"x"`; against the model that ships, the remaining 2.9 s is the selection model and the repaint, and the prebuilt `_flags` below has already made each of those million calls cheap. The two rules were treating the same wound and their savings do not add up. Implemented as `gui.widgets.log_table.FastHeader`, which reimplements the cheap half of the base method — skipping `super()` outright is faster still and paints a header with no titles, since that is also what fills in the section text. `setHighlightSections(False)` was measured as an alternative and does nothing: 5.93 s |
 | `QTableView` only, never `QTreeView`/`QListView` | **Keep the rule.** The evidence is stale: the "20M `rowCount()` calls" figure was fixed by Qt change 601341, merged 2024-11-01 and backported to 6.8, which this project already pins. `QTableView` is still fastest |
-| Cache the `flags()` return value | **Keep, restated.** Measured ~1.3× (3.47 s → 2.55 s at 200k), not 20×. The ADR's "7.760 s → 0.396 s" conflated time-inside-`flags()` with an operation total. It is one line and still worth it — but the calls it optimises are *caused* by the header, and `FastHeader` removes 1,200,006 of the 1,200,689 outright. Fix the cause first |
+| Cache the `flags()` return value | **Keep, restated.** Measured ~1.3× (3.47 s → 2.55 s at 200k), not 20×. The ADR's "7.760 s → 0.396 s" conflated time-inside-`flags()` with an operation total. It is one line and still worth it — but the calls it optimises are *caused* by the header, and `FastHeader` removes 1,200,006 of the 1,200,689 outright. Fix the cause first. Note the corollary, which took a second re-measurement to see: with this in place each remaining call is cheap, which is most of why removing them is worth 2× rather than 541× |
 | Override `multiData()` | **Deleted.** Measured **0.96–0.99× — marginally slower.** Qt does query exactly 7 roles per cell and a Python override *is* called, but the span must be iterated from Python, so 7 inbound crossings become 1 inbound plus ~14 outbound. True in C++, false in PySide6 |
 | Never `ResizeToContents` | **Keep, tightened to the *vertical* header.** QTBUG-57848 is about the vertical header specifically; for the horizontal one, `resizeContentsPrecision` (default 1000) already bounds the scan. Still open, P5, dormant since 2019 |
 | Fixed row height via `verticalHeader().setSectionResizeMode(Fixed)` | **Keep.** `QTableView` genuinely has no `setUniformRowHeights()` *(measured: absent on `QTableView`, present on `QTreeView`)* |
@@ -477,8 +547,10 @@ Do not read the presence of a macOS screenshot as coverage of the menu trap.
 ## 13. Deliberately out of scope for phase 4
 
 - **Substring selection inside a message.** `QTableView` selects whole cells.
-  Cell and row copy ship; a read-only `QLineEdit` delegate does not. The detail
-  pane covers the common case, as ADR 0004 already records.
+  *Row* copy ships — the selection behaviour is whole rows, so a copy always
+  emits every column — and a read-only `QLineEdit` delegate does not. The
+  detail pane covers the common case, as ADR 0004 already records. (This said
+  "cell and row copy ship"; only row copy does.)
 - **Context lines around a match** (`grep -C`). LogExpert's Back Spread / Fore
   Spread is the only GUI implementation found and the demand is real, but with
   process, subsystem and PID on every row a *relational* filter — everything

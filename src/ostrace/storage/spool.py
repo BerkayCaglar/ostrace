@@ -190,15 +190,19 @@ class SpoolReader:
         :class:`~ostrace.model.Record` for each one only to discard it more than
         doubled the cost of this scan.
         """
+        # Every object is decoded, not only the ones claiming to be gaps: the
+        # counter describes the file, and a pass that skipped the records
+        # reported less damage than a pass that read them. Two passes over one
+        # file disagreeing about how much of it is broken is worse than the
+        # decode work saved.
         for obj in self._objects():
-            if obj.get("gap"):
-                try:
-                    item = decode(obj)
-                except SessionCorruptError:
-                    self.malformed += 1
-                    continue
-                if isinstance(item, Gap):
-                    yield item
+            try:
+                item = decode(obj)
+            except SessionCorruptError:
+                self.malformed += 1
+                continue
+            if isinstance(item, Gap):
+                yield item
 
     def items(self) -> Iterator[Record | Gap]:
         for obj in self._objects():

@@ -56,12 +56,23 @@ class CaptureThread(QThread):
         super().__init__()
         self.source = source
         self.destination = destination
+        #: Where the session is being written. Set once, early, by the capture
+        #: itself -- a plain attribute rather than a signal, because the reader
+        #: is whoever just joined this thread and a queued signal would need an
+        #: event loop to have run first. `paths` decides the value; this only
+        #: carries it back.
+        self.path: Path | None = None
         #: Written by this thread, drained by the GUI thread. Unbounded here on
         #: purpose: the bound belongs to whoever is reading, which knows
         #: whether the reader is paused. See `gui.pump`.
         self.queue: deque[Row] = deque()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._task: asyncio.Task[Any] | None = None
+        #: Set by `stop`, read by `_capture`. Identifying a device can take a
+        #: moment, and a Disconnect pressed during it used to find no task to
+        #: cancel and do nothing at all -- leaving the device held by a capture
+        #: the user had already ended.
+        self._stopping = False
 
     def run(self) -> None:
         """The thread body. Everything here is off the GUI thread."""
@@ -82,10 +93,25 @@ class CaptureThread(QThread):
         self.identified.emit(device)
 
         self._task = asyncio.ensure_future(
-            capture(self.source, destination=self.destination, on_item=self.queue.append)
+            capture(
+                self.source,
+                destination=self.destination,
+                on_item=self.queue.append,
+                on_open=self._opened,
+            )
         )
+        if self._stopping:
+            # Disconnect arrived while the device was still being identified,
+            # when there was nothing yet to cancel. The flag is set before
+            # `stop` reads the task and read here after it is assigned, so one
+            # of the two always sees the other.
+            self._task.cancel()
         result = await self._task
         self.completed.emit(result)
+
+    def _opened(self, path: Path) -> None:
+        """Remember where the session is going. Runs on this thread."""
+        self.path = path
 
     def stop(self) -> None:
         """Ask the capture to end, from the GUI thread.
@@ -99,6 +125,7 @@ class CaptureThread(QThread):
         releases the device -- the service connection first, then lockdown,
         because the service is what the generator is blocked reading.
         """
+        self._stopping = True
         loop, task = self._loop, self._task
         if loop is None or task is None:
             return

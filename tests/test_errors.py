@@ -160,3 +160,38 @@ class TestUpstreamNamesStillExist:
         from pymobiledevice3.exceptions import ConnectionTerminatedError
 
         assert isinstance(translate(ConnectionTerminatedError()), StreamInterruptedError)
+
+    def test_the_entry_type_still_has_the_fields_we_read(self) -> None:
+        """Fails on an upstream rename instead of at 3am during a capture.
+
+        It lived in `test_device_live.py` and was therefore marked `device` by
+        that module's `pytestmark`, so CI never ran it -- and it is the only
+        guard on a field rename inside the `>=10.3,<11` pin, which is precisely
+        what a Dependabot bump would introduce. It reads a dataclass
+        definition; no device has ever been involved.
+        """
+        import dataclasses
+
+        from pymobiledevice3.services.os_trace import SyslogEntry
+
+        fields = {field.name for field in dataclasses.fields(SyslogEntry)}
+        required = {
+            "pid",
+            "timestamp",
+            "level",
+            "image_name",
+            "filename",
+            "message",
+            "label",
+            "thread_id",
+        }
+        assert required <= fields, f"pymobiledevice3 SyslogEntry lost {required - fields}"
+
+    def test_every_level_the_device_can_emit_is_one_we_map(self) -> None:
+        """An unmapped level name silently becomes NOTICE, which would hide
+        errors. Same story: marked `device`, never run, and it is an enum."""
+        from pymobiledevice3.services.os_trace import SyslogLogLevel
+
+        from ostrace.sources.os_trace import _LEVELS
+
+        assert {member.name for member in SyslogLogLevel} <= set(_LEVELS)

@@ -18,7 +18,7 @@ import pytest
 from ostrace.exporters import EXPORTERS
 from ostrace.storage.capture import open_capture
 from ostrace.storage.spool import SpoolWriter
-from tests.helpers import ERRORS, MIXED, make_gap, make_record
+from tests.helpers import ERRORS, make_gap, make_record
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
@@ -123,18 +123,33 @@ def test_the_report_declares_a_gap_in_the_capture(qt_app: object, tmp_path: Path
 
 def test_the_notes_are_the_same_sentences_the_cli_prints(qt_app: object, tmp_path: Path) -> None:
     """Two spellings of "this capture has a gap in it" would eventually
-    disagree about which one mattered."""
+    disagree about which one mattered.
+
+    Driven from a capture with a hole in it, and with a guard that the hole
+    actually produces a note. Run against a fixture it proved nothing: both
+    fixtures are intact, `export_notes` returns `[]` for them, and the loop
+    body never executed -- so emptying `export_notes` entirely left this
+    passing.
+    """
     del qt_app
     from ostrace.exporters.notes import export_notes
 
-    dialog = ExportDialog(open_capture(MIXED))
+    spool = tmp_path / "holed.jsonl.gz"
+    with SpoolWriter(spool) as writer:
+        writer.write(make_record(0))
+        writer.write_gap(make_gap())
+        writer.write(make_record(1))
+
+    dialog = ExportDialog(open_capture(spool))
     dialog.format_box.setCurrentIndex(dialog.format_box.findData("text"))
     dialog.destination.setText(str(tmp_path / "out.log"))
     dialog.run_export()
 
     exporter = EXPORTERS["text"]
-    outcome = exporter.export(open_capture(MIXED).items(), tmp_path / "again.log")
-    for note in export_notes(outcome, truncated=False):
+    outcome = exporter.export(open_capture(spool).items(), tmp_path / "again.log")
+    notes = export_notes(outcome, truncated=False)
+    assert notes, "the capture must actually produce a note for this to mean anything"
+    for note in notes:
         assert note in dialog.report.text()
 
 

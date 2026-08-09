@@ -12,7 +12,127 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **`gaps.tsv` in the agent bundle.** Every other export states a gap inside
+  the thing a reader reads; the bundle said it only in `CLAUDE.md`, which is
+  explicitly outside the format contract. So `session.log`, `errors.log`,
+  `timeline.tsv` and `patterns.tsv` all read straight across the hole, and
+  every search an agent ran was answered as though the device had been quiet —
+  the one conclusion this format exists to prevent. Its own file rather than a
+  marker line, because `session.log`'s contract is one record per line and
+  every recipe in the bundle depends on it. Written on every export, header
+  only when there are none: a file that appears solely on bad news cannot be
+  told from a file nobody wrote.
+
+- **Help ▸ About**, which is now the only place the viewer says which version
+  it is. The application has always known — nothing displayed it.
+
+### Removed
+
+- **Edit ▸ Settings…**, which opened nothing. Nothing in this release is
+  configurable, and an inert Preferences item is worst on the platform its
+  menu-role machinery exists for: macOS moves it into the application menu,
+  where it is the item people press without looking.
+
+### Fixed
+
+- **Export was a dead end after a live capture.** Capture from the device,
+  press Export, and the viewer said to disconnect to finish the recording.
+  Disconnect, press Export again, and it said exactly the same thing: nothing
+  ever told the window where the session file had gone, and nothing ever would.
+  The records were on disk throughout — `ostrace.capture.capture` finalises the
+  session on every exit path including cancellation — so the only thing missing
+  was the path.
+
+  `capture()` now reports it through an `on_open` callback as soon as there is
+  one, because a cancelled capture never returns a result and the result was
+  the only thing carrying it. The window adopts the session when the capture
+  thread ends, however it ended, and its title finally says where the capture
+  went — which the CLI has always printed and the viewer never said at all.
+
+  Export offers **Disconnect** as the way out while a capture is running, which
+  is only worth offering now that it leads somewhere.
+
+- **Disconnect did nothing if the capture had not started yet.** Stopping works
+  by cancelling the capture task, and until the device has been identified —
+  a round trip to it — there is no task to cancel, so it returned quietly and
+  the capture went on running against a device the user had already released.
+
+- **A capture that ended by itself left the viewer running against nothing.**
+  Unplug the device, or let a limit stop it, and the pump and the overview
+  timer kept ticking: the status bar switched to `idle` and then back to
+  `0 rec/s` fifty milliseconds later, and stayed there for the rest of the
+  session. Export then took the wrong branch and offered a Disconnect that was
+  greyed out.
+
+- **Pressing Capture with no device gave three seconds of nothing**, then a
+  banner offering **Dismiss**. `OsTraceSource` does not touch the device when
+  it is constructed, so the "no device" path the window was catching never
+  fired. It offers **Retry** now, and the window title stops naming a source
+  that produced nothing.
+
+- **The tail dragged a selected row off the screen.** Follow is derived from
+  the view rather than stored — but only from the scrollbar, and clicking a row
+  does not move the scrollbar, so a reader who selected a record mid-capture
+  had it yanked away by the next batch. `docs/design/gui.md` §4 calls breaking
+  follow on selection "not optional", and with a detail pane selection is the
+  primary interaction. This is the Console.app bug the rule was written to
+  avoid, arriving from the other direction.
+
+- **An empty capture said nothing at all.** A filter matching nothing, a
+  capture with nothing in it and a quiet device all produce the same empty
+  table; only two of the three explained themselves.
+
+- **The Process column dropped the `[pid]`** when the value did not fit,
+  eliding right like every other column. The pid is what tells eight instances
+  of one process apart, the plaintext exporter already takes trouble to keep
+  it, and `docs/design/gui.md` §2 says it is never what gets truncated.
+
+- **The keyboard sheet assumed a monospaced font.** Padded columns in a
+  `QMessageBox` label, which is proportional on every platform.
+
+- **`ai-report` named the wrong section as verbatim**, and at a small budget
+  claimed "the most frequent are shown" above an empty code fence — or "the 0
+  most frequent are shown", which is not a sentence. The subsystem placeholder
+  rendered as literal underscores inside a code span.
+
+- **The bundle's match-count warning was 11–22% optimistic.** It estimated a
+  record's length as the raw message plus a flat sixty characters, where the
+  five fixed columns are nearer eighty and the written message is escaped. It
+  is measured while `session.log` is written now; erring high is the unsafe
+  direction for a number whose whole job is preventing a silent truncation.
+
+- **`trace` said nothing when a window was cut short by the end of the
+  capture.** The size-limit case gets a paragraph; running out of capture got
+  silence, in the last window — the one a reader studies, where an absent
+  aftermath reads as "the device went quiet after the error".
+
+### Changed
+
+- Several published measurements were re-measured and did not survive. The
+  largest: the horizontal header optimisation shipped as *"the single biggest
+  lever, 541×"*, taken against a stand-in model whose `flags()` returns a
+  constant. Against the model that ships it is **about 2×** — 5.98 s to 2.92 s
+  on `selectAll()` at 200,000 rows — because the rest of the time is the
+  selection model and the repaint, and the prebuilt-`flags` rule has already
+  made each of those million calls cheap. The two optimisations were treating
+  the same wound and their savings do not add up. Corrected in `gui.md` §11,
+  ADR 0004, the research note and the source.
+
+- Documentation that had drifted from the code: three documents promised a
+  `syslog_relay` fallback source that was never built, the research note had
+  the `HISTORICAL` stream flag's default backwards, `CONTRIBUTING.md` listed
+  the wrong CI commands and a retracted proxy figure, `docs/formats/session-file.md`
+  documented a sidecar key nothing writes and called itself a draft, ADR 0005
+  counted six files in a seven-file bundle, and `CLAUDE.md` described a project
+  two phases behind. `docs/design/gui.md` now records where phase 4 diverged
+  from it and why, rather than reading as though it had all been built.
+
+- ADR 0001 and the ADR README now say that a *measurement* inside an accepted
+  record is corrected in place with a dated note, while a *decision* is still
+  only reversed by a superseding ADR. ADR 0004 had already been edited twice
+  under a rule that forbade it; the rule was the thing that was wrong.
 
 ## [0.1.0] - 2026-08-09
 
@@ -75,8 +195,6 @@ because the obvious assumption is wrong in each case.
   on every exit path including an exception.
 - `ostrace.capture.capture()`, separate from the CLI because a GUI stop button
   has the same obligations as Ctrl-C.
-
-`export` is declared but not implemented; it needs the exporters from phase 2.
 
 The capture loop takes a `LogSource`, so a recorded session stands in for a
 device: the end-to-end tests run a real iPhone capture through the CLI and
@@ -455,9 +573,10 @@ fixed 200 records however large the capture is.
   `super().initStyleOptionForIndex` avoids the quadratic selection query — and
   also skips the part that fills in the section's *text*, so the header painted
   empty. Nothing failed: the suite passed and the benchmark improved. Only a
-  screenshot showed it. The cheap half is reimplemented now, the titles are
-  back, and the measured gain is 541× rather than the 584× of the broken
-  version.
+  screenshot showed it. The cheap half is reimplemented now and the titles are
+  back, at a small cost against the broken version — both figures were taken
+  against a stand-in model, and neither survives contact with the real one; see
+  the corrected table above.
 
 - **The detail pane clipped and overlapped its rows.** A word-wrapped `QLabel`
   reports a minimum height of about one line, which a scroll area takes as
@@ -550,13 +669,18 @@ fixed 200 records however large the capture is.
 
   | header | time | `flags()` calls |
   | --- | ---: | ---: |
-  | stock `QHeaderView` | 4.064 s | 1,200,689 |
-  | `FastHeader` | 0.008 s | 683 |
+  | stock `QHeaderView` | 5.98 s | 1,200,689 |
+  | `FastHeader` | 2.92 s | 683 |
 
-  541×, with the column titles still on screen. Hiding the header is the cruder
-  version of the same fix. Asserted in CI on call counts rather than elapsed
-  time, because a wall-clock threshold on a shared runner is a flaky test in a
-  performance test's clothes.
+  About 2×, with the column titles still on screen. Asserted in CI on call
+  counts rather than elapsed time, because a wall-clock threshold on a shared
+  runner is a flaky test in a performance test's clothes.
+
+  This shipped as *"541×, the single biggest lever"*, from a run against a
+  stand-in model whose `flags()` returns a constant. Against the model that
+  ships, the header is not the whole cost and the prebuilt `_flags` rule has
+  already made each of those million calls cheap, so the two savings overlap
+  rather than add. Corrected before the release rather than published.
 
 - **A theme that is a function from a colour scheme to a `QPalette`**, rather
   than colours read out of the platform. `QStyleHints.setColorScheme()` is a
@@ -593,10 +717,11 @@ fixed 200 records however large the capture is.
   the span has to be iterated from Python, so seven inbound crossings become
   one inbound plus about fourteen outbound. The `flags()` caching figure was
   overstated by roughly 15× (~1.3×, not 20×). The horizontal header, recorded
-  there as a footnote, is the biggest lever there is: overriding
-  `initStyleOptionForIndex` is worth 541×, and it is the *cause* of the
-  `flags()` calls the caching rule was treating. The `QListView` figures were
-  fixed in Qt 6.8, which this project already pins.
+  there as a footnote, is worth about 2× — overriding
+  `initStyleOptionForIndex` removes 1,200,006 of 1,200,689 `flags()` calls,
+  which is the *cause* the caching rule was treating rather than a second
+  independent win. The `QListView` figures were fixed in Qt 6.8, which this
+  project already pins.
 
   The decision itself — PySide6 with a hand-written filtered model — is
   unaffected.
@@ -656,9 +781,9 @@ callers to break:
 - Dropped from `compat.py`: the subprocess helpers, which supported an
   architecture ADR 0002 rejected, and the platform constants, which the module's
   own rules left with no legal caller.
-- `Environment :: X11 Applications :: Qt` is no longer declared. It advertised a
-  graphical interface that does not exist until phase 4; the `gui` extra stays,
-  because installing Qt on purpose is a different claim from shipping a GUI.
+- `Environment :: X11 Applications :: Qt` was dropped while there was no
+  graphical interface, and is declared again now that phase 4 ships one,
+  alongside the Win32 and macOS environment classifiers.
 
 ### Security
 

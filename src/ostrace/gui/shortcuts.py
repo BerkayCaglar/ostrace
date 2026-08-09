@@ -176,7 +176,13 @@ BINDINGS: tuple[Binding, ...] = (
 
 #: Actions Qt relocates on macOS by matching their text, and should. They are
 #: built separately because their roles, not their bindings, are the point.
-RELOCATED = ("quit", "about", "settings")
+#:
+#: No Settings. There is nothing to configure in this release -- the theme
+#: follows the system, the row cap and the drain interval are measured
+#: constants -- and a menu item that opens nothing is worse than an absent one,
+#: especially on macOS where Qt moves it into the application menu and calls it
+#: Preferences, which is the item people press without looking.
+RELOCATED = ("quit", "about")
 
 
 def sequences(binding: Binding) -> list[QKeySequence]:

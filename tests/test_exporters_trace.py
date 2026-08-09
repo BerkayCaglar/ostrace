@@ -131,3 +131,31 @@ class TestRegistry:
         """`--format` choices come from this registry, so an accidental entry
         becomes a documented option."""
         assert len(EXPORTERS) == 6
+
+
+def test_a_window_cut_short_by_the_end_of_the_capture_says_so(tmp_path: Path) -> None:
+    """The other way a window ends early, and it used to say nothing.
+
+    The size-limit case gets a paragraph. Running out of capture got silence --
+    and it is the *last* window, the one a reader studies, where an absent
+    aftermath reads as "the device went quiet after the error". That is the
+    conclusion this format exists to prevent.
+    """
+    records = [make_record(index) for index in range(60)]
+    records[55] = make_record(55, level=Level.ERROR)
+
+    result = TraceExporter().export(records, tmp_path / "edge.md")
+    report = result.destination.read_text(encoding="utf-8")
+
+    assert "The capture ends here" in report
+    assert "unknown, not absent" in report
+
+
+def test_a_window_with_room_to_spare_says_nothing_extra(tmp_path: Path) -> None:
+    """The note must not fire on an ordinary window, or it becomes noise."""
+    records = [make_record(index) for index in range(300)]
+    records[10] = make_record(10, level=Level.ERROR)
+
+    result = TraceExporter().export(records, tmp_path / "roomy.md")
+
+    assert "The capture ends here" not in result.destination.read_text(encoding="utf-8")

@@ -17,18 +17,22 @@ hardware. This file proves control flow.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections import deque
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
 
-from ostrace.model import Gap, Level, Record
+from ostrace.model import DeviceInfo, Gap, Level, Record
 from ostrace.sources.replay import ReplaySource
 from ostrace.storage.capture import open_capture
 from tests.helpers import ERRORS, ScriptedSource, make_record
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
+
+from PySide6.QtWidgets import QApplication
 
 from ostrace.gui.markers import Eviction
 from ostrace.gui.models import RecordModel
@@ -39,6 +43,8 @@ from ostrace.gui.windows.main import MainWindow
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from ostrace.gui.live import CaptureThread
 
 pytestmark = pytest.mark.gui
 
@@ -58,6 +64,23 @@ def _own_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def model(qt_app: object) -> RecordModel:
     del qt_app
     return RecordModel(Scheme.LIGHT)
+
+
+def once_recording(window: MainWindow, timeout: float = 30.0) -> CaptureThread:
+    """Wait until the capture has a session file open.
+
+    A capture is not recording the instant ``start_capture`` returns: the
+    thread has to be scheduled and the device identified first. Anything
+    asserting what a *recorded* capture leaves behind has to wait for that, and
+    the session path appearing is the moment it is true.
+    """
+    thread = window._capture_thread
+    assert thread is not None
+    deadline = time.monotonic() + timeout
+    while thread.path is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert thread.path is not None, "the capture never opened a session"
+    return thread
 
 
 # -- the pump ----------------------------------------------------------------
@@ -224,6 +247,105 @@ def test_capturing_writes_a_session_file(qt_app: object, tmp_path: Path) -> None
     assert destination.is_dir()
     written = [item for item in open_capture(destination).items() if isinstance(item, Record)]
     assert len(written) == 3000
+
+
+def test_disconnecting_leaves_a_capture_that_can_be_exported(
+    qt_app: object, tmp_path: Path
+) -> None:
+    """The dead end a user hits within a minute of first opening the viewer.
+
+    Capture from the device, press Export, and be told to disconnect to finish
+    the recording. Disconnect, press Export again, and be told exactly the same
+    thing -- because nothing set the window's capture, and nothing ever would.
+    The records were on disk the whole time; the window simply did not know
+    where.
+    """
+    del qt_app
+    window = MainWindow()
+    window.start_capture(
+        ScriptedSource([make_record(i) for i in range(500)], delay=0.01),
+        destination=tmp_path / "live.ostrace",
+    )
+    once_recording(window)
+
+    window.stop_capture()
+
+    assert window.capture is not None, "disconnecting left nothing to export"
+    list(window.capture.items())  # the session is finalised and readable
+    assert "live.ostrace" in window.windowTitle(), "the window never says where it went"
+
+
+def test_export_offers_the_way_to_finish_a_running_capture(qt_app: object, tmp_path: Path) -> None:
+    """And the way out has to lead somewhere.
+
+    Refusing to export a file that is still growing is right -- the end of the
+    report would be arbitrary. Saying so and offering the button that fixes it
+    is the difference between a rule and a dead end.
+    """
+    del qt_app
+    window = MainWindow()
+    window.start_capture(
+        ScriptedSource([make_record(i) for i in range(500)], delay=0.01),
+        destination=tmp_path / "live.ostrace",
+    )
+    once_recording(window)
+
+    window.export_capture()
+    assert "still running" in window.banner.text
+
+    window.banner.act()  # the offered Disconnect
+
+    assert window._capture_thread is None
+    assert window.capture is not None, "the way out did not lead anywhere"
+
+
+def test_disconnecting_before_the_capture_gets_going_still_releases_it(
+    qt_app: object, tmp_path: Path
+) -> None:
+    """Identifying a device is a round trip to it, and Disconnect during that
+    round trip used to do nothing whatsoever.
+
+    ``stop`` cancels the capture task, and until that task exists there was
+    nothing to cancel, so it returned quietly -- and the capture went on
+    running against a device the user had already let go of. Found because a
+    test disconnected quickly enough to hit it.
+    """
+    del qt_app
+
+    class SlowToIdentify(ScriptedSource):
+        async def device_info(self) -> DeviceInfo:
+            await asyncio.sleep(0.5)
+            return await super().device_info()
+
+    window = MainWindow()
+    window.start_capture(
+        SlowToIdentify([make_record(i) for i in range(500)], delay=0.01),
+        destination=tmp_path / "live.ostrace",
+    )
+    thread = window._capture_thread
+    assert thread is not None
+
+    window.stop_capture()
+
+    assert thread.isFinished(), "the capture ignored a stop it had not started yet"
+    assert window._parked == []
+
+
+def test_a_capture_that_ends_by_itself_is_picked_up_too(qt_app: object, tmp_path: Path) -> None:
+    """Unplugging the device ends the capture and disables Disconnect, so the
+    completion signal is the only chance to pick the session up."""
+    del qt_app
+    window = MainWindow()
+    destination = tmp_path / "live.ostrace"
+    window.start_capture(ReplaySource(ERRORS), destination=destination)
+
+    thread = window._capture_thread
+    assert thread is not None
+    assert thread.wait(30_000)
+    QApplication.processEvents()  # deliver `completed`, which is queued
+
+    assert window.capture is not None
+    assert not window.action_disconnect.isEnabled()
 
 
 def test_stopping_a_capture_that_already_ended_is_not_an_error(qt_app: object) -> None:

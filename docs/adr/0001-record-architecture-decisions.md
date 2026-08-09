@@ -17,7 +17,8 @@ the code; the reasons will not be anywhere unless they are written down.
 The specific failure this guards against: a future contributor (including the
 author) sees `QSortFilterProxyModel` in the Qt documentation, notices this
 project hand-rolls a filtered index list instead, assumes it was ignorance, and
-"fixes" it — reintroducing a measured 66× regression.
+"fixes" it — reintroducing a measured 4.7× regression, and giving up control of
+the row cap, the eviction notice and the marker exemption with it.
 
 ## Decision Drivers
 
@@ -37,8 +38,15 @@ project hand-rolls a filtered index list instead, assumes it was ignorance, and
 ## Decision Outcome
 
 Chosen option: **architecture decision records in MADR 4.0.0 format**, one file
-per decision, numbered sequentially, never edited once accepted — superseded by
-a later ADR instead.
+per decision, numbered sequentially. A *decision* is never reversed by editing
+the file that made it — that takes a later ADR marking it superseded.
+
+A **measurement** in an ADR is corrected in place, in a dated note that keeps
+the original number visible. This is not the same rule bent: the reason
+decisions are immutable is that a reader must be able to see what was decided
+and why, and a figure that has since been disproved serves that badly in the
+other direction — it is a wrong number, standing, in the document a future
+reader will trust. ADR 0004 carries the first of these.
 
 MADR because it is the most widely used markdown ADR template, has a published
 spec, and its "Considered Options" and "Pros and Cons" sections force the
@@ -54,8 +62,9 @@ part that actually prevents relitigation.
   out to them.
 - Bad: every non-trivial decision now costs a file. Accepted; the alternative
   has a worse failure mode.
-- Neutral: ADRs are immutable. Changing a decision means a new ADR that marks
-  the old one superseded, not an edit.
+- Neutral: decisions are immutable. Changing one means a new ADR that marks the
+  old one superseded, not an edit. Measurements are not: a figure that has been
+  re-measured is corrected where it stands, with a dated note.
 
 ### Confirmation
 

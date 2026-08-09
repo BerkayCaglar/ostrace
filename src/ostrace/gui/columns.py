@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """What the table shows, and in what order.
 
-`Record` has thirteen fields and the table shows six. The split is not about
+`Record` has eleven fields and the table shows six. The split is not about
 width: the table carries what you *scan*, and the detail pane carries what you
 *confirm* once something has caught your eye. See `docs/design/gui.md` §2.
 

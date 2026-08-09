@@ -101,7 +101,7 @@ explicitly and gives counted, paged search recipes.
   four-column format at all.
 - Good: works with any agent and with a human at a shell. Nothing is
   Claude-specific except the filename `CLAUDE.md`.
-- Bad: a directory of six files is less convenient to hand to a human than one
+- Bad: a directory of seven files is less convenient to hand to a human than one
   document. The Markdown and AI-report exporters remain for that.
 - Bad: escaping is a format contract. A bug in folding corrupts records in a way
   that is hard to notice. It gets dedicated round-trip tests.

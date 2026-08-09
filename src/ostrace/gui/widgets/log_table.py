@@ -13,19 +13,32 @@ Hiding the header fixes it and costs the user the column titles, which is a bad
 trade in a table of six columns of similar-looking text. `FastHeader` below
 takes the documented third option instead: override
 ``initStyleOptionForIndex`` so the per-index selection query never runs, and
-keep the titles. Measured here, PySide6 6.11.1, 200k rows x 6 columns,
-``selectAll()``, best of three after two discarded warm-up runs:
+keep the titles. Measured on PySide6 6.11.1, 200k rows x 6 columns,
+``selectAll()`` plus the repaint it triggers, best of three:
 
-===================  ========  ================
-header               time      ``flags()`` calls
-===================  ========  ================
-stock QHeaderView    4.064 s          1,200,689
-``FastHeader``       0.008 s                683
-===================  ========  ================
+=========================================  ========  ================
+header                                     time      ``flags()`` calls
+=========================================  ========  ================
+stock ``QHeaderView``, real model           5.98 s          1,200,689
+``FastHeader``, real model                  2.92 s                683
+stock ``QHeaderView``, stand-in model       4.06 s          1,200,689
+``FastHeader``, stand-in model              0.008 s               683
+=========================================  ========  ================
 
-541x, with the titles still on screen. Note what the call counts say: that
-million-plus ``flags()`` calls is *caused* by the header, so this also removes
-most of what the ``flags()``-caching rule was treating.
+**Read the first two rows, not the last two.** This was published as "541x, the
+single biggest lever", which is the bottom pair -- measured against a stand-in
+model whose ``flags()`` returns a constant and whose ``data()`` returns ``"x"``.
+Against the model that ships it is **about 2x**, because the remaining ~2.9 s is
+the selection model and the repaint rather than the header, and because
+`RecordModel._flags` is prebuilt: a million cheap calls cost far less than a
+million expensive ones. The two optimisations were treating the same wound and
+their savings do not add up.
+
+Still worth having -- halving `selectAll()` on a large capture is real, and the
+call counts show the header is genuinely what *causes* those calls. But it is
+not the biggest lever, and the figure that said so described a table nobody
+ships. ``setHighlightSections(False)`` was measured separately and does nothing
+at all here: 5.93 s against 5.98 s.
 
 The first version of this class skipped ``super()`` outright and was faster
 still -- and painted a header with no titles, because the base implementation
@@ -42,21 +55,25 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QAbstractItemModel, Qt
+from PySide6.QtCore import QAbstractItemModel, QModelIndex, QPersistentModelIndex, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
     QStyle,
+    QStyledItemDelegate,
     QStyleOptionHeader,
+    QStyleOptionViewItem,
     QTableView,
 )
 
-from ostrace.gui.columns import COLUMNS
+from ostrace.gui.columns import COLUMNS, Column
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
 
-__all__ = ["FastHeader", "LogTable"]
+__all__ = ["FastHeader", "LogTable", "MiddleElidingDelegate"]
+
+_Index = QModelIndex | QPersistentModelIndex
 
 #: Extra pixels above and below the text. Small, because the whole point of the
 #: table is how many records fit on screen at once.
@@ -117,6 +134,25 @@ class FastHeader(QHeaderView):
         return QStyleOptionHeader.SectionPosition.Middle
 
 
+class MiddleElidingDelegate(QStyledItemDelegate):
+    """Elide from the middle, keeping both ends of the value.
+
+    For the Process column, where the cell reads ``name[pid]`` and the pid is
+    the part that tells eight instances of one process apart. The table elides
+    right, which drops exactly that: ``nsurlsessiond(libqui…`` on a 22-character
+    column, with the pid gone. The exporters already take trouble over this --
+    `exporters.plaintext` keeps the pid when a value overflows its column --
+    and `docs/design/gui.md` §2 says the pid is never what gets truncated.
+
+    A delegate rather than a view setting because `textElideMode` is a property
+    of the whole view and the Message column genuinely wants its beginning.
+    """
+
+    def initStyleOption(self, option: QStyleOptionViewItem, index: _Index) -> None:  # noqa: N802
+        super().initStyleOption(option, index)
+        option.textElideMode = Qt.TextElideMode.ElideMiddle
+
+
 class LogTable(QTableView):
     """The record table."""
 
@@ -124,6 +160,7 @@ class LogTable(QTableView):
         super().__init__(parent)
 
         self.setHorizontalHeader(FastHeader(Qt.Orientation.Horizontal, self))
+        self.setItemDelegateForColumn(int(Column.PROCESS), MiddleElidingDelegate(self))
 
         # Whole rows, extended selection: a log is read by row, and copying a
         # range of rows is the single most common thing done with one.

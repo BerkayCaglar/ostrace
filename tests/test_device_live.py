@@ -187,18 +187,6 @@ def test_the_kernel_is_named_rather_than_numbered(live: list[Record]) -> None:
         assert not record.process.isdigit()
 
 
-def test_every_level_the_device_emits_is_one_we_map() -> None:
-    """An unmapped level name silently becomes NOTICE, which would hide errors.
-
-    If iOS adds a level, this is where it shows up.
-    """
-    from pymobiledevice3.services.os_trace import SyslogLogLevel
-
-    from ostrace.sources.os_trace import _LEVELS
-
-    assert {member.name for member in SyslogLogLevel} <= set(_LEVELS)
-
-
 def test_the_structured_fields_are_actually_populated(live: list[Record]) -> None:
     """The entire justification for using os_trace_relay over the legacy relay.
 
@@ -223,23 +211,3 @@ def test_a_shared_library_is_never_the_process(live: list[Record]) -> None:
     """Guards the two upstream fields that read backwards. See the same test in
     test_sources_replay.py -- this is the live half of it."""
     assert not [record for record in live if record.process_path.endswith(".dylib")]
-
-
-def test_the_entry_type_still_has_the_fields_we_read() -> None:
-    """Fails on an upstream rename instead of at 3am during a capture."""
-    import dataclasses
-
-    from pymobiledevice3.services.os_trace import SyslogEntry
-
-    fields = {field.name for field in dataclasses.fields(SyslogEntry)}
-    required = {
-        "pid",
-        "timestamp",
-        "level",
-        "image_name",
-        "filename",
-        "message",
-        "label",
-        "thread_id",
-    }
-    assert required <= fields, f"pymobiledevice3 SyslogEntry lost {required - fields}"

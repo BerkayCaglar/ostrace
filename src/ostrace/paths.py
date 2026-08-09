@@ -29,12 +29,16 @@ from pathlib import Path
 
 from platformdirs import PlatformDirs
 
+from ostrace.errors import DestinationInUseError
+
 __all__ = [
     "SESSION_SUFFIX",
     "cache_dir",
+    "check_export_destination",
     "config_dir",
     "data_dir",
     "export_path",
+    "export_stem",
     "log_dir",
     "session_name",
     "session_path",
@@ -179,3 +183,27 @@ def export_path(session: Path, suffix: str, *, root: Path | None = None) -> Path
     """
     base = root if root is not None else session.parent
     return base / f"{export_stem(session)}{suffix}"
+
+
+def check_export_destination(destination: Path, session: Path) -> None:
+    """Refuse an export that would be written over the capture it is reading.
+
+    Not a hypothetical. ``.jsonl`` is both a capture ending this module strips
+    and the jsonl exporter's suffix, so ``ostrace export capture.jsonl -f
+    jsonl`` computed its default destination as the input path. The exporter
+    opened it for writing while the reader was still a lazy iterator over it:
+    a 2.2 MB capture became zero bytes, the command reported ``0 records`` and
+    exited successfully. An explicit ``--output`` at the same path did the same.
+
+    Compared after ``resolve()`` so that a relative path, a symlink and a
+    different spelling of the same file are one file, and case-folded because
+    two spellings of one name on Windows are also one file.
+    """
+    try:
+        same = os.path.normcase(destination.resolve()) == os.path.normcase(session.resolve())
+    except OSError:  # pragma: no cover - an unresolvable path is not this check's problem
+        return
+    if not same:
+        return
+    msg = f"the export would be written over the capture it reads, {session.name}"
+    raise DestinationInUseError(msg)

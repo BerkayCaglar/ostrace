@@ -24,7 +24,7 @@ does. Read [formats/](formats/) if you are writing something that consumes an
 | 2 | `analysis/` and `exporters/`, six-column agent bundle | **done** |
 | 3b | CLI: `export` | **done** |
 | 4 | PySide6 GUI | **done**, against [its contract](design/gui.md) |
-| 5 | Release: PyPI via Trusted Publishing, tagged 0.1.0 | in progress |
+| 5 | Release: PyPI via Trusted Publishing, tagged 0.1.0 | in progress — everything but the tag |
 
 Phases 1 and 2 carried the real risk, and phase 4 carried the rest of it: it is
 the one part of the program whose macOS behaviour cannot be run here. See
@@ -35,4 +35,7 @@ verifiable at all, so it is guarded by a property test rather than by looking.
 
 The documentation under `formats/` and `design/` describes contracts, which are
 specified before they are implemented so that the shape is a decision rather
-than an accident. Where something is not built yet, the document says so.
+than an accident. Where something is not built yet, the document says so —
+`design/gui.md` in particular carries several of these, because phase 4 shipped
+a subset of it and each divergence is recorded where it happened rather than
+quietly dropped.

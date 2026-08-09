@@ -106,6 +106,27 @@ class TestStopping:
         assert result.records == 0
         assert result.stopped_early is True
 
+    def test_the_session_path_is_reported_before_any_record(self, tmp_path: Path) -> None:
+        """A cancelled capture never returns a result, so a caller that stops
+        one has no other way to learn where the file went -- and working it out
+        for itself would be making `paths`' decision a second time.
+
+        Asserted as an ordering, not just a value: the point is that it arrives
+        early enough to be useful to something that is about to be cancelled.
+        """
+        seen: list[Path] = []
+        known_by_then: list[bool] = []
+
+        result = run(
+            ScriptedSource([make_record(i) for i in range(3)]),
+            destination=tmp_path / "out",
+            on_open=seen.append,
+            on_item=lambda _item: known_by_then.append(bool(seen)),
+        )
+
+        assert seen == [result.path]
+        assert known_by_then == [True, True, True]
+
     def test_the_source_is_closed_on_every_path(self, tmp_path: Path) -> None:
         source = ScriptedSource([make_record(i) for i in range(10)])
         run(source, destination=tmp_path / "out", max_records=2)

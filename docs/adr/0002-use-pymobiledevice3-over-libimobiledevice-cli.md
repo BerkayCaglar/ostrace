@@ -56,9 +56,19 @@ colouring, filtering and grouping were all quietly dead.
 
 ## Decision Outcome
 
-Chosen option: **`pymobiledevice3` as an imported library**, with
-`syslog_relay` retained as a fallback source for devices where `os_trace_relay`
-is unavailable, and the text parser deleted outright.
+Chosen option: **`pymobiledevice3` as an imported library**, with the text
+parser deleted outright.
+
+> **Correction, 0.1.0.** This originally added "with `syslog_relay` retained as
+> a fallback source for devices where `os_trace_relay` is unavailable". No such
+> source was built: `sources/` holds `os_trace.py` and `replay.py` and nothing
+> else. `os_trace_relay` turned out to be available on every device tested, and
+> the fallback would have been a second parser for a tier of data the whole ADR
+> argues is not worth having. `errors.SourceUnavailableError` still names the
+> case, so a device that genuinely lacks the service says so rather than
+> failing obscurely. The claim is corrected here rather than left standing,
+> since it sent two other documents on to give advice about a session file that
+> cannot exist.
 
 The concern that iOS 17+ moved this behind a RemoteXPC tunnel was checked
 empirically rather than assumed: `com.apple.os_trace_relay` is still an ordinary

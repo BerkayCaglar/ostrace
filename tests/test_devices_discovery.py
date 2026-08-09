@@ -149,3 +149,41 @@ class TestRequireDevice:
 def test_a_summary_knows_its_transport() -> None:
     assert discovery.DeviceSummary("x", "network").is_network is True
     assert discovery.DeviceSummary("x", "usb").is_network is False
+
+
+class TestValuesThatAreNotNumbers:
+    """A device answering with something unparseable must not abort a capture.
+
+    Both of these reach `DeviceInfo` and then detonate lazily -- the offset in
+    `tzinfo`, which every timestamp goes through, and the skew in `now()`. The
+    guard existed for one of them and nothing tested it; the other had no
+    guard at all and raised a bare `ValueError` from `capture()` before a
+    single record was read.
+    """
+
+    def test_a_non_numeric_clock_is_absent_rather_than_fatal(self) -> None:
+        lockdown = FakeLockdown(
+            {**FULL, "TimeIntervalSince1970": "not a number", "TimeZoneOffsetFromUTC": "nonsense"}
+        )
+
+        info = asyncio.run(discovery.read_device_info(lockdown))  # type: ignore[arg-type]
+
+        assert info.clock_skew is None
+        assert info.utc_offset is None
+        assert info.product_type == "iPhone18,2", "the rest of the identity still parses"
+
+    def test_an_impossible_utc_offset_is_refused_rather_than_carried(self) -> None:
+        """`timedelta` accepts any number of seconds; `timezone` does not.
+
+        A device reporting an offset of 999,999 seconds produced a `DeviceInfo`
+        that raised `ValueError: offset must be a timedelta strictly between
+        -timedelta(hours=24)...` from `device.now()` at the top of `capture()`
+        -- a bare exception carrying none of the guidance this layer exists to
+        provide, and nowhere near the value that caused it.
+        """
+        lockdown = FakeLockdown({**FULL, "TimeZoneOffsetFromUTC": 999_999})
+
+        info = asyncio.run(discovery.read_device_info(lockdown))  # type: ignore[arg-type]
+
+        assert info.utc_offset is None
+        assert info.now().tzinfo is not None, "it still has a usable clock"

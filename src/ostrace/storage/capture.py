@@ -70,6 +70,17 @@ class Capture:
         """
         return self._reader.truncated
 
+    @property
+    def malformed(self) -> int:
+        """Lines the reader could not decode, once it has read them.
+
+        Zero until something has iterated: the readers count as they go, which
+        is the only way a stream that recovers from damage can count at all. A
+        consumer reporting this must therefore ask *after* it has finished
+        reading, not before.
+        """
+        return self._reader.malformed
+
     def items(self) -> Iterator[Record | Gap]:
         """Records and gaps, in the order the device delivered them."""
         return self._reader.items()

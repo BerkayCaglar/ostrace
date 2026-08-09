@@ -22,10 +22,13 @@ An agent bundle is a directory. Exporting produces:
 ├── patterns.tsv       distinct message templates, with counts
 ├── processes.tsv      record count per process
 ├── subsystems.tsv     record count per subsystem
-└── timeline.tsv       per-minute counts and line-number pointers
+├── timeline.tsv       per-minute counts and line-number pointers
+└── gaps.tsv           where the capture has holes
 ```
 
 All files are UTF-8 with LF line endings, on every platform. **Contract.**
+Every file is written on every export, including with nothing to put in it: a
+file that appears only on bad news cannot be told from a file nobody wrote.
 
 ## `session.log` — **contract**
 
@@ -99,14 +102,25 @@ Distinct message templates with counts, most frequent first. Header row present.
 count <TAB> level <TAB> process <TAB> subsystem <TAB> first_line <TAB> template
 ```
 
-A template is the message with variable parts normalised: numbers to `<N>`,
-floats to `<F>`, hex to `<HEX>`, UUIDs to `<UUID>`, paths to `<PATH>`. Messages
-that normalise identically are collapsed into one row.
+A template is the message with variable parts normalised: runs of two or more
+digits to `<N>`, decimals to `<F>`, hex to `<HEX>`, UUIDs to `<UUID>`, paths to
+`<PATH>`.
 
-`<HEX>` also covers hex with no `0x` to announce it — operation identifiers,
-content references, protection tags. iOS emits those constantly and they are
-pure identity; measured on this project's own fixture, recognising them folds
-1,677 templates down to 1,431.
+**A row is one `(level, process, subsystem, template)`, not one template.** The
+same normalised message emitted by four processes is four rows, because the
+question this file answers is *which* component is repeating itself — a count
+that merged them would say a template is frequent without saying where. The
+row count is therefore at or above the template count: on this project's own
+fixture, 1,454 rows for 1,431 templates.
+
+Single digits are deliberately left alone: `endpoint 5` and `endpoint 7` are
+usually different things, while `port 49152` and `port 49153` are the same
+thing twice. `<HEX>` also covers hex with no `0x` to announce it — operation
+identifiers, content references, protection tags — but only runs of six or more
+characters that mix letters and digits, so an English word is not mistaken for
+an identifier. iOS emits those constantly and they are pure identity; measured
+on this project's own fixture, recognising them folds 1,677 templates down to
+1,431.
 
 A capture with an implausible number of distinct templates stops learning new
 ones at a cap. When that happens the generated `CLAUDE.md` says so and gives the
@@ -146,6 +160,32 @@ before its first.
 Reading a range around a spike is how an investigation gets from "something
 happened at 00:05" to a cause.
 
+## `gaps.tsv` — **contract**
+
+Where the capture has holes. Header row present, one row per gap, in capture
+order.
+
+```
+start <TAB> end <TAB> seconds <TAB> reason
+```
+
+| Column | Contents |
+| --- | --- |
+| `start` | ISO 8601 with the device's UTC offset |
+| `end` | ISO 8601 with the device's UTC offset |
+| `seconds` | Duration to three decimal places |
+| `reason` | Why the stream broke, escaped as in `session.log` |
+
+**Header only means no gaps**, which is not the same as the file being absent.
+
+This file exists because a gap is not a record and therefore cannot live in
+`session.log` without breaking the one-record-per-line rule every recipe here
+depends on. Without it a gap appeared nowhere a search could reach: `grep`
+over `session.log` reads straight across the hole, `timeline.tsv` shows a quiet
+minute, and the only mention was in `CLAUDE.md`, which is explicitly outside
+this contract. An absence that a reader takes for silence is the single
+conclusion this format exists to prevent.
+
 ## `CLAUDE.md`
 
 Generated per bundle. **Bounded length regardless of capture size** — a bundle
@@ -170,9 +210,12 @@ rg -n '\tcom\.apple\.network\t' session.log | head -n 50
 head -n 30 patterns.tsv
 ```
 
-Shell tool output truncates at 30,000 characters, **silently**. At an average
-record length around 165 characters that is reached at roughly 180 matches.
-Always count before asking for content.
+Shell tool output truncates at 30,000 characters, **silently**. The generated
+`CLAUDE.md` divides that by *this capture's* mean written line length — measured
+while `session.log` is written, not estimated from the message alone — and says
+how many matches it works out to. At the 180-character mean of this project's
+fixture that is 166, which an independent count over the written file agrees
+with exactly. Always count before asking for content.
 
 ## Compatibility
 

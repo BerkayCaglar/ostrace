@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Every field of the selected record, including the ones the table cannot fit.
 
-The table shows six of `Record`'s thirteen fields. This shows all of them, and
+The table shows six of `Record`'s eleven fields. This shows all of them, and
 it is where two of this project's less obvious invariants finally become
 visible to a human:
 

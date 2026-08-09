@@ -205,13 +205,25 @@ def test_selection_falls_back_to_the_nearest_survivor(window: MainWindow) -> Non
 
 
 def test_the_table_shows_what_the_model_says(window: MainWindow) -> None:
-    """One end-to-end check that the columns are wired to the right fields."""
+    """One end-to-end check that the columns are wired to the right fields.
+
+    The escape hatch that used to be here -- accepting `""` as well as the
+    value -- made the test unfailable: rendering the empty string
+    unconditionally is exactly what a mis-wired column does. It was there
+    because a repeated value is blanked, so the fix is to pick a row that
+    *starts* a run rather than to accept any answer.
+    """
     load(window, ERRORS)
-    row = next(
-        r
-        for r in (window.model.row_at(i) for i in range(50))
-        if isinstance(r, Record) and r.subsystem
+    index = next(
+        i
+        for i in range(1, 50)
+        if isinstance(row := window.model.row_at(i), Record)
+        and row.subsystem
+        # The first of its run: the row above it says something different, so
+        # nothing is blanked and the cell must carry the real value.
+        and getattr(window.model.row_at(i - 1), "subsystem", None) != row.subsystem
     )
-    index = next(i for i in range(50) if window.model.row_at(i) is row)
+    row = window.model.row_at(index)
+    assert isinstance(row, Record)
     shown = window.model.data(window.model.index(index, int(Column.SUBSYSTEM)))
-    assert shown in (row.subsystem, "")
+    assert shown == row.subsystem

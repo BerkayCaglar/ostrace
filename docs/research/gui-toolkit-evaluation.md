@@ -81,6 +81,18 @@ embedded webview, which is the shape this project would have been inventing.
 
 ## The performance findings that shaped the model design
 
+> **Superseded, 0.1.0.** This section is the pre-phase-4 survey and is kept as
+> the record of what the design was reasoned from. Every figure in it was
+> re-measured on PySide6 6.11.1 while phase 4 was built, and about half did not
+> survive: `multiData()` is *marginally slower* rather than the biggest lever,
+> the `flags()` figure was overstated by roughly 15×, the proxy is 4.7× rather
+> than 66× and never froze, and the horizontal header — mentioned here only as
+> a workaround — is worth about 2× against the model that ships.
+> **[`docs/design/gui.md` §11](../design/gui.md) is the current
+> version.** The conclusion this section was drawing — Qt with a hand-written
+> filtered model — is unaffected, which is why it is corrected rather than
+> deleted.
+
 Choosing Qt settles the toolkit. It does not settle the design, and a naive Qt
 model at these row counts is slow in ways that are not obvious from the
 documentation.
