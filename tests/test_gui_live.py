@@ -25,6 +25,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ostrace.analysis.scan import ScanResult
+from ostrace.exporters.base import ExportResult
+from ostrace.exporters.notes import export_notes
 from ostrace.model import DeviceInfo, Gap, Level, Record
 from ostrace.sources.replay import ReplaySource
 from ostrace.storage.capture import open_capture
@@ -36,7 +39,7 @@ from PySide6.QtWidgets import QApplication
 
 from ostrace.gui.markers import Eviction
 from ostrace.gui.models import RecordModel
-from ostrace.gui.pump import Pump
+from ostrace.gui.pump import RATE_WINDOW_MS, Pump
 from ostrace.gui.theme import Scheme
 from ostrace.gui.windows import main
 from ostrace.gui.windows.main import MainWindow
@@ -106,6 +109,43 @@ def test_draining_an_empty_queue_reports_no_traffic(model: RecordModel) -> None:
     pump.rate_changed.connect(rates.append)
     pump.drain()
     assert rates == [0.0]
+
+
+def test_the_quiet_ticks_between_bursts_are_not_a_rate_of_zero(model: RecordModel) -> None:
+    """What the status bar actually showed against a device.
+
+    A device does not deliver evenly: it hands over a batch and then says
+    nothing for several 50 ms ticks. The rate was computed from one tick, so
+    the commonest reading was 0 -- and a readout that says 0 while a capture is
+    plainly streaming does not look like a bug, it looks like the device having
+    stopped.
+    """
+    queue: deque[object] = deque(make_record(i) for i in range(100))
+    pump = Pump(queue, model)  # type: ignore[arg-type]
+    rates: list[float] = []
+    pump.rate_changed.connect(rates.append)
+
+    pump.drain()
+    for _ in range(5):  # the ticks a quiet moment produces next
+        pump.drain()
+
+    assert len(rates) == 6
+    assert all(rate > 0 for rate in rates), rates
+
+
+def test_a_device_that_really_stops_does_read_zero(model: RecordModel) -> None:
+    """The window has to empty, or the readout would be a different lie.
+
+    Asked for a moment past the window rather than by sleeping through it: the
+    figure is a function of when it is asked, which is exactly what makes that
+    possible.
+    """
+    queue: deque[object] = deque(make_record(i) for i in range(10))
+    pump = Pump(queue, model)  # type: ignore[arg-type]
+    pump.drain()
+
+    later = pump._clock.elapsed() + RATE_WINDOW_MS + 1
+    assert pump._rate(later) == 0.0
 
 
 def test_pausing_stops_the_view_and_not_the_queue(model: RecordModel) -> None:
@@ -275,12 +315,18 @@ def test_disconnecting_leaves_a_capture_that_can_be_exported(
     assert "live.ostrace" in window.windowTitle(), "the window never says where it went"
 
 
-def test_export_offers_the_way_to_finish_a_running_capture(qt_app: object, tmp_path: Path) -> None:
-    """And the way out has to lead somewhere.
+def test_a_running_capture_exports_as_a_snapshot(qt_app: object, tmp_path: Path) -> None:
+    """This used to be refused, and the refusal was the wrong answer.
 
-    Refusing to export a file that is still growing is right -- the end of the
-    report would be arbitrary. Saying so and offering the button that fixes it
-    is the difference between a rule and a dead end.
+    A file growing under the exporter does produce a report whose end is
+    arbitrary -- while that end goes unstated. `storage.spool` has emitted a
+    ``Z_SYNC_FLUSH`` boundary since phase 1 so that a reader can decompress
+    everything written so far, and `exporters.notes` exists to say what an
+    export could not tell you. The capability and the vocabulary were both
+    already here.
+
+    Built through `export_dialog` rather than `export_capture`: `exec()` is a
+    nested event loop that only a person can leave.
     """
     del qt_app
     window = MainWindow()
@@ -290,13 +336,36 @@ def test_export_offers_the_way_to_finish_a_running_capture(qt_app: object, tmp_p
     )
     once_recording(window)
 
-    window.export_capture()
-    assert "still running" in window.banner.text
+    dialog = window.export_dialog()
 
-    window.banner.act()  # the offered Disconnect
+    assert dialog is not None, "a running capture offered nothing to export"
+    assert dialog.running, "the dialog did not know it was writing a snapshot"
+    assert window._capture_thread is not None, "exporting stopped the capture"
+    dialog.deleteLater()
 
-    assert window._capture_thread is None
-    assert window.capture is not None, "the way out did not lead anywhere"
+    window.stop_capture()
+
+
+def test_a_snapshot_export_says_that_it_is_one(qt_app: object, tmp_path: Path) -> None:
+    """The note is the whole argument for allowing this.
+
+    Without it the last record in the export reads as the last thing that
+    happened, when it is only where the file had got to when the button was
+    pressed.
+    """
+    del qt_app
+    scan = ScanResult()
+    for index in range(3):
+        scan.add(make_record(index), index + 1)
+    outcome = ExportResult(destination=tmp_path / "out.md", scan=scan)
+
+    notes = export_notes(outcome, truncated=True, running=True)
+
+    assert any("snapshot" in note for note in notes)
+    assert any("3 records" in note for note in notes), notes
+    assert not any("process was killed" in note for note in notes), (
+        "the truncation guess is still offered beside the known answer"
+    )
 
 
 def test_disconnecting_before_the_capture_gets_going_still_releases_it(

@@ -38,6 +38,7 @@ from ostrace.gui.theme import (
     selection_row,
     severity_for,
     stylesheet_for,
+    token,
 )
 
 pytestmark = pytest.mark.gui
@@ -45,6 +46,34 @@ pytestmark = pytest.mark.gui
 #: WCAG 2.1 AA for body text. Severity foregrounds are body text: they are the
 #: message, not decoration around it.
 AA = 4.5
+
+#: WCAG 2.1 for a user interface component against what is next to it. Lower
+#: than `AA` because a scrollbar handle is a shape rather than text.
+NON_TEXT = 3.0
+
+
+@pytest.mark.parametrize("scheme", list(Scheme))
+def test_the_scrollbar_handle_is_visible_against_its_own_track(scheme: Scheme) -> None:
+    """The bug this exists for was invisible in exactly one scheme.
+
+    The handle borrowed ``border-strong``, which is also ``QPalette.Dark`` and
+    ``Shadow``. For a shadow, darker than the surface is the entire job; for a
+    handle it is the bug -- in the dark scheme that token is ``#0f1116`` and
+    the track it sits on is ``#101216``, which is a contrast of 1.01:1. It was
+    painted correctly and could not be seen, and the light scheme was under
+    this line too at 1.64:1 without anybody noticing.
+    """
+    ratio = contrast_ratio(token("scrollbar-handle", scheme), token("surface-sunken", scheme))
+    assert ratio >= NON_TEXT, f"{scheme}: scrollbar handle at {ratio:.2f}:1 against its track"
+
+
+@pytest.mark.parametrize("scheme", list(Scheme))
+def test_the_scrollbar_handle_lightens_under_the_pointer(scheme: Scheme) -> None:
+    """A hover state that is not a change is not a hover state."""
+    resting = token("scrollbar-handle", scheme)
+    hovered = token("scrollbar-handle-hover", scheme)
+    assert resting != hovered
+    assert contrast_ratio(hovered, token("surface-sunken", scheme)) >= NON_TEXT
 
 
 @pytest.mark.parametrize("scheme", list(Scheme))

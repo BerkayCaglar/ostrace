@@ -118,14 +118,31 @@ class ExportWorker(QThread):
 class ExportDialog(QDialog):
     """Pick a format and a destination, then read what was left out."""
 
-    def __init__(self, capture: Capture, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, capture: Capture, parent: QWidget | None = None, *, running: bool = False
+    ) -> None:
         super().__init__(parent)
         self.capture = capture
+        self.running = running
         self.result_path: Path | None = None
         self._worker: ExportWorker | None = None
-        self.setWindowTitle("Export capture")
+        self.setWindowTitle("Export snapshot" if running else "Export capture")
 
         layout = QVBoxLayout(self)
+        if running:
+            # Said before the export rather than only after it. The user asked
+            # for this while a capture was streaming, and what they get is a
+            # prefix of it -- which is useful and is not the same thing as the
+            # capture, so the dialog names the difference at the point of the
+            # decision as well as in the notes afterwards.
+            preamble = QLabel(
+                "The capture is still recording. This writes out everything on "
+                "disk so far and leaves the capture running.",
+                self,
+            )
+            preamble.setWordWrap(True)
+            layout.addWidget(preamble)
+
         form = QFormLayout()
         layout.addLayout(form)
 
@@ -148,15 +165,7 @@ class ExportDialog(QDialog):
         self.budget_label = QLabel("Token budget:", self)
         form.addRow(self.budget_label, self.budget)
 
-        destination = QWidget(self)
-        chooser = QVBoxLayout(destination)
-        chooser.setContentsMargins(0, 0, 0, 0)
-        self.destination = QLineEdit(destination)
-        chooser.addWidget(self.destination)
-        browse = QPushButton("Choose…", destination)
-        browse.clicked.connect(self._choose_destination)
-        chooser.addWidget(browse)
-        form.addRow("Write to:", destination)
+        form.addRow("Write to:", self._build_destination())
 
         # Indeterminate: an exporter reports no progress, and a bar that
         # invented one would be worse than none. What it honestly says is
@@ -183,6 +192,18 @@ class ExportDialog(QDialog):
         layout.addWidget(self.buttons)
 
         self._on_format_changed()
+
+    def _build_destination(self) -> QWidget:
+        """The path field and the button that fills it in."""
+        destination = QWidget(self)
+        chooser = QVBoxLayout(destination)
+        chooser.setContentsMargins(0, 0, 0, 0)
+        self.destination = QLineEdit(destination)
+        chooser.addWidget(self.destination)
+        browse = QPushButton("Choose…", destination)
+        browse.clicked.connect(self._choose_destination)
+        chooser.addWidget(browse)
+        return destination
 
     # -- state -----------------------------------------------------------
 
@@ -273,7 +294,7 @@ class ExportDialog(QDialog):
         if not isinstance(outcome, ExportResult):  # pragma: no cover - defensive
             return
         self.result_path = outcome.destination
-        notes = export_notes(outcome, truncated=self.capture.truncated)
+        notes = export_notes(outcome, truncated=self.capture.truncated, running=self.running)
         lines = [f"{outcome.records:,} records → {outcome.destination}"]
         if notes:
             lines.append("")

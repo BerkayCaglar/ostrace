@@ -49,6 +49,7 @@ __all__ = [
     "TOKENS",
     "Scheme",
     "Severity",
+    "already_applied",
     "apply_theme",
     "contrast_ratio",
     "mark_accent",
@@ -95,6 +96,8 @@ TOKENS: dict[Scheme, dict[str, str]] = {
         "border": "#d6d9df",
         "border-strong": "#b3b8c2",
         "control-border": "#7e8590",
+        "scrollbar-handle": "#7e8590",
+        "scrollbar-handle-hover": "#5f6773",
         "text-primary": "#14161a",
         "text-secondary": "#474e59",
         "text-muted": "#5f6773",
@@ -123,6 +126,8 @@ TOKENS: dict[Scheme, dict[str, str]] = {
         "border": "#2e333c",
         "border-strong": "#0f1116",
         "control-border": "#6b7381",
+        "scrollbar-handle": "#5a626f",
+        "scrollbar-handle-hover": "#79828f",
         "text-primary": "#e7eaf0",
         "text-secondary": "#b4bbc7",
         "text-muted": "#99a2b0",
@@ -369,12 +374,22 @@ QHeaderView::section { background: $surface; color: $text_secondary;
                        border-bottom: 1px solid $border; padding: 0 8px; }
 QHeaderView::section:hover { background: $hover; }
 
+/* The handle has a token of its own rather than borrowing `border-strong`,
+   which is also `QPalette.Dark` and `Shadow`. For a shadow "darker than the
+   surface" is the whole job; for a scrollbar it is the bug. In the dark scheme
+   that token is #0f1116 and the track it sits on is #101216 -- a contrast of
+   1.01:1, painted correctly and invisible, which is what "the scrollbar
+   disappears in dark mode" turned out to mean. Both handles now clear 3:1
+   against their own track, WCAG 2.1's non-text threshold, asserted in
+   `test_gui_theme.py`. The light one was never invisible but was under it too,
+   at 1.64:1. */
 QScrollBar:vertical { background: $surface_sunken; width: 10px; margin: 0; border: 0; }
-QScrollBar::handle:vertical { background: $border_strong; border-radius: 3px;
+QScrollBar::handle:vertical { background: $scrollbar_handle; border-radius: 3px;
                               min-height: 24px; margin: 2px; }
 QScrollBar:horizontal { background: $surface_sunken; height: 10px; margin: 0; border: 0; }
-QScrollBar::handle:horizontal { background: $border_strong; border-radius: 3px;
+QScrollBar::handle:horizontal { background: $scrollbar_handle; border-radius: 3px;
                                 min-width: 24px; margin: 2px; }
+QScrollBar::handle:hover { background: $scrollbar_handle_hover; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; border: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 
@@ -406,8 +421,36 @@ def stylesheet_for(scheme: Scheme) -> str:
     )
 
 
+def already_applied(app: QApplication, scheme: Scheme) -> bool:
+    """Whether this application is already wearing ``scheme``.
+
+    The stylesheet is the witness, and it is an exact one: it carries this
+    scheme's colours as literals, and nothing but `apply_theme` ever sets it.
+    So a match means this function's own work is already done, and a difference
+    -- including the empty string an application starts with -- means it is not.
+
+    The obvious cheaper witnesses are both wrong. ``app.palette()`` alone says
+    yes to a fresh application in the light scheme, because Fusion's default
+    ``Base`` is already white; ``style().name()`` alone says yes wherever
+    Fusion is the platform default, which is the offscreen lane and most of
+    Linux. Together they still say yes to the first call under the offscreen
+    plugin, which is the one call that must not be skipped.
+    """
+    return app.styleSheet() == stylesheet_for(scheme)
+
+
 def apply_theme(app: QApplication, scheme: Scheme) -> None:
     """Put ``scheme`` on the application.
+
+    Returns immediately if it is already there, and that is not a
+    micro-optimisation. ``setStyle`` and ``setStyleSheet`` re-polish *every
+    widget in the process*, so the cost is proportional to how much is alive --
+    and `MainWindow._on_color_scheme_changed` calls this, once per window, for
+    a signal Qt delivers to every window there is. One window is the whole of
+    production; a test session holds hundreds, and the work went quadratic.
+    Measured: the suite ran for over thirty minutes of solid CPU and had to be
+    killed. The same shape is already recorded in `docs/design/gui.md` -- a
+    single test at 151 seconds, for the same reason.
 
     The style is set first and the palette second, and the order is load-
     bearing: ``QApplication`` resets the palette to the style's defaults when
@@ -420,6 +463,8 @@ def apply_theme(app: QApplication, scheme: Scheme) -> None:
     the light one. Qt 6 removed the class-specific ``setPalette`` overload that
     used to cover this, and ``QToolTip.setPalette`` is what replaced it.
     """
+    if already_applied(app, scheme):
+        return
     palette = palette_for(scheme)
     app.setStyle(STYLE)
     app.setPalette(palette)

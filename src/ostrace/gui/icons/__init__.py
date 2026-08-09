@@ -35,7 +35,7 @@ from PySide6.QtSvg import QSvgRenderer
 
 from ostrace.gui.theme import Scheme, token
 
-__all__ = ["ICON_SIZE", "icon", "icon_names"]
+__all__ = ["APP_SIZES", "ICON_SIZE", "app_icon", "icon", "icon_names"]
 
 #: Toolbar icons, in logical pixels. Sixteen against a 26-pixel button leaves
 #: the glyph room to be a glyph rather than a filled square.
@@ -109,6 +109,41 @@ def icon(
     built.addPixmap(
         _pixmap(name, token("text-disabled", scheme).name(), size, ratio), QIcon.Mode.Disabled
     )
+    return built
+
+
+#: The sizes a desktop asks the application mark for: a title bar wants 16, the
+#: Windows taskbar 24 or 32 depending on scaling, Alt-Tab 48, and the shell's
+#: large-icon view up to 256. Supplied rather than left to Qt, which would
+#: rescale one bitmap and produce the soft edges that read as an unfinished
+#: program at exactly the sizes people see most.
+APP_SIZES = (16, 24, 32, 48, 64, 128, 256)
+
+
+@functools.lru_cache(maxsize=len(APP_SIZES))
+def _plain_pixmap(name: str, size: int) -> QPixmap:
+    """Render an icon that carries its own colours.
+
+    Separate from `_pixmap` because there is nothing to substitute: the
+    application mark is not a themed glyph and must not follow the scheme. A
+    taskbar entry that changes colour when the user switches theme reads as a
+    different program, and on macOS and Linux the icon is drawn by a shell that
+    never asked this application what scheme it is in.
+    """
+    renderer = QSvgRenderer(_source(name).encode("utf-8"))
+    pixmap = QPixmap(QSize(size, size))
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    renderer.render(painter)
+    painter.end()
+    return pixmap
+
+
+def app_icon() -> QIcon:
+    """The application's own mark, at every size a desktop asks for."""
+    built = QIcon()
+    for size in APP_SIZES:
+        built.addPixmap(_plain_pixmap("app", size))
     return built
 
 

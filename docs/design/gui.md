@@ -225,6 +225,15 @@ breaks follow: a caret parked on the last row is exactly the evidence of a
 reader who has stopped tailing, so leaving it there would break the tail again
 on the very next record.
 
+**`Esc` is the other half and does only its own half.** It lets go of the
+selected row and moves nothing. It briefly did more — forcing the at-bottom
+state and scrolling there, on the reasoning that letting go of a row is asking
+for the tail back — and against a real capture that reads as `Esc` throwing the
+reader to the end of the log from wherever they were, which is precisely where
+they had chosen not to be. It is also unnecessary: follow is derived from the
+viewport, so deselecting at the bottom resumes the tail on its own and
+deselecting half way up does not. Only `Ctrl+End` asks for the end.
+
 **Not built in 0.1.0:** the two indicators this section asked for — whether
 follow is on, and how many records have arrived unseen. The status bar has
 four fields and neither is among them. The unseen count is the more useful
@@ -345,13 +354,31 @@ theirs to "Exit live mode" precisely because "Stop" was ambiguous against
 "Pause". Ours releases the device, and the name should say so.
 
 **Disconnecting finishes the capture, and a finished capture is exportable.**
-Export is refused while records are still arriving — a file growing under the
-exporter produces a report whose end is arbitrary — so the refusal has to name
-the control that resolves it and that control has to actually resolve it. The
-window adopts the session file the moment the capture thread ends, whether it
-ended because the user disconnected or because the device went away. Anything
-less makes the refusal a dead end: told to disconnect, the user disconnects and
-is told to disconnect.
+The window adopts the session file the moment the capture thread ends, whether
+it ended because the user disconnected or because the device went away.
+Anything less makes the export a dead end: told to disconnect, the user
+disconnects and is told to disconnect.
+
+**A running capture is exportable too, as a snapshot.** This section used to
+refuse it outright, on the grounds that a file growing under the exporter
+produces a report whose end is arbitrary. The objection is real; the refusal
+was the wrong answer to it, on two counts.
+
+The end is only arbitrary while it goes *unstated*. Every exporter here already
+declares its own omissions, so the honest form of "this report stops somewhere"
+is a sentence saying where — which is what `exporters.notes` is for, and it now
+carries one. A snapshot that says it is a snapshot has a declared end, not an
+arbitrary one, and the sentence has to say the thing a reader would otherwise
+assume: the last record in it is where *the file had got to*, not where the
+device stopped.
+
+And it was already built. `storage.spool` emits a `Z_SYNC_FLUSH` boundary as it
+writes, precisely so that a reader can decompress everything up to the last one;
+its module docstring says live export during capture depends on it. The
+capability had been there since phase 1 and the window declined to use it.
+
+Disconnect remains the way to finish a capture. It is no longer a prerequisite
+for getting anything out of one.
 
 ostrace spools to disk, so pause can keep its promise honestly and needs no
 ring buffer. Grafana promises "no gap" while backing it with a 1,000-line ring
@@ -403,6 +430,27 @@ discards all marks on truncation with an unresolved `TODO` (#179, a regression
 against glogg); the better answer, proposed by its own users, is to keep the
 mark and flag it unverified.
 
+**`F3` follows the toolbar; the per-kind keys do not.** The two chevrons were
+wired to errors and nothing else, which is the right default and a poor answer
+to "I am reading this capture for gaps today". The target is a toolbar control
+now, and `F3` / `Shift+F3` — the find-next key on Windows and klogg's — mean
+*next of whatever I am looking for*. Every kind keeps its own explicit binding,
+so choosing a target in the toolbar never takes a key away from somebody who
+already knows `Ctrl+Shift+G`.
+
+**Icons do not appear in menus.** The toolbar and the menus share their action
+objects, so an icon put on one for the toolbar's sake is drawn by the other in
+the column a checkmark occupies: `Next Error` and `Previous Error` rendered in
+the View menu with what reads as a tick and an indicator beside them, two items
+above a `Dark Mode` whose tick is real. `_action` clears
+`setIconVisibleInMenu` for every action it builds.
+
+**Menu items are grouped by the bindings table, not by hand.** `Binding.group`
+carries the run an item belongs to and the window draws a separator wherever it
+changes, so an added or reordered item lands in the right run without anybody
+remembering to move a divider. The View menu was eleven items in one undivided
+column before this.
+
 ---
 
 ## 9. Detail pane
@@ -413,6 +461,22 @@ the stream semantics that would have gone with it — *row expansion keeps the
 stream running; opening the detail panel pauses it*. Here the panel is always
 present and neither of them pauses anything, which is consistent, if less
 expressive than the pair.
+
+**Two columns of fields and a message block**, not one column of everything.
+The first version was a single-column form of twelve rows, which against a real
+window is mostly empty space with a stack of labels down the left edge: the
+fields are short, the message is long, and giving `PID` the same width as a
+message means neither is laid out for what it is. The fields fill the width in
+pairs, top to bottom in each column so that the clock fields stay together, and
+the message gets a block of its own in the table's own monospaced face — the
+pane is where people go to read the awkward messages, the ones with alignment
+or a hex dump in them.
+
+**It carries a close control, and the control asks rather than acts.** `Esc`
+was the only way to let go of a record, which is a key you have to be told
+about. The `✕` emits and the window turns that into a deselect; the pane never
+hides itself, because a pane that can disappear is one the reader has to work
+out how to bring back.
 
 Do not budget performance work for the detail pane. Wireshark's own guidance
 names real-time list update, **colouring rules** and name resolution as the
@@ -474,6 +538,32 @@ stays text. A background tint at 14% sits at roughly 1.12–1.22:1 against `Base
 *reinforcement* and never as *information*. `ERROR` and `FAULT` additionally
 carry a leading glyph, so a screenshot survives being printed, and a
 colour-blind reader loses nothing.
+
+**One object owns the switch, and it is the window.** `colorSchemeChanged` was
+answered twice — by `gui.app`, unconditionally, and by the window, only while
+the user had expressed no preference — and two listeners under different rules
+is one rule that does not hold. Picking a theme and then letting the operating
+system change its own moved the palette and the chrome stylesheet while the
+table, the model, the minimap and the icons stayed where the user had put them:
+a dark window with a white log in the middle of it, which reads as a broken
+dark mode rather than as a preference being honoured. `gui.app` themes the
+application once at startup and connects nothing.
+
+**A colour used for two jobs eventually gets one of them wrong.** The scrollbar
+handle was painted in `border-strong`, which is also `QPalette.Dark` and
+`Shadow`. For a shadow, "darker than the surface" is the entire job; for a
+handle it is the bug — in the dark scheme that token is `#0f1116` against a
+`#101216` track, a contrast of **1.01:1**, painted correctly and invisible. The
+handle has its own token now, and both schemes clear 3:1 against their own
+track, which is WCAG 2.1's non-text threshold and is asserted alongside the
+severity contrasts. The light handle was never invisible and was under the line
+too, at 1.64:1.
+
+**The application mark is not themed.** `icons/app.svg` carries its own colours
+and is rendered without substitution, at every size a desktop asks for. A
+taskbar entry that changed colour with the theme would read as a different
+program, and on macOS and Linux the icon is drawn by a shell that never asked
+this application what scheme it is in.
 
 **Force the Fusion style.** It is the only style besides `windows`/`windows11`
 that supports dark at all, the Qt blog calls it the preferred style for

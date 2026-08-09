@@ -445,6 +445,33 @@ def test_escape_lets_go_of_a_row_and_the_tail_resumes(window: MainWindow) -> Non
     assert bar.value() >= bar.maximum() - 4, "the tail did not resume"
 
 
+def test_escape_does_not_move_the_view(window: MainWindow) -> None:
+    """The correction, reported from a real capture.
+
+    `deselect` used to force the at-bottom state and call `_follow`, on the
+    reasoning that letting go of a row is asking for the tail back. What that
+    does to somebody reading half way up a log is throw them to the end of it,
+    which is precisely where they had chosen not to be. Follow is derived from
+    the viewport, so a reader who deselects at the bottom gets the tail back
+    without being taken there.
+    """
+    window.model.append([make_record(i) for i in range(500)])
+    window.table.resize(600, 300)
+    window.table.show()
+    QApplication.processEvents()
+
+    bar = window.table.verticalScrollBar()
+    assert bar.maximum() > 0, "the table has no range, so this would prove nothing"
+    window.go_to(200)
+    before = bar.value()
+    assert before > 0, "the view never left the top"
+
+    window.deselect()
+
+    assert not window.table.currentIndex().isValid()
+    assert bar.value() == before, "Esc moved the view instead of only letting go of the row"
+
+
 def test_scrolling_up_stops_the_tail_and_scrolling_back_resumes_it(window: MainWindow) -> None:
     """The half that protects the reader, and the half that lets them go again.
 

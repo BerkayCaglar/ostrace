@@ -122,21 +122,58 @@ class Band(IntFlag):
 class Find(StrEnum):
     """What `RecordModel.find` looks for.
 
-    The three things worth jumping between in a log: what went wrong, where
-    data is missing, and where the reader left a note to themselves. Named
-    rather than passed as a predicate so the key bindings and the menu can
-    refer to them.
+    What went wrong, where data is missing, and where the reader left a note to
+    themselves -- the three things worth jumping between in a log. Named rather
+    than passed as a predicate so the key bindings, the menu and the toolbar's
+    target picker can all refer to the same thing.
+
+    The severity entries are *thresholds*, not equalities: `Level` is ordered
+    on purpose (Apple's own values are not, which is why this project keeps its
+    own enum), so `NOTICE` finds everything a reader would call interesting
+    without them having to know which of four names the device chose. Jumping
+    to a level exactly would be a filter, and there is already a filter.
     """
 
     ERROR = "error"
+    FAULT = "fault"
+    NOTICE = "notice"
     MARKER = "marker"
     MARK = "mark"
 
+    @property
+    def label(self) -> str:
+        """How the target picker names it."""
+        return _FIND_LABELS[self]
+
+
+#: Beside the enum rather than in the window, so that adding a target and
+#: naming it are one edit. A member with no label raises here rather than
+#: rendering as its own lowercase value in a menu.
+_FIND_LABELS: dict[Find, str] = {
+    Find.ERROR: "Errors and Faults",
+    Find.FAULT: "Faults",
+    Find.NOTICE: "Notices and above",
+    Find.MARKER: "Gaps",
+    Find.MARK: "Marked rows",
+}
+
+
+def _at_least(level: Level) -> Callable[[RecordModel, int], bool]:
+    """Match records at or above ``level``. Markers are never records."""
+
+    def matches(model: RecordModel, row: int) -> bool:
+        record = model.row_at(row)
+        return isinstance(record, Record) and record.level >= level
+
+    return matches
+
 
 _MATCHERS: dict[Find, Callable[[RecordModel, int], bool]] = {
-    Find.ERROR: lambda model, row: (
-        isinstance(record := model.row_at(row), Record) and record.is_error
-    ),
+    # `Record.is_error` is `level >= ERROR`, so this is the same predicate it
+    # always was, spelled once instead of twice.
+    Find.ERROR: _at_least(Level.ERROR),
+    Find.FAULT: _at_least(Level.FAULT),
+    Find.NOTICE: _at_least(Level.NOTICE),
     Find.MARKER: lambda model, row: not isinstance(model.row_at(row), Record),
     Find.MARK: lambda model, row: model.is_marked(row),
 }
