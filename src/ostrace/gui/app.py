@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QApplication
 
 from ostrace import __version__
+from ostrace.gui import icons
 from ostrace.gui.theme import Scheme, apply_theme, resolve_scheme
 from ostrace.gui.windows.main import MainWindow
 
@@ -44,16 +45,23 @@ def build_application(argv: Sequence[str] | None = None) -> QApplication:
     app.setApplicationDisplayName(APP_NAME)
     app.setOrganizationName(ORG_NAME)
     app.setApplicationVersion(__version__)
+    # On the application rather than on the window: every window, dialog and
+    # message box inherits it, and the taskbar entry comes from here too. There
+    # was no icon at all, so the title bar, Alt-Tab and the taskbar all showed
+    # Qt's default -- which on Windows is a blank sheet.
+    app.setWindowIcon(icons.app_icon())
 
-    hints = app.styleHints()
-    apply_theme(app, resolve_scheme(hints))
-
-    # A theme switch while the program is open. Verified to fire on Windows;
-    # the cocoa plugin has the same wiring but there is no Mac here to see it,
-    # and it is a no-op under the offscreen plugin, which is why the scheme is
-    # a parameter everywhere below rather than something read at the point of
-    # use.
-    hints.colorSchemeChanged.connect(lambda _scheme: apply_theme(app, resolve_scheme(hints)))
+    # Once, at startup. A theme switch *while* the program is open is the
+    # window's to handle and deliberately not connected here: this function
+    # cannot see whether the user has chosen a scheme, so a connection made at
+    # this level overrides that choice from outside the object that holds it.
+    # It did. Two listeners answered the same signal under different rules --
+    # this one unconditionally, `MainWindow._on_color_scheme_changed` only
+    # while the user had expressed no preference -- so an operating-system
+    # switch moved the palette and the stylesheet while the table, the model,
+    # the minimap and the icons stayed where the user had put them. What that
+    # looks like is a dark window with a white log in the middle of it.
+    apply_theme(app, resolve_scheme(app.styleHints()))
     return app
 
 

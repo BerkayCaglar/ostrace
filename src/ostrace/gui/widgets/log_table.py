@@ -69,6 +69,7 @@ from PySide6.QtWidgets import (
 )
 
 from ostrace.gui.columns import COLUMNS, Column
+from ostrace.gui.fonts import monospace
 from ostrace.gui.theme import Scheme, palette_for, selection_row, token
 
 if TYPE_CHECKING:
@@ -86,27 +87,6 @@ _ROW_PADDING = 6
 #: platform whose UI font happens to be short. The measured Windows default
 #: lands at 21, so this bites rarely and only in the direction of legibility.
 _MIN_ROW_HEIGHT = 22
-
-#: Fixed-width faces, most-wanted first; Qt takes the first that resolves. Not
-#: a platform branch -- the list is the same on all three, which is precisely
-#: why it can live here rather than in `compat`. `Cascadia Mono` ships with
-#: Windows 11, `SF Mono` and `Menlo` with macOS, and the rest are what Linux
-#: distributions actually install.
-_MONO_FAMILIES = (
-    "Cascadia Mono",
-    "SF Mono",  # UNVERIFIED-MACOS
-    "Menlo",  # UNVERIFIED-MACOS
-    "DejaVu Sans Mono",
-    "Noto Sans Mono",
-    "Liberation Mono",
-    "Consolas",
-    "Courier New",
-)
-
-#: Points added to the interface font for the table body. A monospaced face at
-#: the same nominal size reads noticeably smaller than a proportional one, and
-#: this is the column of text the user is actually here to read.
-_MONO_POINT_BONUS = 0.5
 
 #: The empty-state heading, in points above the body. Big enough to read as a
 #: statement rather than as a stray record.
@@ -277,16 +257,10 @@ class LogTable(QTableView):
         Monospaced, which is also what makes `apply_column_widths` honest: it
         budgets a column in multiples of the width of ``0``, and in a
         proportional face a digit is nothing like a colon or a lowercase l.
+        Shared with the detail pane through `gui.fonts`, so a message reads the
+        same in both places.
         """
-        font = QFont()
-        font.setFamilies(list(_MONO_FAMILIES))
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        size = font.pointSizeF()
-        if size > 0:
-            # Negative means the font was specified in pixels, where adding
-            # points would silently switch units and resize the whole table.
-            font.setPointSizeF(size + _MONO_POINT_BONUS)
-        return font
+        return monospace()
 
     def set_scheme(self, scheme: Scheme) -> None:
         """Recolour the table for ``scheme``.

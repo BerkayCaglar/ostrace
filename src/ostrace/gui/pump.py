@@ -24,6 +24,7 @@ mean opposite things.
 
 from __future__ import annotations
 
+from collections import deque
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QElapsedTimer, QObject, QTimer, Signal
@@ -31,17 +32,29 @@ from PySide6.QtCore import QElapsedTimer, QObject, QTimer, Signal
 from ostrace.model import Record
 
 if TYPE_CHECKING:
-    from collections import deque
-
     from ostrace.gui.markers import Row
     from ostrace.gui.models import RecordModel
 
-__all__ = ["PAUSE_LIMIT", "TICK_MS", "Pump"]
+__all__ = ["PAUSE_LIMIT", "RATE_WINDOW_MS", "TICK_MS", "Pump"]
 
 #: Drain interval. Twenty updates a second reads as continuous, and is few
 #: enough that the model work per second is bounded by the tick rather than by
 #: how talkative the device is.
 TICK_MS = 50
+
+#: How long a window the rate is averaged over.
+#:
+#: A device does not deliver evenly. It hands over a batch and then says nothing
+#: for several ticks, so the rate computed from a single 50 ms tick is **zero**
+#: more often than it is anything else -- and a readout that spends most of its
+#: time on 0 while a capture is plainly streaming is worse than no readout,
+#: because it is not obviously broken. It reads as the device having stopped.
+#:
+#: One second is also the unit the label is spelled in. "1,200 rec/s" derived
+#: from a twentieth of a second is a projection; derived from the last second it
+#: is a count, and the number on screen is one the user could have counted
+#: themselves.
+RATE_WINDOW_MS = 1_000
 
 #: How many records may pile up while paused before the oldest are dropped from
 #: the view. Generous -- about a minute of a busy device -- because the point of
@@ -77,12 +90,15 @@ class Pump(QObject):
         self._timer = QTimer(self)
         self._timer.setInterval(interval_ms)
         self._timer.timeout.connect(self.drain)
-        #: Time actually elapsed between drains. `QTimer` defaults to a coarse
-        #: timer, and on Windows that snaps to the 15.625 ms scheduler tick:
-        #: a 50 ms interval measured 62.5 ms. Deriving the rate from the
-        #: nominal interval therefore over-read a 1,600 rec/s device as 2,000.
-        self._since = QElapsedTimer()
-        self._since.start()
+        #: Measured rather than assumed. `QTimer` defaults to a coarse timer,
+        #: and on Windows that snaps to the 15.625 ms scheduler tick: a 50 ms
+        #: interval measured 62.5 ms. Deriving the rate from the nominal
+        #: interval over-read a 1,600 rec/s device as 2,000.
+        self._clock = QElapsedTimer()
+        self._clock.start()
+        #: ``(when, how many)`` per batch, kept for `RATE_WINDOW_MS`. A window
+        #: rather than the last tick -- see that constant.
+        self._samples: deque[tuple[int, int]] = deque()
 
     def start(self) -> None:
         self._timer.start()
@@ -110,18 +126,35 @@ class Pump(QObject):
             self._enforce_pause_limit()
             return
 
-        elapsed_ms = self._since.restart()
+        now = self._clock.elapsed()
         batch: list[Row] = []
         queue = self.queue
         while queue:
             batch.append(queue.popleft())
-        if not batch:
-            self.rate_changed.emit(0.0)
-            return
 
-        self.model.append(batch)
-        self.delivered += sum(1 for item in batch if isinstance(item, Record))
-        self.rate_changed.emit(len(batch) * (1000.0 / max(elapsed_ms, 1)))
+        if batch:
+            self.model.append(batch)
+            self.delivered += sum(1 for item in batch if isinstance(item, Record))
+            self._samples.append((now, len(batch)))
+
+        # Emitted on every tick, including the empty ones. An empty tick is not
+        # a rate of zero -- it is one twentieth of a second in which nothing
+        # happened to arrive -- but a *second* of them is, and letting the
+        # window empty is how that gets said. A device that stops still reads
+        # 0 rec/s a second later; it just no longer says so between bursts.
+        self.rate_changed.emit(self._rate(now))
+
+    def _rate(self, now: int) -> float:
+        """Records a second, over the last `RATE_WINDOW_MS`."""
+        horizon = now - RATE_WINDOW_MS
+        while self._samples and self._samples[0][0] <= horizon:
+            self._samples.popleft()
+        if not self._samples:
+            return 0.0
+        # Before a full window has elapsed the divisor is what has actually
+        # passed, or the first second of every capture would read low.
+        span_ms = min(now, RATE_WINDOW_MS)
+        return sum(count for _, count in self._samples) * 1000.0 / max(span_ms, 1)
 
     def _enforce_pause_limit(self) -> None:
         """Bound what a pause may hold, and say so when it bites."""

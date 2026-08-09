@@ -70,6 +70,7 @@ from ostrace.gui.widgets.detail_pane import DetailPane
 from ostrace.gui.widgets.device_button import DeviceButton
 from ostrace.gui.widgets.export_dialog import ExportDialog
 from ostrace.gui.widgets.filter_bar import FilterBar
+from ostrace.gui.widgets.jump_button import JumpButton
 from ostrace.gui.widgets.log_table import LogTable
 from ostrace.gui.widgets.minimap import Minimap
 from ostrace.gui.widgets.status_bar import StatusBar
@@ -143,6 +144,7 @@ class MainWindow(QMainWindow):
     action_pause: QAction
     action_disconnect: QAction
     action_open: QAction
+    action_close: QAction
     action_export: QAction
     action_copy: QAction
     action_deselect: QAction
@@ -151,6 +153,8 @@ class MainWindow(QMainWindow):
     action_clear_marks: QAction
     action_top: QAction
     action_bottom: QAction
+    action_next_jump: QAction
+    action_previous_jump: QAction
     action_next_error: QAction
     action_previous_error: QAction
     action_next_marker: QAction
@@ -174,6 +178,11 @@ class MainWindow(QMainWindow):
         #: turn it off -- see `_on_user_scroll`.
         self._at_bottom = True
         self._user_scrolled = False
+        #: What the toolbar's chevrons move between. Read before the toolbar is
+        #: built, since the button is constructed with it, and separately from
+        #: `_restore_layout`, which is allowed to give up on a geometry that no
+        #: longer fits any screen and would take this with it.
+        self._jump = self._restore_jump()
         self.setWindowTitle(_TITLE)
         # Before anything asks for a size hint. Left to Qt the window opened at
         # 751x362 -- the sum of what an empty table and a two-line form ask for,
@@ -243,11 +252,26 @@ class MainWindow(QMainWindow):
         app.styleHints().colorSchemeChanged.connect(self._on_color_scheme_changed)
 
     def _on_color_scheme_changed(self, colour_scheme: Qt.ColorScheme) -> None:
+        """Follow the operating system, if the user has not overruled it.
+
+        Both halves of the switch happen here, and that is the point.
+        `apply_theme` moves the application -- palette, tooltips, chrome
+        stylesheet -- and `set_scheme` moves what this window prebuilt for
+        itself. `gui.app` used to make the first call from its own connection
+        to this same signal, under a rule that could not see `_theme_chosen`,
+        so the two listeners disagreed the moment anybody picked a theme: the
+        chrome went dark and the table stayed white, which reads as a broken
+        dark mode rather than as a preference being honoured.
+        """
         if self._theme_chosen:
             # The user said which one they wanted. The operating system is the
             # default, not the authority.
             return
-        self.set_scheme(scheme_for(colour_scheme))
+        scheme = scheme_for(colour_scheme)
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            apply_theme(app, scheme)
+        self.set_scheme(scheme)
         self._show_theme_state()
 
     def _show_theme_state(self) -> None:
@@ -363,8 +387,8 @@ class MainWindow(QMainWindow):
         ("action_open", "folder-open", False),
         ("action_export", "download", False),
         None,
-        ("action_previous_error", "chevron-up", False),
-        ("action_next_error", "chevron-down", False),
+        ("action_previous_jump", "chevron-up", False),
+        ("action_next_jump", "chevron-down", False),
     )
 
     def _build_toolbar(self) -> None:
@@ -402,6 +426,15 @@ class MainWindow(QMainWindow):
             button = self.toolbar.widgetForAction(action)
             if isinstance(button, QToolButton) and not labelled:
                 button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+
+        # Immediately after the two chevrons, because it is what they mean. An
+        # arrow whose target is stated somewhere else is an arrow you have to
+        # remember the setting of.
+        self.jump_button = JumpButton(self._jump, self.toolbar)
+        self.jump_button.changed.connect(self._on_jump_target_changed)
+        self.toolbar.addWidget(self.jump_button)
+        self._on_jump_target_changed(self._jump)
+
         self._apply_icons()
 
     def _apply_icons(self) -> None:
@@ -427,18 +460,26 @@ class MainWindow(QMainWindow):
         """
         self.filter_bar.changed.connect(self._on_filter_changed)
         self.action_open.triggered.connect(self.choose_capture)
+        self.action_close.triggered.connect(self.close_capture)
         self.action_capture.triggered.connect(self.capture_from_device)
         self.action_disconnect.triggered.connect(self.stop_capture)
         self.action_pause.toggled.connect(self.set_paused)
 
         self.action_copy.triggered.connect(self.copy_selection)
         self.action_deselect.triggered.connect(self.deselect)
+        # The pane's own way out. `Esc` was the only one, which is a key you
+        # have to be told about; a control you can see is not.
+        self.detail.closed.connect(self.deselect)
         self.action_dark_mode.toggled.connect(lambda on: self.toggle_dark_mode(dark=on))
         self.action_find.triggered.connect(self.filter_bar.focus_search)
         self.action_mark.triggered.connect(self.toggle_mark)
         self.action_clear_marks.triggered.connect(self.clear_marks)
         self.action_top.triggered.connect(self.go_to_top)
         self.action_bottom.triggered.connect(self.go_to_bottom)
+        self.action_next_jump.triggered.connect(lambda: self.find_next(self._jump))
+        self.action_previous_jump.triggered.connect(
+            lambda: self.find_next(self._jump, backwards=True)
+        )
         self.action_next_error.triggered.connect(lambda: self.find_next(Find.ERROR))
         self.action_previous_error.triggered.connect(
             lambda: self.find_next(Find.ERROR, backwards=True)
@@ -562,6 +603,16 @@ class MainWindow(QMainWindow):
         """
         return QSettings()
 
+    def _restore_jump(self) -> Find:
+        """Which jump target the last session left the toolbar on."""
+        stored = self._settings().value("table/jump")
+        try:
+            return Find(stored)
+        except ValueError:
+            # Absent, or written by a version that offered a kind this one does
+            # not. The default is the one every reader wants first.
+            return Find.ERROR
+
     def _on_a_screen(self) -> bool:
         """Is this window somewhere a person could actually see it?
 
@@ -593,6 +644,10 @@ class MainWindow(QMainWindow):
             "table/columns",
             [self.table.columnWidth(index) for index in range(len(COLUMNS))],
         )
+        # A way of reading rather than a property of a capture, so it belongs
+        # with the geometry and not with the filter, which is deliberately not
+        # remembered.
+        settings.setValue("table/jump", self._jump.value)
 
     def _restore_layout(self) -> bool:
         """Put it back, and say whether there was anything to put.
@@ -676,6 +731,13 @@ class MainWindow(QMainWindow):
         action = QAction(text, self)
         action.setMenuRole(role)
         action.setCheckable(checkable)
+        # The toolbar and the menus share these objects, and an icon put on one
+        # for the toolbar's sake is drawn by the other in the column a
+        # checkmark occupies. The two jump buttons carry chevrons, so `Next
+        # Error` and `Previous Error` appeared in the View menu with what reads
+        # as a tick and an indicator beside them, next to a `Dark Mode` whose
+        # tick is real. Icons belong on the toolbar, where they are the label.
+        action.setIconVisibleInMenu(False)
         if shortcut is not None:
             # StandardKey maps Ctrl to Cmd on macOS *and* knows where the two
             # platforms genuinely differ, which a literal string cannot.
@@ -705,8 +767,17 @@ class MainWindow(QMainWindow):
         for menu in self.menus.values():
             bar.addMenu(menu)
 
+        # A separator wherever the group changes. Declared in the bindings table
+        # rather than inserted here by name, so a reordered or added item lands
+        # in the right run without anybody remembering to move a divider: the
+        # View menu is eleven items and was one undivided column of them.
+        seen: dict[str, str] = {}
         for binding in BINDINGS:
-            self.menus[binding.menu].addAction(self.actions_by_name[binding.name])
+            menu = self.menus[binding.menu]
+            if binding.menu in seen and seen[binding.menu] != binding.group:
+                menu.addSeparator()
+            seen[binding.menu] = binding.group
+            menu.addAction(self.actions_by_name[binding.name])
 
         self.menus["capture"].addSeparator()
         self.menus["capture"].addAction(self.action_quit)
@@ -789,6 +860,62 @@ class MainWindow(QMainWindow):
         self._loader.start()
 
         self.setWindowTitle(f"{path.name} — {_TITLE}")
+
+    def close_capture(self) -> None:
+        """Put the window back the way it starts.
+
+        There was no way to do this. Every state the window can be in -- a
+        capture loaded, a filter narrowed, a row selected, a device named in the
+        status bar, a file name in the title -- was reachable and none of it was
+        reversible without quitting and starting again. Reported as wanting "a
+        clean page" after finishing with a capture, which is exactly right: the
+        alternative was reading the next capture through the last one's filter.
+
+        A running capture is not closed out from under itself. Disconnect
+        releases the device and finalises the session, and doing that silently
+        because somebody asked for an empty window would throw away a recording
+        in progress.
+        """
+        if self._capture_thread is not None:
+            self.banner.show_message(
+                "A capture is still running. Disconnect to finish it, and the "
+                "window can be emptied after that.",
+                "Disconnect",
+                on_action=self.stop_capture,
+            )
+            return
+
+        if self._loader is not None:
+            self._loader.cancel()
+            self._loader = None
+
+        self.capture = None
+        self.model = RecordModel(self.scheme, parent=self)
+        self.table.setModel(self.model)
+        self.minimap.set_model(self.model)
+        self.minimap.rebuild()
+        self._connect_selection()
+        self.detail.clear()
+        # The filter goes with it. A filter that outlived the capture it was
+        # written for is the "where did my logs go" failure with a longer fuse,
+        # and this is the one moment the window knows for certain that it is
+        # not the filter for whatever comes next.
+        self.filter_bar.clear()
+        self.banner.hide()
+        self._showing_filter_notice = False
+        self.status.set_device(None)
+        self.status.set_rate(None)
+        self.setWindowTitle(_TITLE)
+        self._update_counts()
+        self._update_placeholder()
+
+    def _on_jump_target_changed(self, target: object) -> None:
+        """Point the chevrons somewhere else, and say so in their tooltips."""
+        if not isinstance(target, Find):  # pragma: no cover - the signal carries a Find
+            return
+        self._jump = target
+        self.action_next_jump.setToolTip(f"Next: {target.label}")
+        self.action_previous_jump.setToolTip(f"Previous: {target.label}")
 
     def _on_progress(self, loaded: int) -> None:
         self.status.set_volume(loaded)
@@ -1044,7 +1171,7 @@ class MainWindow(QMainWindow):
         self.stop_capture()
 
     def deselect(self) -> None:
-        """Let go of the selected row.
+        """Let go of the selected row, and do nothing else.
 
         Selecting a row stops the tail, deliberately -- see `_follow`. Until
         this existed there was no way to say you had finished reading it: the
@@ -1054,14 +1181,21 @@ class MainWindow(QMainWindow):
 
         `Esc` because it is what the key means everywhere else, and it was the
         only obvious chord this window had not already spent.
+
+        **Nothing else** is the correction. This used to force `_at_bottom`,
+        clear `_user_scrolled` and call `_follow`, on the reasoning that asking
+        to let go of a row is asking for the tail back. Against a real capture
+        that reads as `Esc` throwing the reader to the end of the log from
+        wherever they were -- the tail is somewhere else by definition, which is
+        why they had scrolled away from it. It is also unnecessary: `_follow`
+        derives "at the bottom" from the scrollbar, so a reader who deselects
+        while genuinely at the bottom gets the tail back without being teleported
+        there, and one who deselects half way up keeps their place. `Ctrl+End`
+        remains the way to ask for the end on purpose.
         """
         self.table.clearSelection()
         self.table.setCurrentIndex(QModelIndex())
         self.detail.clear()
-        # Asking to let go of a row is asking for the tail back.
-        self._at_bottom = True
-        self._user_scrolled = False
-        self._follow()
 
     def _follow(self) -> None:
         """Stay at the bottom, but only if that is where the user already is.
@@ -1110,31 +1244,60 @@ class MainWindow(QMainWindow):
         self.table.scrollToBottom()
 
     def export_capture(self) -> None:
-        """Offer to write the finished capture out.
+        """Open the export dialog, if there is anything to export."""
+        dialog = self.export_dialog()
+        if dialog is not None:
+            dialog.exec()
 
-        A capture still being recorded is excluded: exporting a file that is
-        growing under the exporter produces a report whose end is arbitrary.
-        Disconnect first, which is also when the session is finalised -- and
-        the export is then available, which it was not until `_adopt_session`
-        existed.
+    def export_dialog(self) -> ExportDialog | None:
+        """The dialog Export would open, or ``None`` with a banner saying why.
+
+        Separate from `export_capture` because `exec()` is a nested event loop
+        that only a person can leave, so nothing can test what this window
+        decides to offer without hanging on it.
+
+        A running capture used to be refused outright, on the reasoning in
+        `docs/design/gui.md` §7: a file growing under the exporter produces a
+        report whose end is arbitrary. The objection is real and the refusal was
+        the wrong answer to it, for two reasons.
+
+        The first is that the end is only arbitrary while it goes *unstated*.
+        Every exporter in this package already declares its own omissions, so
+        the honest form of "this report stops somewhere" is a sentence saying
+        where, which is what `exporters.notes` is for. A snapshot that says it
+        is a snapshot is not a report with an arbitrary end; it is a report with
+        a declared one.
+
+        The second is that this was already built. `storage.spool` emits a
+        ``Z_SYNC_FLUSH`` boundary as it writes precisely so that a reader can
+        decompress everything up to the last one, and its module docstring says
+        live export during capture depends on it. The capability existed and the
+        window declined to use it.
         """
-        if self.capture is None:
-            if self._capture_thread is not None:
-                self.banner.show_message(
-                    "The capture is still running, and a file growing under the "
-                    "exporter would produce a report whose end is arbitrary. "
-                    "Disconnect to finish it.",
-                    "Disconnect",
-                    on_action=self.stop_capture,
-                )
-            else:
-                self.banner.show_message(
-                    "There is nothing to export yet. Open a capture, or record one from a device.",
-                    "Open capture…",
-                    on_action=self.choose_capture,
-                )
-            return
-        ExportDialog(self.capture, self).exec()
+        if self.capture is not None:
+            return ExportDialog(self.capture, self)
+
+        path = self._capture_thread.path if self._capture_thread is not None else None
+        if path is None:
+            self.banner.show_message(
+                "There is nothing to export yet. Open a capture, or record one from a device.",
+                "Open capture…",
+                on_action=self.choose_capture,
+            )
+            return None
+
+        try:
+            snapshot = open_capture(path)
+        except OstraceError as exc:
+            # The session file exists but cannot be read yet -- the first flush
+            # boundary has not been written, most likely, which on a quiet
+            # device is a real wait rather than a moment.
+            self.banner.show_message(
+                f"Nothing can be read from the capture yet: {exc}",
+                "Dismiss",
+            )
+            return None
+        return ExportDialog(snapshot, self, running=True)
 
     # -- navigation, marks, copy -----------------------------------------
 

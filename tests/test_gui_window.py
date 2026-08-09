@@ -48,7 +48,7 @@ from ostrace.gui.widgets.log_table import (
 )
 from ostrace.gui.windows.main import MainWindow
 from ostrace.model import Level
-from tests.helpers import make_record
+from tests.helpers import ERRORS, make_record
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
@@ -63,6 +63,70 @@ _Index = QModelIndex | QPersistentModelIndex
 def window(qt_app: QApplication) -> MainWindow:
     del qt_app  # required so that exactly one QApplication exists first
     return MainWindow()
+
+
+def test_no_action_shows_an_icon_in_a_menu(window: MainWindow) -> None:
+    """The toolbar and the menus share their action objects.
+
+    So an icon put on one for the toolbar's sake is drawn by the other in the
+    column a checkmark occupies: the two jump actions carry chevrons, and
+    `Next` and `Previous` therefore appeared in the View menu with what reads
+    as a tick and an indicator beside them -- a few rows above a `Dark Mode`
+    whose tick is real.
+    """
+    wearing = [
+        action.text()
+        for action in window.menu_items()
+        if action.isIconVisibleInMenu() and not action.icon().isNull()
+    ]
+    assert not wearing, f"{wearing} draw an icon where a checkmark goes"
+
+
+def test_the_view_menu_is_divided_into_runs(window: MainWindow) -> None:
+    """Eleven items in one undivided column is a list nobody reads to the end
+    of, and the grouping is declared in the bindings table so that a reordered
+    item cannot leave a divider stranded behind it."""
+    view = window.menus["view"]
+    separators = [action for action in view.actions() if action.isSeparator()]
+
+    assert separators, "the View menu is one flat run"
+    assert not view.actions()[0].isSeparator(), "a divider above the first item"
+    assert not view.actions()[-1].isSeparator(), "a divider below the last item"
+
+
+class TestClosingACapture:
+    """There was no way back to an empty window.
+
+    A loaded capture, a narrowed filter, a selected row, a device in the status
+    bar and a file name in the title were all reachable, and none of it was
+    reversible without quitting the program.
+    """
+
+    def test_it_empties_everything(self, window: MainWindow) -> None:
+        window.open_capture(ERRORS)
+        loader = window._loader
+        assert loader is not None
+        loader._step()
+        window.filter_bar._process.setText("cloudd")
+
+        window.close_capture()
+
+        assert window.capture is None
+        assert window.model.rowCount() == 0
+        assert window.filter_bar.is_empty, "the next capture would be read through this filter"
+        assert window.windowTitle() == "ostrace"
+        assert window.detail.field("Nothing selected") is not None
+
+    def test_it_refuses_while_a_capture_is_running(self, window: MainWindow) -> None:
+        """Disconnect releases the device and finalises the session. Doing that
+        silently because somebody asked for an empty window would throw away a
+        recording in progress."""
+        window._capture_thread = object()  # type: ignore[assignment]
+        try:
+            window.close_capture()
+            assert "still running" in window.banner.text
+        finally:
+            window._capture_thread = None
 
 
 # -- the macOS menu heuristic ------------------------------------------------

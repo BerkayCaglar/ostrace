@@ -12,10 +12,56 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
-Five of these came from ten minutes of somebody actually using 0.1.0. The last
-one came from auditing what this repository had already published.
+Almost all of this came from somebody actually using the program against a
+phone, in two rounds. The security entry came from auditing what this
+repository had already published.
+
+Worth stating plainly, because it is the pattern: **every one of these bugs was
+reachable in a minute of real use, and the test suite covered the code they
+were in.** The follow tests scrolled to the bottom by hand before appending —
+the one thing a real capture never does. The trim tests never showed the
+window, so nothing could scroll. The export tests ran on the interface thread
+and never noticed the freeze. A green suite is evidence about the states it set
+up, and each of these was found in a state it did not.
 
 ### Added
+
+- **The jump arrows can be pointed at something other than errors.** The two
+  toolbar chevrons were wired to `Find.ERROR` and nothing else, which is the
+  right default and a poor answer to reading a capture for gaps. The target is
+  a control beside them now — errors and faults, faults, notices and above,
+  gaps, marked rows — remembered between sessions, and `F3` / `Shift+F3`
+  follow it. Every kind keeps its own explicit key, so choosing one in the
+  toolbar takes nothing away from somebody who already knows `Ctrl+Shift+G`.
+
+- **Close Capture**, on the standard close chord. There was no way back to an
+  empty window: a loaded capture, a narrowed filter, a selected row, a device
+  in the status bar and a file name in the title were all reachable and none of
+  it was reversible without quitting. The filter goes with the capture, since
+  this is the one moment the window knows for certain it is not the filter for
+  whatever comes next. A running capture is not closed out from under itself.
+
+- **A snapshot export while a capture is still recording.** It used to be
+  refused until Disconnect, on the grounds that a file growing under the
+  exporter produces a report whose end is arbitrary. The end is only arbitrary
+  while it goes unstated: the export now declares that it is a snapshot and
+  that it ends where the file had got to rather than where the device stopped,
+  in the same `exporters.notes` sentences the CLI prints. `storage.spool` has
+  emitted a `Z_SYNC_FLUSH` boundary for exactly this since phase 1 — its
+  docstring says live export depends on it — so the capability was there and
+  the window was declining to use it. The capture keeps running.
+
+- **An application icon.** There was none, so the title bar, Alt-Tab and the
+  taskbar all showed Qt's default, which on Windows is a blank sheet. Drawn
+  here, set on the application so every window and dialog inherits it, and
+  supplied at seven sizes rather than left to Qt to rescale one bitmap into the
+  soft edges that read as an unfinished program.
+
+- **A close control on the detail pane.** `Esc` was the only way to let go of a
+  record, which is a key you have to be told about. The control asks rather
+  than acts — it emits, and the window turns that into a deselect — because a
+  pane that can hide itself is one the reader has to work out how to bring
+  back.
 
 - **A dark-mode switch**, in View, remembered between sessions. The viewer
   followed the operating system and offered no way to disagree with it — which
@@ -30,7 +76,90 @@ one came from auditing what this repository had already published.
   to be told. So a live capture stopped following the first time anybody
   clicked anything and stayed stopped.
 
+### Changed
+
+- **The detail pane is two columns of fields and a message block.** It was a
+  single-column form of twelve short rows, which against a real window is
+  mostly empty space with a stack of labels down the left edge — and the
+  message, the one field with anything to say, got the same narrow strip as
+  `PID`. The message now has a block of its own in the table's monospaced face,
+  and the fields fill the width in pairs, top to bottom in each column so the
+  clock fields stay together.
+
+- **`Esc` lets go of the selected row and moves nothing else.** It also forced
+  the at-bottom state and scrolled there, on the reasoning that letting go of a
+  row is asking for the tail back. Against a real capture that reads as `Esc`
+  throwing the reader to the end of the log from wherever they were, which is
+  precisely where they had chosen not to be. It was unnecessary as well: follow
+  is derived from the viewport, so deselecting at the bottom resumes the tail
+  on its own and deselecting half way up does not. `Ctrl+End` remains the way
+  to ask for the end.
+
 ### Fixed
+
+- **Dark mode came apart when the operating system switched.** Two objects
+  answered `colorSchemeChanged` under different rules — `gui.app`
+  unconditionally, the window only while the user had expressed no preference —
+  and two listeners under different rules is one rule that does not hold.
+  Choosing a theme and then letting the system change its own moved the palette
+  and the chrome stylesheet while the table, the model, the minimap and the
+  icons stayed put: a dark window with a white log in the middle of it. The
+  window owns the switch now and `gui.app` connects nothing.
+
+- **Applying a theme that is already applied re-polished every widget in the
+  process.** `setStyle` and `setStyleSheet` do that by definition, and nothing
+  checked first. One window is the whole of production so it never showed, but
+  it is work done for no reason on every switch — and it is quadratic in a test
+  session, where `colorSchemeChanged` reaches hundreds of live windows and each
+  one restyles the shared application. `apply_theme` returns early when the
+  application is already wearing the scheme, with the stylesheet as the
+  witness: it carries the scheme's colours as literals and nothing else ever
+  sets it. The suite went from about three and a half minutes to 49 seconds.
+
+- **The scrollbar was invisible in the dark scheme.** Its handle was painted in
+  `border-strong`, which is also `QPalette.Dark` and `Shadow`: for a shadow
+  "darker than the surface" is the whole job, and for a handle it is the bug.
+  Measured, that is `#0f1116` on a `#101216` track — a contrast of **1.01:1**,
+  drawn correctly and impossible to see. The handle has its own token now and
+  both schemes clear 3:1 against their own track, WCAG 2.1's non-text
+  threshold, asserted beside the severity contrasts. The light one was never
+  invisible and was under the line too, at 1.64:1.
+
+- **The device button chose a device instead of opening its menu.** It is an
+  instant-popup button over a menu that was empty until an asynchronous scan
+  returned, and Qt pops up nothing for a menu with no actions — so the press
+  appeared to do nothing, and then the scan landed, took the first device and
+  changed the label. Both halves of that were one empty popup. The menu is
+  never empty now: it says `Scanning…` while a scan is in flight, and its
+  contents are replaced by building the new rows before removing the old ones,
+  because a `QMenu` emptied under a user who is looking at it closes itself.
+
+- **The `rec/s` readout spent most of its time reading zero.** It was computed
+  from a single 50 ms drain, and a device does not deliver evenly — it hands
+  over a batch and then says nothing for several ticks, so the commonest value
+  for one tick is none at all. A readout that reads 0 while a capture is
+  plainly streaming is worse than no readout, because it looks like the device
+  stopped rather than like a bug. It is now a count over the last second, which
+  is also the unit it is spelled in: a number the user could have counted
+  themselves rather than a projection from a twentieth of a second.
+
+- **The View menu drew icons where checkmarks go.** The toolbar and the menus
+  share their action objects, so the chevrons put on the two jump actions for
+  the toolbar's sake were rendered by the menu in the check column: `Next
+  Error` and `Previous Error` appeared with what reads as a tick and an
+  indicator beside them, two rows above a `Dark Mode` whose tick is real. No
+  action shows an icon in a menu now. The menu was also eleven items in one
+  undivided column; grouping is declared in the bindings table and the
+  separators are drawn from it, so a reordered item cannot leave a divider
+  behind.
+
+- **The detail pane measured itself against rows it had not shown yet.** A
+  widget added to the layout of an already-visible parent is not made visible
+  until the event loop next runs, and a layout skips hidden items — so
+  `QGridLayout.hasHeightForWidth` was false, `heightForWidth` returned -1, and
+  the height computed for the pane a line later left the entire field grid out
+  of it. Measured: 189 pixels for contents needing 433, which is every row
+  rendered as its own top half.
 
 - **The tail never followed a live capture at all.** Appending rows does not
   move a scrollbar: Qt raises the maximum and leaves the value where it was. So

@@ -42,6 +42,16 @@ __all__ = ["DeviceButton", "DeviceScanner"]
 #: with no text reads as a rendering fault rather than as an answer.
 NO_DEVICE = "No device"
 
+#: What the menu holds while a scan is in flight. Its job is to exist: an
+#: `InstantPopup` button whose menu has no actions pops up nothing at all, so a
+#: press looked like a control that did not work -- and then the scan landed,
+#: chose the first device and changed the label, which looked like a control
+#: that had skipped its own menu. Both readings were of the same empty popup.
+SCANNING = "Scanning…"
+
+#: What it holds when the scan came back with nothing.
+NONE_ATTACHED = "No device attached"
+
 #: How long to wait for a scan to notice it was interrupted. It is blocked on a
 #: socket read at worst, not on the network.
 _SCAN_STOP_TIMEOUT_MS = 2_000
@@ -134,7 +144,17 @@ class DeviceButton(QToolButton):
         self.setText(NO_DEVICE)
         self.setToolTip("Choose which attached device to capture from")
         self._menu.aboutToShow.connect(self.rescan)
+        # Before the first press, not in response to it. `aboutToShow` fires
+        # after Qt has decided whether there is a menu worth showing, so a menu
+        # filled from the scan that press starts is filled too late.
+        self._place_holder(SCANNING)
         self.set_scheme(scheme)
+
+    def _place_holder(self, text: str) -> QAction:
+        """Put one disabled row in the menu, so that it is never empty."""
+        action = self._menu.addAction(text)
+        action.setEnabled(False)
+        return action
 
     def set_scheme(self, scheme: Scheme) -> None:
         self._scheme = scheme
@@ -142,6 +162,15 @@ class DeviceButton(QToolButton):
 
     def rescan(self) -> None:
         """Ask usbmux again. Safe to call while a scan is already running."""
+        if not self._actions:
+            # Nothing real to show yet, so say what is happening rather than
+            # leave the last answer up. A menu still reading "No device
+            # attached" while the scan that would contradict it is running is
+            # the one moment this control is guaranteed to be out of date.
+            stale = self._menu.actions()
+            self._place_holder(SCANNING)
+            for action in stale:
+                self._menu.removeAction(action)
         if self._scanner is not None and self._scanner.isRunning():
             return
         self._scanner = DeviceScanner(skip=self.busy_udid, parent=self)
@@ -163,26 +192,37 @@ class DeviceButton(QToolButton):
         self._scanner = None
 
     def _on_found(self, summaries: list[DeviceSummary]) -> None:
-        self._menu.clear()
+        """Replace the menu's contents without it ever being empty.
+
+        The new rows go in before the old ones come out, deliberately. This
+        signal arrives while the popup is very likely open -- a scan is started
+        by opening it -- and a `QMenu` emptied under a user who is looking at it
+        closes itself. Building first and removing after means the list changes
+        under the cursor instead of vanishing from it.
+        """
+        stale = self._menu.actions()
         self._actions.clear()
+
         if not summaries:
             self.udid = None
             self._show(NO_DEVICE)
-            empty = self._menu.addAction("No device attached")
-            empty.setEnabled(False)
-            return
+            self._place_holder(NONE_ATTACHED)
+        else:
+            for summary in summaries:
+                label = self._names.get(summary.udid, summary.udid)
+                action = self._menu.addAction(f"{label}  ({summary.connection})")
+                action.setCheckable(True)
+                action.setChecked(summary.udid == self.udid)
+                action.triggered.connect(lambda _checked=False, u=summary.udid: self.choose(u))
+                self._actions[summary.udid] = action
 
-        for summary in summaries:
-            label = self._names.get(summary.udid, summary.udid)
-            action = self._menu.addAction(f"{label}  ({summary.connection})")
-            action.setCheckable(True)
-            action.setChecked(summary.udid == self.udid)
-            action.triggered.connect(lambda _checked=False, u=summary.udid: self.choose(u))
-            self._actions[summary.udid] = action
+        for action in stale:
+            self._menu.removeAction(action)
 
-        if self.udid not in self._actions:
+        if summaries and self.udid not in self._actions:
             # First device wins, which is what the capture did before this
-            # existed -- the difference is that its name is now on screen.
+            # existed -- the difference is that its name is now on screen, and
+            # that the menu it happens in front of is on screen too.
             self.choose(summaries[0].udid)
 
     def _on_identified(self, udid: str, info: DeviceInfo) -> None:

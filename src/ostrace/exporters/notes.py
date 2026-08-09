@@ -24,10 +24,27 @@ if TYPE_CHECKING:
 __all__ = ["export_notes"]
 
 
-def export_notes(result: ExportResult, *, truncated: bool, malformed: int = 0) -> list[str]:
-    """Everything about this export a reader would otherwise assume away."""
+def export_notes(
+    result: ExportResult, *, truncated: bool, malformed: int = 0, running: bool = False
+) -> list[str]:
+    """Everything about this export a reader would otherwise assume away.
+
+    ``running`` says the capture was still being recorded when this was
+    written. It replaces the truncation note rather than joining it: both
+    describe the same missing gzip trailer, and "the process was killed"
+    alongside "it is still going" is two guesses where there is a known answer.
+    An export taken this way is a snapshot, and the reader has to be told that
+    the end of it is *when they pressed the button* rather than when the device
+    stopped -- otherwise the last record reads as the last thing that happened.
+    """
     notes: list[str] = []
-    if truncated:
+    if running:
+        notes.append(
+            f"this is a snapshot of a capture that was still recording. It ends at "
+            f"the {result.records:,} records written so far, which is where the file "
+            f"had got to and not where the device stopped. The capture continues."
+        )
+    elif truncated:
         notes.append(
             "the capture has no gzip trailer -- it was still being written, the "
             "process was killed, or it is not a gzip file at all. Whatever decoded "

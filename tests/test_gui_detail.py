@@ -21,7 +21,7 @@ from tests.helpers import MIXED
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
-from PySide6.QtWidgets import QApplication, QFormLayout, QLabel
+from PySide6.QtWidgets import QApplication, QLabel
 
 from ostrace.gui.widgets.detail_pane import ABSENT, DetailPane
 
@@ -29,19 +29,15 @@ pytestmark = pytest.mark.gui
 
 
 def field_widgets(pane: DetailPane) -> list[QLabel]:
-    """The value half of every row, in order.
+    """The value half of every field, plus the message block.
 
-    Reaching into the layout because geometry is what is under test here and
+    Reaching into the pane because geometry is what is under test here and
     there is no public accessor for it -- the pane's own interface is text.
+    Driven from ``_rows``, which is the same mapping ``field()`` answers from,
+    so a value that is on screen is in here whichever of the two layouts it
+    ended up in.
     """
-    form = pane._form
-    widgets = []
-    for row in range(form.rowCount()):
-        item = form.itemAt(row, QFormLayout.ItemRole.FieldRole)
-        widget = item.widget() if item is not None else None
-        if isinstance(widget, QLabel):
-            widgets.append(widget)
-    return widgets
+    return list(pane._rows.values())
 
 
 @pytest.fixture(scope="module")
@@ -156,6 +152,54 @@ def test_a_record_is_not_squeezed_into_the_previous_one_s_height(
         if label.height() < label.heightForWidth(label.width())
     ]
     assert not squeezed, f"{len(squeezed)} rows rendered shorter than their text"
+
+
+def test_the_message_is_a_block_of_its_own(pane: DetailPane, records: list[Record]) -> None:
+    """The one field with anything to say does not share a column with ``PID``.
+
+    It is still reachable as a field, which is the pane's interface, but it is
+    laid out separately -- the fields are short and the message is long, and a
+    single column sized for both gave the message a strip and left the rest of
+    the pane empty.
+    """
+    long_message = max(records, key=lambda record: len(record.message))
+    pane.show_record(long_message)
+
+    assert pane.field("Message") == long_message.message
+    assert pane._message.isVisibleTo(pane)
+    assert pane._message.wordWrap(), "a message that cannot wrap is a message with one line of it"
+
+
+def test_a_gap_has_no_message_block(pane: DetailPane, records: list[Record]) -> None:
+    """A gap has no message, and an empty framed box saying so is furniture."""
+    start = records[0].timestamp
+    pane.show_gap(Gap(start=start, end=start + timedelta(seconds=2), reason="unplugged"))
+
+    assert not pane._message.isVisibleTo(pane)
+    assert pane.field("Message") is None
+
+
+def test_the_close_control_asks_rather_than_hides(pane: DetailPane, records: list[Record]) -> None:
+    """Pressing it emits; the window turns that into a deselect.
+
+    The pane does not hide itself, and does not empty itself either. One that
+    can disappear is one the user has to work out how to bring back, and
+    `docs/design/gui.md` §9 has it always present on purpose.
+    """
+    seen: list[bool] = []
+    pane.closed.connect(lambda: seen.append(True))
+    pane.show_record(records[0])
+
+    pane._close.click()
+
+    assert seen == [True]
+    assert pane.field("Message") is not None, "the pane cleared itself instead of asking"
+
+
+def test_nothing_selected_offers_nothing_to_close(pane: DetailPane) -> None:
+    """A close button on an empty pane is a control that does nothing."""
+    pane.clear()
+    assert not pane._close.isVisibleTo(pane)
 
 
 def test_show_item_dispatches_on_the_kind(pane: DetailPane, records: list[Record]) -> None:

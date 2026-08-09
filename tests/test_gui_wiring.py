@@ -333,6 +333,50 @@ class TestChoosingATheme:
 
         assert window.scheme is Scheme.DARK
 
+    def test_a_choice_outranks_the_system_for_the_chrome_as_well(self, window: MainWindow) -> None:
+        """The half of that rule which nothing enforced.
+
+        Two objects answered `colorSchemeChanged` under different rules: this
+        window, only while the user had expressed no preference, and
+        `gui.app`, unconditionally. So a system switch after a choice moved the
+        application palette and the chrome stylesheet while the table, the
+        model, the minimap and the icons stayed where the user had put them --
+        a dark window with a white log in the middle of it. Asserting
+        ``window.scheme`` could never catch it, because the window was the one
+        behaving correctly.
+
+        The handler is called directly rather than through the signal. The
+        application palette is global and `colorSchemeChanged` reaches every
+        window still alive in the process, so in a suite that has built a
+        hundred of them the signal proves whatever the last one to answer
+        happened to think. One window's rule is what is under test.
+        """
+        app = QApplication.instance()
+        assert isinstance(app, QApplication)
+
+        window.toggle_dark_mode(dark=True)
+        window._on_color_scheme_changed(Qt.ColorScheme.Light)
+
+        chosen = palette_for(Scheme.DARK).base().color()
+        assert app.palette().base().color() == chosen, "the application followed the system anyway"
+        assert window.table.palette().base().color() == chosen
+
+    def test_following_the_system_moves_the_application_as_well(self, window: MainWindow) -> None:
+        """And the other direction: with no choice made, both halves move.
+
+        Removing `gui.app`'s connection is only correct if the window's own
+        handler took over the application-wide half of the switch -- which the
+        old one did not do, because something else was doing it.
+        """
+        app = QApplication.instance()
+        assert isinstance(app, QApplication)
+
+        window._on_color_scheme_changed(Qt.ColorScheme.Dark)
+
+        expected = palette_for(Scheme.DARK).base().color()
+        assert app.palette().base().color() == expected
+        assert window.table.palette().base().color() == expected
+
     def test_following_the_system_is_not_a_choice(self, window: MainWindow) -> None:
         """The checkbox is wired to the toggle, so moving it to match the system
         would mark the theme as chosen -- and one system switch would work while

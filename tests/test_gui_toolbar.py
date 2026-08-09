@@ -24,8 +24,10 @@ from PySide6.QtWidgets import QApplication, QToolBar, QToolButton, QWidgetAction
 
 from ostrace.devices.discovery import DeviceSummary
 from ostrace.gui import icons
+from ostrace.gui.models import Find
 from ostrace.gui.theme import Scheme, token
-from ostrace.gui.widgets.device_button import NO_DEVICE, DeviceButton
+from ostrace.gui.widgets import device_button
+from ostrace.gui.widgets.device_button import NO_DEVICE, SCANNING, DeviceButton, DeviceScanner
 from ostrace.gui.windows.main import MainWindow
 from ostrace.model import DeviceInfo, Level, Platform
 from tests.helpers import make_record
@@ -66,6 +68,124 @@ def _buttons(window: MainWindow) -> list[QAction]:
 def window(qt_app: object) -> MainWindow:
     del qt_app
     return MainWindow()
+
+
+def test_the_device_menu_is_never_empty(qt_app: object) -> None:
+    """It is an instant-popup button, and Qt pops up nothing for a menu with no
+    actions.
+
+    The menu was filled by an asynchronous scan, so the first press showed
+    nothing at all -- and then the scan landed, took the first device and
+    changed the label, which looked like a control that had skipped its own
+    menu. Both readings were of one empty popup.
+    """
+    del qt_app
+    button = DeviceButton()
+
+    assert button.menu() is not None
+    assert [action.text() for action in button.menu().actions()] == [SCANNING]
+    assert all(not action.isEnabled() for action in button.menu().actions())
+
+
+class IdleScanner(DeviceScanner):
+    """A scan that answers nothing, so a test can start one.
+
+    The real one imports pymobiledevice3 and asks usbmux, which this machine
+    happens to have and a CI runner does not -- and a `QThread` still running
+    when Python drops its last reference aborts the process with no message,
+    which is exactly how the first version of the test below took the whole
+    Windows job down after printing one dot. What is under test is the menu,
+    not the device layer.
+    """
+
+    def run(self) -> None:
+        return
+
+
+def test_the_menu_says_it_is_looking_again_rather_than_showing_a_stale_answer(
+    qt_app: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A menu still reading "No device attached" while the scan that would
+    contradict it is running is the one moment this control is guaranteed to be
+    out of date -- which is exactly when somebody has just plugged a phone in.
+    """
+    del qt_app
+    monkeypatch.setattr(device_button, "DeviceScanner", IdleScanner)
+    button = DeviceButton()
+    button._on_found([])
+    assert [action.text() for action in button.menu().actions()] != [SCANNING]
+
+    button.rescan()
+    try:
+        assert [action.text() for action in button.menu().actions()] == [SCANNING]
+    finally:
+        button.stop()
+
+
+def test_the_application_has_a_mark_at_every_size_a_desktop_asks_for(qt_app: object) -> None:
+    """There was no icon at all, so the title bar, Alt-Tab and the taskbar all
+    showed Qt's default -- on Windows, a blank sheet.
+
+    Sizes rather than one bitmap: Qt would rescale a single pixmap into exactly
+    the soft edges that read as an unfinished program, at the sizes people see
+    most.
+    """
+    del qt_app
+    built = icons.app_icon()
+
+    assert not built.isNull()
+    available = {size.width() for size in built.availableSizes()}
+    assert available == set(icons.APP_SIZES)
+
+
+def test_the_application_mark_does_not_follow_the_theme(qt_app: object) -> None:
+    """A taskbar entry that changed colour with the scheme reads as a different
+    program -- and on macOS and Linux the icon is drawn by a shell that never
+    asked this application what scheme it is in."""
+    del qt_app
+    small = icons.APP_SIZES[0]
+    first = icons.app_icon().pixmap(small, small).toImage()
+    icons.clear_cache()
+    second = icons.app_icon().pixmap(small, small).toImage()
+
+    assert first == second
+
+
+class TestTheJumpTarget:
+    """The chevrons were wired to errors and nothing else."""
+
+    def test_choosing_a_target_moves_the_arrows(self, window: MainWindow) -> None:
+        window.jump_button.set_target(Find.MARKER)
+
+        assert window._jump is Find.MARKER
+        assert "Gaps" in window.action_next_jump.toolTip()
+
+    def test_every_kind_is_offered_and_exactly_one_is_checked(self, window: MainWindow) -> None:
+        """An arrow has one meaning at a time, and the menu is where that is
+        visible."""
+        window.jump_button.set_target(Find.MARK)
+        checked = [
+            kind for kind, action in window.jump_button._actions.items() if action.isChecked()
+        ]
+
+        assert set(window.jump_button._actions) == set(Find)
+        assert checked == [Find.MARK]
+
+    def test_the_explicit_keys_keep_their_own_kinds(self, window: MainWindow) -> None:
+        """Choosing a target in the toolbar must not take `Ctrl+Shift+G` away
+        from somebody who already knows it."""
+        window.jump_button.set_target(Find.MARK)
+
+        assert window.action_next_error is not window.action_next_jump
+        assert window.action_next_marker is not window.action_next_jump
+
+    def test_the_choice_is_remembered(self, window: MainWindow) -> None:
+        """It is a way of reading rather than a property of a capture, so it
+        travels with the geometry and not with the filter."""
+        window.jump_button.set_target(Find.FAULT)
+        window._save_layout()
+
+        assert MainWindow()._jump is Find.FAULT
 
 
 # -- the toolbar -------------------------------------------------------------

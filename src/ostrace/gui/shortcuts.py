@@ -50,6 +50,12 @@ class Binding:
     aliases: tuple[str, ...] = ()
     #: Which menu it belongs to.
     menu: str = "view"
+    #: Which run of related items inside that menu. A separator is drawn where
+    #: this changes, so the grouping is a property of the table rather than a
+    #: list of insertion points kept in step with it by hand. The View menu had
+    #: eleven items in one undivided column -- four pairs of Next/Previous, two
+    #: jumps and a theme toggle -- which is a list nobody reads to the end of.
+    group: str = ""
     checkable: bool = False
     #: One line for the help sheet. Says what it is *for*, not what it does.
     description: str = ""
@@ -61,6 +67,7 @@ BINDINGS: tuple[Binding, ...] = (
         "&Capture",
         "Ctrl+R",
         menu="capture",
+        group="device",
         description="Start capturing from the attached device",
     ),
     Binding(
@@ -68,6 +75,7 @@ BINDINGS: tuple[Binding, ...] = (
         "&Pause",
         "Ctrl+P",
         menu="capture",
+        group="device",
         checkable=True,
         description="Freeze the view. The capture keeps running and keeps writing to disk",
     ),
@@ -76,6 +84,7 @@ BINDINGS: tuple[Binding, ...] = (
         "&Disconnect",
         "Ctrl+D",
         menu="capture",
+        group="device",
         description="Release the device and end the capture",
     ),
     Binding(
@@ -83,13 +92,23 @@ BINDINGS: tuple[Binding, ...] = (
         "&Open Capture…",
         QKeySequence.StandardKey.Open,
         menu="capture",
+        group="file",
         description="Open a session directory or a .jsonl.gz capture",
+    ),
+    Binding(
+        "close",
+        "&Close Capture",
+        QKeySequence.StandardKey.Close,
+        menu="capture",
+        group="file",
+        description="Empty the window: no capture, no filter, no selection",
     ),
     Binding(
         "export",
         "&Export…",
         "Ctrl+E",
         menu="capture",
+        group="file",
         description="Write the capture out in one of the six formats",
     ),
     Binding(
@@ -97,6 +116,7 @@ BINDINGS: tuple[Binding, ...] = (
         "&Copy",
         QKeySequence.StandardKey.Copy,
         menu="edit",
+        group="clipboard",
         description="Copy the selected rows as tab-separated text",
     ),
     Binding(
@@ -105,6 +125,7 @@ BINDINGS: tuple[Binding, ...] = (
         QKeySequence.StandardKey.Find,
         aliases=("/",),
         menu="edit",
+        group="selection",
         description="Jump to the search box",
     ),
     Binding(
@@ -112,7 +133,8 @@ BINDINGS: tuple[Binding, ...] = (
         "Dese&lect",
         "Esc",
         menu="edit",
-        description="Let go of the selected row, and let the tail follow again",
+        group="selection",
+        description="Let go of the selected row, without moving the view",
     ),
     Binding(
         "mark",
@@ -120,16 +142,23 @@ BINDINGS: tuple[Binding, ...] = (
         "Ctrl+M",
         aliases=("M",),
         menu="edit",
+        group="marks",
         description="Mark the current row, or unmark it",
     ),
     Binding(
-        "clear_marks", "Clear &Marks", "Ctrl+Shift+M", menu="edit", description="Remove every mark"
+        "clear_marks",
+        "Clear &Marks",
+        "Ctrl+Shift+M",
+        menu="edit",
+        group="marks",
+        description="Remove every mark",
     ),
     Binding(
         "top",
         "Go to &Top",
         QKeySequence.StandardKey.MoveToStartOfDocument,
         aliases=("G, G",),
+        group="ends",
         description="First row",
     ),
     Binding(
@@ -137,13 +166,35 @@ BINDINGS: tuple[Binding, ...] = (
         "Go to &Bottom",
         QKeySequence.StandardKey.MoveToEndOfDocument,
         aliases=("Shift+G",),
+        group="ends",
         description="Last row. Press again at the bottom to resume following",
+    ),
+    # `F3` is the find-next key on Windows and the one klogg binds, which is
+    # exactly the meaning wanted here: *next of whatever I am looking for*. The
+    # per-kind bindings below keep their own keys, so choosing a target in the
+    # toolbar never takes a key away from somebody who knows the explicit one.
+    Binding(
+        "next_jump",
+        "&Next Jump",
+        "F3",
+        aliases=("N",),
+        group="jump",
+        description="Next row of the kind the toolbar is set to jump between",
+    ),
+    Binding(
+        "previous_jump",
+        "&Previous Jump",
+        "Shift+F3",
+        aliases=("Shift+N",),
+        group="jump",
+        description="Previous row of the kind the toolbar is set to jump between",
     ),
     Binding(
         "next_error",
         "Next &Error",
         "Ctrl+Shift+E",
         aliases=("E",),
+        group="kinds",
         description="Next Error or Fault, wrapping at the end",
     ),
     Binding(
@@ -151,6 +202,7 @@ BINDINGS: tuple[Binding, ...] = (
         "Previous Erro&r",
         "Ctrl+Alt+Shift+E",
         aliases=("Shift+E",),
+        group="kinds",
         description="Previous Error or Fault",
     ),
     Binding(
@@ -158,6 +210,7 @@ BINDINGS: tuple[Binding, ...] = (
         "Next &Gap",
         "Ctrl+Shift+G",
         aliases=("]",),
+        group="kinds",
         description="Next gap or eviction notice — where records are missing",
     ),
     Binding(
@@ -165,17 +218,35 @@ BINDINGS: tuple[Binding, ...] = (
         "Previous Ga&p",
         "Ctrl+Alt+Shift+G",
         aliases=("[",),
+        group="kinds",
         description="Previous gap or eviction notice",
     ),
-    Binding("next_mark", "Next Mar&k", "Ctrl+Shift+N", description="Next marked row"),
-    Binding("previous_mark", "Previous Mar&k", "Ctrl+Shift+P", description="Previous marked row"),
     Binding(
-        "step_down", "Next Row", "F8", description="Next row, even when the detail pane has focus"
+        "next_mark",
+        "Next Mar&k",
+        "Ctrl+Shift+N",
+        group="kinds",
+        description="Next marked row",
+    ),
+    Binding(
+        "previous_mark",
+        "Previous Mar&k",
+        "Ctrl+Shift+P",
+        group="kinds",
+        description="Previous marked row",
+    ),
+    Binding(
+        "step_down",
+        "Next Row",
+        "F8",
+        group="rows",
+        description="Next row, even when the detail pane has focus",
     ),
     Binding(
         "step_up",
         "Previous Row",
         "F7",
+        group="rows",
         description="Previous row, even when the detail pane has focus",
     ),
     Binding(
@@ -183,6 +254,7 @@ BINDINGS: tuple[Binding, ...] = (
         "&Dark Mode",
         "Ctrl+Shift+T",
         menu="view",
+        group="theme",
         checkable=True,
         description="Use the dark theme regardless of what the system is set to",
     ),

@@ -19,15 +19,33 @@ visible to a human:
 - **`process_path` and `image_path` are different things.** `filename` is the
   process executable and `image_name` is the library loaded into it; they read
   backwards and differ in about nine records in ten.
+
+**The shape is two columns and a message block**, which is a correction. It was
+a single-column form of twelve short rows, and against a real window that reads
+as a mostly empty panel with a wall of labels down the left: the message -- the
+one field with anything to say -- got the same narrow strip as ``PID``, and the
+rest of the width was nothing at all. The fields are short and the message is
+long, so they are laid out as what they are.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFormLayout, QLabel, QScrollArea, QWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QSizePolicy,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
+from ostrace.gui.fonts import monospace
 from ostrace.gui.markers import Eviction
 from ostrace.model import Gap, Record
 
@@ -42,58 +60,143 @@ __all__ = ["DetailPane"]
 #: so a value copied out of here matches what a bundle would contain.
 ABSENT = "-"
 
+#: How many field columns the grid has. Two, because the fields are short: at
+#: one column a dozen of them leave most of the pane empty and push the message
+#: below the fold, and at three the labels stop lining up with anything.
+_COLUMNS = 2
 
-def _offset(moment: datetime) -> str:
-    """The UTC offset a timestamp carries, spelled out.
-
-    A naive timestamp is rejected on read rather than guessed at, so this
-    should never be ``ABSENT`` -- but it says so rather than crashing if one
-    ever gets through, because a detail pane that raises is worse than one
-    that admits it does not know.
-    """
-    delta = moment.utcoffset()
-    if delta is None:
-        return ABSENT
-    total = int(delta.total_seconds())
-    sign = "+" if total >= 0 else "-"
-    hours, remainder = divmod(abs(total), 3600)
-    return f"UTC{sign}{hours:02d}:{remainder // 60:02d}"
+#: Between a label and its value, and between the two columns.
+_GAP = 10
 
 
 class DetailPane(QScrollArea):
     """A read-only form. Selectable text, because the point is to copy from it."""
+
+    #: The close control was pressed. The window turns this into a deselect,
+    #: rather than the pane hiding itself: a pane that can disappear is a pane
+    #: the user has to discover how to get back.
+    closed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWidgetResizable(True)
 
         self._body = QWidget(self)
-        self._form = QFormLayout(self._body)
-        self._form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        self._root = QVBoxLayout(self._body)
+        self._root.setSpacing(_GAP)
         self.setWidget(self._body)
+
+        self._title = QLabel(self._body)
+        self._title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._close = QToolButton(self._body)
+        self._close.setText("✕")
+        self._close.setAutoRaise(True)
+        self._close.setToolTip("Close this record (Esc)")
+        self._close.clicked.connect(self.closed)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.addWidget(self._title, stretch=1)
+        header.addWidget(self._close)
+        self._root.addLayout(header)
+
+        self._grid = QGridLayout()
+        self._grid.setHorizontalSpacing(_GAP)
+        self._grid.setVerticalSpacing(2)
+        # The value columns take the width; the label columns take what their
+        # text needs. Without this the four columns divide the pane evenly and
+        # `PID` is given as much room as a process path.
+        for column in range(_COLUMNS):
+            self._grid.setColumnStretch(column * 2 + 1, 1)
+        self._root.addLayout(self._grid)
+
+        self._message_heading = QLabel("Message", self._body)
+        self._message = QLabel(self._body)
+        self._message.setFont(monospace())
+        self._message.setWordWrap(True)
+        self._message.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._message.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self._message.setFrameShape(QFrame.Shape.StyledPanel)
+        self._message.setMargin(_GAP // 2)
+        # `setWordWrap` is what turns a label's height-for-width on, by editing
+        # its size policy. Replacing that policy afterwards -- which an explicit
+        # `setSizePolicy` does -- switches it back off, and a message block that
+        # does not report a height for its width is given one line's worth and
+        # clips the rest. Set the flag on the policy the label already has.
+        policy = self._message.sizePolicy()
+        policy.setVerticalPolicy(QSizePolicy.Policy.Minimum)
+        policy.setHeightForWidth(True)
+        self._message.setSizePolicy(policy)
+        self._root.addWidget(self._message_heading)
+        self._root.addWidget(self._message)
+        self._root.addStretch(1)
 
         self._rows: dict[str, QLabel] = {}
         self.clear()
 
-    def _set(self, fields: list[tuple[str, str]]) -> None:
-        """Rebuild the form. Called on selection, which is a human action."""
-        while self._form.rowCount():
-            self._form.removeRow(0)
-        self._rows.clear()
-        for name, value in fields:
-            label = QLabel(value, self._body)
-            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            label.setWordWrap(True)
-            self._form.addRow(f"{name}:", label)
-            self._rows[name] = label
+    # -- building --------------------------------------------------------
+
+    def _set(
+        self,
+        fields: list[tuple[str, str]],
+        *,
+        title: str = "",
+        message: str | None = None,
+    ) -> None:
+        """Rebuild the pane. Called on selection, which is a human action."""
+        self._title.setText(title)
+        self._close.setVisible(bool(title))
+        self._fill(fields)
+
+        self._message.setText(message or "")
+        self._message.setVisible(message is not None)
+        self._message_heading.setVisible(message is not None)
+        if message is not None:
+            self._rows["Message"] = self._message
+
         self._fit_body()
+
+    def _fill(self, fields: list[tuple[str, str]]) -> None:
+        """Lay the label/value pairs out down one column and then the next.
+
+        Column-major rather than row-major: the pairs arrive in a meaningful
+        order -- the clock fields together, then what emitted the record -- and
+        reading left-to-right across two columns would interleave them.
+        """
+        while self._grid.count():
+            item = self._grid.takeAt(0)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widget.deleteLater()
+        self._rows.clear()
+
+        per_column = -(-len(fields) // _COLUMNS)  # ceiling, so the last column is the short one
+        for index, (name, value) in enumerate(fields):
+            row, column = (index % per_column, index // per_column) if per_column else (0, 0)
+            label = QLabel(f"{name}:", self._body)
+            label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+            shown = QLabel(value, self._body)
+            shown.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            shown.setWordWrap(True)
+            self._grid.addWidget(label, row, column * 2)
+            self._grid.addWidget(shown, row, column * 2 + 1)
+            # Shown explicitly, and this is load-bearing rather than tidy. A
+            # widget added to the layout of an already-visible parent is not
+            # made visible until the event loop next runs, and a layout ignores
+            # a hidden item entirely: `QGridLayout.hasHeightForWidth` was
+            # therefore false and `heightForWidth` returned -1, so the height
+            # computed for the pane a line later left the whole grid out of it.
+            # Measured: 189 pixels for contents that need 433.
+            label.show()
+            shown.show()
+            self._rows[name] = shown
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._fit_body()
 
     def _fit_body(self) -> None:
-        """Give the form the height its wrapped text actually needs.
+        """Give the contents the height their wrapped text actually needs.
 
         A word-wrapped `QLabel` reports a minimum height of about one line,
         because it can always wrap harder. Inside a scroll area that is taken
@@ -110,14 +213,27 @@ class DetailPane(QScrollArea):
         out. Without it the pane sizes the new record against the *previous*
         one's height -- measured, twelve fields given 8 pixels each where they
         need 16, so every row rendered as its own top half.
+
+        The other half of that is in `_fill`, which has to *show* the rows it
+        adds: a layout skips hidden items, so an unshown grid reports no
+        height-for-width at all and this measures the pane without it.
         """
         width = self.viewport().width()
         if width <= 0:
             return
-        self._form.activate()
-        needed = self._form.heightForWidth(width)
+        # Invalidate before activating, and the *nested* layout as well as the
+        # root. A layout caches what it last worked out, and `activate()` alone
+        # recomputes the root from children that are still holding cached
+        # answers for the rows they had a moment ago -- measured here as 189
+        # pixels where the same call returns 433 one event loop later, which
+        # renders every row as its own top half. The single-layout version of
+        # this pane needed only `activate()`; the two-layer one needs both.
+        self._root.activate()
+        needed = self._root.heightForWidth(width)
         if needed > 0:
             self._body.setMinimumHeight(needed)
+
+    # -- what to show ----------------------------------------------------
 
     def clear(self) -> None:
         self._set([("Nothing selected", "Select a record to see every field of it.")])
@@ -155,9 +271,12 @@ class DetailPane(QScrollArea):
             ("Thread", str(record.thread_id) if record.thread_id is not None else ABSENT),
             ("Image", record.image_path or ABSENT),
             ("Platform", record.platform.display_name),
-            ("Message", record.message),
         ]
-        self._set(fields)
+        self._set(
+            fields,
+            title=f"{record.level.title} · {record.process_label}",
+            message=record.message,
+        )
 
     def show_gap(self, gap: Gap) -> None:
         """Display a gap.
@@ -179,7 +298,8 @@ class DetailPane(QScrollArea):
                         "never received and nothing buffers them."
                     ),
                 ),
-            ]
+            ],
+            title="Gap in the capture",
         )
 
     def show_eviction(self, eviction: Eviction) -> None:
@@ -202,7 +322,8 @@ class DetailPane(QScrollArea):
                         "Export the capture, or open it again, to read them."
                     ),
                 ),
-            ]
+            ],
+            title="Trimmed from the view",
         )
 
     def show_item(self, item: Record | Gap | Eviction, host_now: datetime | None = None) -> None:
@@ -218,3 +339,20 @@ class DetailPane(QScrollArea):
         """The displayed value of one field, or ``None`` if it is not shown."""
         label = self._rows.get(name)
         return label.text() if label is not None else None
+
+
+def _offset(moment: datetime) -> str:
+    """The UTC offset a timestamp carries, spelled out.
+
+    A naive timestamp is rejected on read rather than guessed at, so this
+    should never be ``ABSENT`` -- but it says so rather than crashing if one
+    ever gets through, because a detail pane that raises is worse than one
+    that admits it does not know.
+    """
+    delta = moment.utcoffset()
+    if delta is None:
+        return ABSENT
+    total = int(delta.total_seconds())
+    sign = "+" if total >= 0 else "-"
+    hours, remainder = divmod(abs(total), 3600)
+    return f"UTC{sign}{hours:02d}:{remainder // 60:02d}"
