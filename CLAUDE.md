@@ -1,9 +1,15 @@
 # ostrace
 
-Cross-platform iOS log viewer, complete through 0.1.0: the model, sources and
-storage (phases 0-1), `analysis/` plus all six exporters (phase 2), the command
-line — `devices`, `capture`, `doctor`, `export` (phase 3), and the PySide6
-viewer in `gui/` (phase 4).
+Cross-platform iOS log viewer, released: 0.1.1 is on PyPI. That covers the
+model, sources and storage (phases 0-1), `analysis/` plus all six exporters
+(phase 2), the command line — `devices`, `capture`, `doctor`, `export`
+(phase 3), the PySide6 viewer in `gui/` (phase 4), and the release machinery
+itself (phase 5).
+
+0.1.0 does not exist. It was published and withdrawn the next day over the
+fixtures inside its `sdist`, and the number will not be reused — so there is
+deliberately no `v0.1.0` tag, and a commit or document referring to one is
+wrong rather than missing.
 
 Read when relevant, rather than up front: `docs/adr/` for why decisions were
 taken, `docs/formats/` for the on-disk contracts, `CONTRIBUTING.md` for setup,
@@ -17,14 +23,26 @@ taken, `docs/formats/` for the on-disk contracts, `CONTRIBUTING.md` for setup,
 ## Commands
 
 ```bash
-pip install -e . --group dev     # PEP 735, needs pip >= 25.1 -- not .[dev]
+pip install -e ".[gui]" --group dev   # PEP 735, needs pip >= 25.1 -- not .[dev]
 ruff check . && ruff format --check .
 zizmor --persona=regular .github/workflows
 mypy --platform linux && mypy --platform win32 && mypy --platform darwin
-pytest -m "not device"
+pytest -m "not device and not gui"
+QT_QPA_PLATFORM=offscreen pytest -m gui
+python tools/audit_capture.py tests/fixtures/ios26-mixed.jsonl.gz
 ```
 
-All of these run in CI. mypy runs three times on purpose: it narrows `sys.platform`
+**Install the `gui` extra even when not touching the GUI.** Without PySide6,
+mypy cannot see `src/ostrace/gui` at all and reports success on a package it
+never opened, and every GUI test turns into a skip. CI's lint job installs it
+for exactly that reason.
+
+All of these run in CI, which additionally runs CodeQL from GitHub's default
+setup — there is no file for it under `.github/workflows/`, so it is invisible
+to anyone reading the repository alone. The GUI tests are a job of their own on
+all three operating systems, which is why they are a separate command here.
+
+mypy runs three times on purpose: it narrows `sys.platform`
 to whatever it runs on, so a single pass leaves the other platforms' branches
 unchecked — which is where the bugs would be, since one machine can only ever
 run one of the three.
