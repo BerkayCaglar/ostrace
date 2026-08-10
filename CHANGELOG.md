@@ -224,6 +224,33 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Fixed
 
+- **A gap row said `ConnectionTerminatedError` where it should have said what
+  happened.** Pulling the cable mid-capture wrote
+  `---- gap 14:22:31+00:00 to 14:22:39+00:00 (ConnectionTerminatedError) ----`
+  into the log. Several `pymobiledevice3` exceptions are raised with no message
+  at all, and `errors.translate` fell back to the upstream *class name*, which
+  became the error's message, which became the gap's `reason`, which is printed
+  by all six exporters and shown in the viewer's table and detail pane.
+
+  Of every line ostrace puts in front of a reader, the gap row is the one whose
+  entire purpose is to explain itself — it is there because records are missing
+  and somebody has to be told why. Each entry in the translation table now
+  carries its own sentence for the case where upstream supplies none: the
+  pulled cable reads `(the connection to the device was lost)`. An upstream
+  message is still passed through when there is one, and the unrecognised case
+  at the end of `translate` still names the class, because that is a bug report
+  about that class and naming it is the useful thing.
+
+  The sentences are per *entry*, not per error class: four upstream exceptions
+  become `DeviceNotPairedError`, and never trusted, pairing failed, and a
+  pairing record the device has since forgotten are three different situations
+  that the class alone can no longer distinguish.
+
+  Sessions already on disk are untouched and stay valid — `reason` is free text
+  and always was — so a capture written by 0.1.1 still reads back with a class
+  name in it. `docs/formats/session-file.md` now says so, and says what the
+  field is: prose for a person, not an identifier anything may switch on.
+
 - **The detail pane drew the previous record's rows over the new one.**
   Replacing the contents took each old row out of the grid and handed it to
   `deleteLater`, which destroys it whenever the event loop next drains — and

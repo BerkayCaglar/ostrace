@@ -19,6 +19,8 @@ exception names.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 __all__ = [
     "DeviceError",
     "DeviceLockedError",
@@ -175,23 +177,103 @@ class DestinationInUseError(StorageError):
 # Translation from pymobiledevice3
 # --------------------------------------------------------------------------
 
+
+class _Translation(NamedTuple):
+    """One upstream exception name, the error it becomes, and what it says.
+
+    ``fallback`` is the message used when the upstream exception carries none
+    of its own, which several of them do not: ``str(exc)`` is then empty and
+    there is nothing to pass on. It has to be written here rather than derived,
+    because the only thing available to derive it from is the class name, and
+    the class name is not a sentence.
+
+    It matters more than an exception message usually would, because it does
+    not only reach a traceback. A recoverable outage mid-capture becomes the
+    ``reason`` of a :class:`~ostrace.model.Gap`, and the gap row is the one row
+    in a log that exists to explain itself -- printed by every exporter and
+    shown in the viewer's table and detail pane. So these are phrased as the
+    rest of the user-facing text is: a lower-case fragment, no full stop, and
+    no class names.
+    """
+
+    upstream: str
+    ours: type[DeviceError | SourceError]
+    fallback: str
+
+
 # Matched most specific first, since the upstream hierarchy overlaps: a
 # ConnectionFailedToUsbmuxdError is also a ConnectionFailedError is also a
 # MuxException, and only the first of those tells the user anything useful.
-_TRANSLATIONS: tuple[tuple[str, type[DeviceError | SourceError]], ...] = (
-    ("ConnectionFailedToUsbmuxdError", UsbmuxUnavailableError),
-    ("NotPairedError", DeviceNotPairedError),
-    ("InvalidHostIDError", DeviceNotPairedError),
-    ("FatalPairingError", DeviceNotPairedError),
-    ("PairingError", DeviceNotPairedError),
-    ("PasswordRequiredError", DeviceLockedError),
-    ("NoDeviceConnectedError", NoDeviceFoundError),
-    ("DeviceNotFoundError", NoDeviceFoundError),
-    ("ConnectionTerminatedError", StreamInterruptedError),
-    ("InvalidServiceError", SourceUnavailableError),
-    ("MissingValueError", SourceUnavailableError),
-    ("ConnectionFailedError", UsbmuxUnavailableError),
-    ("MuxException", UsbmuxUnavailableError),
+# That ordering is also why near-duplicate entries keep distinct sentences:
+# reaching DeviceNotPairedError through InvalidHostIDError means something
+# different from reaching it through NotPairedError, and the entry is the last
+# place that difference still exists.
+_TRANSLATIONS: tuple[_Translation, ...] = (
+    _Translation(
+        "ConnectionFailedToUsbmuxdError",
+        UsbmuxUnavailableError,
+        "could not reach the usbmux service on this computer",
+    ),
+    _Translation(
+        "NotPairedError",
+        DeviceNotPairedError,
+        "the device has not been paired with this computer",
+    ),
+    _Translation(
+        "InvalidHostIDError",
+        DeviceNotPairedError,
+        "the device does not recognise this computer's pairing record",
+    ),
+    _Translation(
+        "FatalPairingError",
+        DeviceNotPairedError,
+        "pairing with the device failed",
+    ),
+    _Translation(
+        "PairingError",
+        DeviceNotPairedError,
+        "pairing with the device did not complete",
+    ),
+    _Translation(
+        "PasswordRequiredError",
+        DeviceLockedError,
+        "the device is locked",
+    ),
+    _Translation(
+        "NoDeviceConnectedError",
+        NoDeviceFoundError,
+        "no device is connected",
+    ),
+    _Translation(
+        "DeviceNotFoundError",
+        NoDeviceFoundError,
+        "the device is no longer connected",
+    ),
+    _Translation(
+        "ConnectionTerminatedError",
+        StreamInterruptedError,
+        "the connection to the device was lost",
+    ),
+    _Translation(
+        "InvalidServiceError",
+        SourceUnavailableError,
+        "the device did not offer the log service",
+    ),
+    _Translation(
+        "MissingValueError",
+        SourceUnavailableError,
+        "the device did not report something the log service needs",
+    ),
+    _Translation(
+        "ConnectionFailedError",
+        UsbmuxUnavailableError,
+        "could not connect to the usbmux service",
+    ),
+    _Translation(
+        "MuxException",
+        UsbmuxUnavailableError,
+        "the usbmux service failed",
+    ),
 )
 
 
@@ -203,15 +285,23 @@ def translate(exc: BaseException) -> OstraceError:
     removed upstream exception degrades to a generic error instead of an
     ImportError at start-up -- the library's 10.x line has already removed a
     public API once.
+
+    An upstream message is passed through when there is one, and replaced by
+    the entry's own sentence when there is not. Falling back to the class name
+    was how ``ConnectionTerminatedError`` came to be printed at the reader in
+    the middle of a log file, in the gap row of all six export formats.
     """
     if isinstance(exc, OstraceError):
         return exc
 
     names = {klass.__name__ for klass in type(exc).__mro__}
-    for upstream, ours in _TRANSLATIONS:
+    for upstream, ours, fallback in _TRANSLATIONS:
         if upstream in names:
-            return ours(str(exc) or upstream)
+            return ours(str(exc) or fallback)
 
+    # The class name earns its place here and nowhere above: this is the
+    # unrecognised case, the report we are asking for is about that class, and
+    # naming it is the only specific thing left to say.
     detail = str(exc) or type(exc).__name__
     return DeviceError(
         f"{type(exc).__name__}: {detail}",

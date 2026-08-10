@@ -24,6 +24,7 @@ from ostrace.errors import (
     NoDeviceFoundError,
     StreamInterruptedError,
     UsbmuxUnavailableError,
+    translate,
 )
 from ostrace.model import DeviceInfo, Gap, Level, Platform, Record
 from ostrace.sources import os_trace
@@ -271,6 +272,29 @@ class TestReconnect:
         assert [type(item).__name__ for item in items] == ["Record", "Gap", "Record"]
         assert isinstance(items[1], Gap)
         assert items[1].reason == "device disconnected"
+
+    def test_the_gap_reason_is_readable_when_the_device_error_said_nothing(
+        self,
+        seam: types.SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The pulled-cable case, end to end from the exception that caused it.
+
+        `ConnectionTerminatedError` is raised upstream with no message, so the
+        gap took the class name and printed it at the reader: `---- gap ... to
+        ... (ConnectionTerminatedError) ----`, in every export and both viewer
+        panes. The reason travels this far from `translate`, so the outage is
+        built the same way here rather than handed in ready-made.
+        """
+        upstream = type("ConnectionTerminatedError", (Exception,), {})
+        emitting([record(0), translate(upstream())], [record(1)], monkeypatch=monkeypatch)
+        source = OsTraceSource(reconnect=ReconnectPolicy(delay=0.0))
+        items = asyncio.run(take(source, 3))
+
+        gap = items[1]
+        assert isinstance(gap, Gap)
+        assert gap.reason == "the connection to the device was lost"
+        assert "Error" not in gap.reason
 
     def test_a_recoverable_error_that_is_not_a_stream_interruption_also_retries(
         self,

@@ -967,3 +967,9 @@ has been wrong in a way only a picture could reveal.
   not have. Noted because klogg's single shared flag has been issue #211 since
   2020 and retrofitting it is the expensive order.
 - **A `Gap` reason taxonomy.** A session-format decision, not a GUI one (§3).
+  Still out of scope, and now with one side of it settled: `reason` is
+  documented as prose for a person, so a taxonomy would arrive as a second
+  field beside it rather than as a vocabulary imposed on this one. What did
+  change is that the prose is prose — the reasons that used to fall back to a
+  `pymobiledevice3` class name are sentences now, which is a wording fix, not
+  the taxonomy.

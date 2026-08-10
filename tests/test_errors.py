@@ -24,6 +24,7 @@ from ostrace.errors import (
     UsbmuxUnavailableError,
     translate,
 )
+from ostrace.errors import _Translation as Translation
 
 
 def fake(name: str, base: type[Exception] = Exception) -> type[Exception]:
@@ -71,12 +72,54 @@ class TestTranslate:
         assert "details here" in result.message
         assert "report it" in result.hint
 
-    def test_an_exception_with_no_message_still_names_the_class(self) -> None:
-        assert "NotPairedError" in translate(fake("NotPairedError")()).message
+    def test_an_upstream_message_is_passed_through_when_there_is_one(self) -> None:
+        assert translate(fake("NotPairedError")("device said no")).message == "device said no"
 
     def test_our_own_errors_pass_through_unchanged(self) -> None:
         original = DeviceLockedError("locked")
         assert translate(original) is original
+
+
+class TestMessagelessUpstreamExceptions:
+    """Several upstream exceptions are raised with no message at all.
+
+    The fallback used to be the upstream *class name*, which was fine in a
+    traceback and wrong everywhere else it went. A cable pulled mid-capture
+    wrote `(ConnectionTerminatedError)` into the gap row -- the one row in a
+    log whose entire job is to explain itself to whoever reads it -- and from
+    there into all six export formats and both viewer panes.
+    """
+
+    def test_the_reported_case_reads_as_a_sentence(self) -> None:
+        message = translate(fake("ConnectionTerminatedError")()).message
+        assert message == "the connection to the device was lost"
+
+    @pytest.mark.parametrize("entry", TRANSLATIONS, ids=lambda entry: entry.upstream)
+    def test_every_entry_falls_back_to_its_own_sentence(self, entry: Translation) -> None:
+        assert translate(fake(entry.upstream)()).message == entry.fallback
+
+    @pytest.mark.parametrize("entry", TRANSLATIONS, ids=lambda entry: entry.upstream)
+    def test_no_sentence_is_jargon(self, entry: Translation) -> None:
+        """What separates a sentence from a class name, mechanically.
+
+        Naming the class is still right in one place -- the unrecognised case
+        at the end of `translate`, where it is the only specific thing left to
+        say -- and this is deliberately not that.
+        """
+        assert "Error" not in entry.fallback
+        assert "Exception" not in entry.fallback
+        assert entry.fallback[0].islower(), "reads mid-sentence"
+        assert not entry.fallback.endswith("."), "gap rows put it in parentheses"
+
+    def test_the_sentences_are_not_all_the_same_one(self) -> None:
+        """A shared sentence per error class would be easier and worth less.
+
+        Four entries land on DeviceNotPairedError alone, and how you got there
+        -- never trusted, or trusted by a host record the device has since
+        forgotten -- is the difference between two different remedies.
+        """
+        sentences = [entry.fallback for entry in TRANSLATIONS]
+        assert len(set(sentences)) == len(sentences)
 
 
 class TestHints:
@@ -150,7 +193,9 @@ class TestUpstreamNamesStillExist:
         import pymobiledevice3.exceptions as upstream
 
         missing = [
-            name for name, _ in TRANSLATIONS if not isinstance(getattr(upstream, name, None), type)
+            entry.upstream
+            for entry in TRANSLATIONS
+            if not isinstance(getattr(upstream, entry.upstream, None), type)
         ]
         assert missing == [], (
             f"pymobiledevice3 no longer defines {missing}; update _TRANSLATIONS in errors.py"

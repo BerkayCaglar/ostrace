@@ -108,5 +108,5 @@ def make_gap(index: int = 0) -> Gap:
     return Gap(
         start=start,
         end=start + timedelta(seconds=4 + index),
-        reason="ConnectionTerminatedError",
+        reason="the connection to the device was lost",
     )
