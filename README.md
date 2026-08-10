@@ -9,8 +9,17 @@ NOTICE-tier text that the legacy `syslog_relay` path returns.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-dark.png">
-  <img alt="The ostrace viewer showing a capture from an iPhone, with an error selected and every field of it in the detail pane" src="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-light.png">
+  <img alt="The ostrace viewer on Windows, showing a capture from an iPhone with an error selected and every field of it in the detail pane" src="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-light.png">
 </picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-macos-dark.png">
+  <img alt="The same window on macOS, drawn in the system font, with no menu bar inside it because macOS puts one in the screen menu instead" src="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-macos-light.png">
+</picture>
+
+*Windows above, macOS below — the same capture and the same code, in whichever
+colour scheme you are reading this in. The macOS window carries no menu bar of
+its own: there it belongs to the screen.*
 
 ---
 

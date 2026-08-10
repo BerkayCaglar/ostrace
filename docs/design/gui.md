@@ -657,6 +657,14 @@ gate. It renders each screen in both schemes and uploads with
 `if-no-files-found: error`, so a silent capture failure fails the run rather
 than producing an empty artifact nobody notices.
 
+The two images in the README come from there. The **macOS pair does not**, and
+the difference is the point: under `offscreen` the interface font resolves to
+Qt's generic `Sans Serif` rather than to `.AppleSystemUIFont`, so the job's own
+macOS picture is right about layout, palette and elision and wrong about the
+one thing a reader looks at a macOS screenshot for. Those two were rendered
+under `cocoa` on a real Mac. Anyone regenerating them needs one; regenerating
+the Windows pair needs only the job.
+
 ### The screenshot job cannot show the macOS menu bar, and that is structural
 
 The first run made this plain. On macOS under the offscreen plugin the window

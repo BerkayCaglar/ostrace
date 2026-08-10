@@ -12,6 +12,23 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
+### Changed
+
+- **The README shows the window as it is, and shows it on both platforms.** The
+  committed screenshots were taken before 0.1.1 and had gone quietly stale: no
+  jump-target control in the toolbar, no follow indicator in the status bar, and
+  a detail pane that is a single narrow column of twelve rows. A reader
+  comparing them against the program they had just installed would have found
+  three differences on the first screen.
+
+  There are now two pairs. The Windows one comes from the screenshot job, as
+  before. The macOS one could not: that job runs the offscreen plugin, which
+  resolves the interface font to Qt's generic `Sans Serif` rather than to
+  `.AppleSystemUIFont` — right about layout and palette, wrong about the one
+  thing anybody looks at a macOS screenshot for. It was rendered under `cocoa`
+  on a real Mac, which is the first picture of this program on macOS that shows
+  the face a Mac user actually sees.
+
 ### Fixed
 
 - **The detail pane drew the previous record's rows over the new one.**
