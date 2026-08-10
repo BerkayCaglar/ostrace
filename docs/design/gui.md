@@ -410,19 +410,82 @@ banner with a recovery action**, not a toolbar icon:
 | Everything filtered out | All *N* records are hidden by the filter | Clear filter | ships |
 | No device | wording from the error | Retry | ships |
 | Empty capture | This capture contains no records | Open another | ships |
-| Disconnected mid-capture | Device disconnected — reconnecting | Disconnect | **not built** |
-| Capture stopped | wording from the error | Retry | ships (not listed here originally) |
+| Disconnected mid-capture | Device stopped answering — reconnecting | Disconnect | ships |
+| Capture stopped | wording from the error | Diagnose… | ships (not listed here originally) |
+| Capture finished | *N* records | Export… | ships (not listed here originally) |
 | Paused queue overflowed | *N* records did not fit; they are in the file | Resume | ships (not listed here originally) |
 | Truncated capture opened | the tail is missing | Dismiss | ships (not listed here originally) |
 
 Logcat ships the first two with a one-click **Clear filter**; they are the two
 that generate support questions everywhere else.
 
-The missing one is the reconnect. `sources/os_trace.py` retries an outage for
-up to a minute and the viewer says nothing while it does — the user sees a
-stream that has stopped, and finds out what happened only when a `Gap` row
-appears or the capture gives up. That is precisely the invisible state this
-section exists for.
+**The reconnect is built, and it needed something the stream could not give.**
+`sources/os_trace.py` retries an outage for up to a minute, and the viewer used
+to say nothing while it did: the user saw a stream that had stopped and found
+out what had happened only when a `Gap` row appeared or the capture gave up.
+
+The `Gap` is not enough on its own and never could be. It is the *record* of an
+outage and stays that — it travels in the stream in position, which is where
+its meaning is — but it can only be written once the device is back, and the
+question somebody staring at a stalled window has is being asked several
+seconds earlier. So `OsTraceSource` takes an `on_state` callback and says
+`reconnecting` before it waits and `streaming` after it reconnects.
+
+Three things about that callback are deliberate. It is a **constructor argument
+on the concrete source**, not a method on `LogSource`: reporting a connection is
+a property of one implementation, and a consumer that took the protocol and
+reached for a method only one side has is what that protocol exists to prevent.
+The two words live in `sources/base.py` rather than in `sources/os_trace.py`,
+because the listener is a *window* and importing them from there would pull
+pymobiledevice3 — forty packages — into the path that merely opens a saved
+capture, and would make the window unimportable under `-O`. And a listener that
+raises is **swallowed**: the records are the product and the notification is a
+courtesy, so a device released because a banner threw would lose everything the
+device says next.
+
+The window turns it into a banner offering `Disconnect`, which is the only
+decision left — the source is already retrying. Coming back clears that banner
+and *only* that one, matched on its own message: a pause raised during the
+outage is a different state that is still true, and clearing it would leave the
+view frozen with nothing on screen saying why.
+
+**Two dead ends got the right action rather than a second Retry.** A capture
+that ran and then died now offers `Diagnose…`, because pressing Capture again
+is one click away on the toolbar and what the user does not have is any way to
+find out why — see §6a. A capture that finished offers `Export…`, which until
+now was a moment nothing marked at all: the records stopped arriving and the
+window said so in no way a person notices.
+
+---
+
+## 6a. The Doctor window
+
+The checks in `devices/doctor.py` have existed since phase 1 and only
+`ostrace doctor` could run them, so somebody who installed this for the window
+met a dead end at exactly the moment something was wrong. It is reachable from
+`Help`, on `Ctrl+Shift+D`, and offered as the action on the banner of a capture
+that died.
+
+It **runs on a thread**. `doctor.run` opens a lockdown session and waits on
+sockets with a two-second timeout apiece; on the interface thread that is a
+window frozen for as long as the diagnosis takes, which is longest in exactly
+the case somebody is running it. `Run Again` is guarded while one is in flight,
+because a second lockdown against a device is the thing this project already
+knows stalls the first.
+
+Each check is a row with its status **as a word** — `ok`, `warn`, `FAIL`,
+`skipped` — never as a colour alone, per §10, and this window is read by
+somebody already having a bad time, often over a screen share. A hint gets a
+child row rather than a third column, because the hints are sentences and the
+details are phrases, and in one column every row would be as tall as the
+longest hint.
+
+**The report can be copied out**, because the reason to run this is usually to
+tell somebody else what it said, and a wall of text nobody can select is one
+that gets photographed.
+
+Non-modal, and shown rather than executed: the answer is often "unlock the
+phone", which is a thing to do while the window stays open.
 
 ---
 

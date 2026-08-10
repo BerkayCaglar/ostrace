@@ -37,6 +37,7 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
+    Signal,
 )
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
@@ -78,8 +79,10 @@ from ostrace.gui.widgets.jump_button import JumpButton
 from ostrace.gui.widgets.log_table import LogTable
 from ostrace.gui.widgets.minimap import Minimap
 from ostrace.gui.widgets.status_bar import StatusBar
+from ostrace.gui.windows.doctor import open_doctor
 from ostrace.model import DeviceInfo, Record
 from ostrace.paths import export_stem, sessions_dir
+from ostrace.sources.base import RECONNECTING, STREAMING
 from ostrace.storage.capture import Capture, open_capture
 
 if TYPE_CHECKING:
@@ -161,8 +164,21 @@ def _submenu(action: QAction) -> QMenu | None:
     return menu if isinstance(menu, QMenu) else None
 
 
+#: What the banner says while the device is gone and the source is retrying.
+#: A constant because the window has to recognise its own message to know
+#: whether the banner it is about to hide is still this one.
+RECONNECT_MESSAGE = "The device stopped answering. Reconnecting — records arriving now are lost."
+
+
 class MainWindow(QMainWindow):
     """Toolbar, filter bar, table, detail pane, status bar."""
+
+    #: The device came or went, reported by the source from the capture
+    #: thread. A signal rather than a direct call because that is the thread
+    #: boundary: emitting is queued and delivered here, where widgets may be
+    #: touched, and `gui.live`'s own rule -- signals for lifecycle only, never
+    #: for a record -- is what makes one per outage affordable.
+    capture_state = Signal(str)
 
     # Declared, then filled from `gui.shortcuts.BINDINGS` in `_build_actions`.
     # Assigning them through `setattr` alone would leave a type checker blind
@@ -197,6 +213,7 @@ class MainWindow(QMainWindow):
     action_step_down: QAction
     action_step_up: QAction
     action_dark_mode: QAction
+    action_doctor: QAction
     action_keys: QAction
     action_quit: QAction
     action_about: QAction
@@ -564,7 +581,9 @@ class MainWindow(QMainWindow):
         self.action_step_down.triggered.connect(lambda: self.step_row(1))
         self.action_step_up.triggered.connect(lambda: self.step_row(-1))
         self.action_export.triggered.connect(self.export_capture)
+        self.action_doctor.triggered.connect(self.show_doctor)
         self.action_keys.triggered.connect(self.show_keys)
+        self.capture_state.connect(self._on_capture_state)
 
     def clear_marks(self) -> None:
         """Drop every mark.
@@ -1136,7 +1155,12 @@ class MainWindow(QMainWindow):
         # existed was always `None` -- "whichever answers first". With two
         # devices attached that was a coin toss the user could not see and,
         # since nothing named the winner, could not lose either.
-        return OsTraceSource(self.device_button.udid)
+        # `on_state` crosses a thread: the source runs on the capture thread
+        # and this is a Qt signal belonging to a window on the interface one,
+        # so the emission is queued and delivered where it can touch widgets.
+        # Calling a method directly from there would repaint from the wrong
+        # thread, which Qt does not always refuse and never survives.
+        return OsTraceSource(self.device_button.udid, on_state=self.capture_state.emit)
 
     def start_capture(self, source: LogSource, *, destination: Path | None = None) -> None:
         """Begin a live capture into a fresh model.
@@ -1325,19 +1349,50 @@ class MainWindow(QMainWindow):
             on_action=lambda: self.action_pause.setChecked(False),
         )
 
+    def _on_capture_state(self, state: str) -> None:
+        """The device came or went, said while it is happening.
+
+        The `Gap` in the stream is the *record* of an outage and stays that --
+        it travels in position, which is where its meaning is. This is the
+        other half: a gap can only be written once the device is back, and the
+        question somebody staring at a stalled window has is being asked
+        several seconds before that.
+
+        Disconnect rather than a way out: the source is already retrying, and
+        the only decision left to the user is whether to stop waiting.
+        """
+        if state == RECONNECTING:
+            self.banner.show_message(RECONNECT_MESSAGE, "Disconnect", on_action=self.stop_capture)
+        elif state == STREAMING and self.banner.text == RECONNECT_MESSAGE:
+            # Only its own message. A pause banner raised during the outage is
+            # a different state that is still true, and clearing it here would
+            # leave the view frozen with nothing on screen saying why.
+            self.banner.hide()
+
+    def show_doctor(self) -> None:
+        """Open the Doctor window on whichever device is selected.
+
+        Kept on the window, because a dialog whose last reference is a local
+        in the function that opened it is collected on the next line.
+        """
+        self._doctor = open_doctor(self.device_button.udid, self)
+
     def _on_capture_failed(self, message: str) -> None:
         """The capture died. Wind the machinery down as if Disconnect had been
         pressed, because from here on nothing is going to press it.
 
-        Retry rather than Dismiss: the message is almost always "no device", and
-        the answer to that is to plug one in and go again. Dismissing it just
-        clears the sentence off the screen.
+        `Diagnose…` rather than `Retry`, which is what this offered until the
+        Doctor window existed. A capture that ran and then died is a different
+        situation from one that never started: pressing Capture again is one
+        click away on the toolbar, and what the user does not have is any way
+        to find out *why* -- which is almost never in this program. It is a
+        service that stopped, a device that locked, or a cable half out.
         """
         self.stop_capture()
         self.banner.show_message(
             f"Capture stopped: {message}",
-            "Retry",
-            on_action=self.capture_from_device,
+            "Diagnose…",
+            on_action=self.show_doctor,
         )
 
     def _on_capture_finished(self, result: object) -> None:
@@ -1352,6 +1407,15 @@ class MainWindow(QMainWindow):
         """
         del result  # `stop_capture` reads the path off the thread, which is the same one
         self.stop_capture()
+        # The end of a capture is the moment an export is worth offering, and
+        # until now it was a moment nothing marked at all: the records stopped
+        # arriving and the window said so in no way a person notices. The
+        # banner is the same one every other invisible state uses.
+        self.banner.show_message(
+            f"Capture finished — {self.model.retained:,} records.",
+            "Export…",
+            on_action=self.export_capture,
+        )
 
     def deselect(self) -> None:
         """Let go of the selected row, and do nothing else.

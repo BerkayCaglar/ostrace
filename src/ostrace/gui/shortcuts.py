@@ -287,6 +287,13 @@ BINDINGS: tuple[Binding, ...] = (
         checkable=True,
         description="Use the dark theme regardless of what the system is set to",
     ),
+    Binding(
+        "doctor",
+        "&Doctor…",
+        "Ctrl+Shift+D",
+        menu="help",
+        description="Find out why a device cannot be reached",
+    ),
     Binding("keys", "&Keyboard Shortcuts", "F1", menu="help", description="This list"),
 )
 

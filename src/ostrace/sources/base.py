@@ -20,7 +20,22 @@ if TYPE_CHECKING:
 
     from ostrace.model import DeviceInfo, Gap
 
-__all__ = ["LogSource", "SourceCloseMixin"]
+__all__ = ["RECONNECTING", "STREAMING", "LogSource", "SourceCloseMixin"]
+
+#: The two words a source may report about its connection, for a source that
+#: reconnects and a caller that wants to say so while it is happening.
+#:
+#: Here rather than in `sources.os_trace`, which is the only source that says
+#: either, because the *listener* is a window: importing them from there would
+#: pull pymobiledevice3 -- forty packages -- into the path that merely opens a
+#: saved capture, and would make the window unimportable under ``-O``, which
+#: that module refuses on purpose.
+#:
+#: Not on the `LogSource` protocol. Reporting them is a property of one
+#: implementation, and a consumer that took the protocol and reached for a
+#: method only one side has is the thing this module exists to prevent.
+RECONNECTING = "reconnecting"
+STREAMING = "streaming"
 
 
 @runtime_checkable
