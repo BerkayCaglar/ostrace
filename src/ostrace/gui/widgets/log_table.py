@@ -270,6 +270,11 @@ class LogTable(QTableView):
 
         # Wrapping forces a per-row height computation, which defeats the fixed
         # row height below and reintroduces the cost it exists to avoid.
+        # The menu itself is the window's: every entry on it is an action the
+        # window already owns, and a table that built its own copy or its own
+        # mark would be a second implementation to keep in step with the first.
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
         self.setWordWrap(False)
         self.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.setShowGrid(False)
