@@ -10,6 +10,7 @@ stay short and so the findings can be re-examined on their own terms.
 | [network-capture-feasibility.md](network-capture-feasibility.md) | [ADR 0006](../adr/0006-defer-wifi-capture.md) | Windows verified; macOS from documentation only |
 | [gui-toolkit-evaluation.md](gui-toolkit-evaluation.md) | [ADR 0004](../adr/0004-pyside6-with-custom-filtered-model.md) | Upstream issues and published benchmarks |
 | [claude-code-log-investigation.md](claude-code-log-investigation.md) | [ADR 0005](../adr/0005-agent-bundle-export-format.md) | Observed behaviour plus documented tool limits |
+| [gui-redesign/](gui-redesign/) | The visual layer in `gui/theme.py`, and most of what [design/gui.md](../design/gui.md) has gained since 0.1.0 | Five documents, each stating its own; measured on Windows, macOS from documentation |
 
 Each document states its own evidence quality at the top. Where something was
 not verified on hardware, it says so — several conclusions here rest on
