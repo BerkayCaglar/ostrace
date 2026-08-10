@@ -44,6 +44,15 @@ such: the `Record` model and the on-disk export formats documented in
   the only decision left while the source is already retrying. Coming back
   clears that banner and only that one.
 
+  **Watched happening**, against an `iPhone18,2` on iOS 26.5.2 with the cable
+  pulled mid-capture: `streaming` at 0.7 s, `reconnecting` at 22.7 s as the
+  cable came out, `streaming` again at 30.7 s, and the `Gap` written at the
+  same instant. Those eight seconds are the whole argument for this — they are
+  time the `Gap` cannot yet exist, because it can only be written once the
+  device is back, and until now they were eight seconds of a stalled window
+  saying nothing. The suite stubs `_stream_once`, so it proves the control flow
+  and not the sockets; this is the part only hardware can answer.
+
 - **Two dead ends got the right action instead of a second Retry.** A capture
   that ran and then died offers `Diagnose…` — pressing Capture again is one
   click away on the toolbar, and what the user does not have is any way to find
