@@ -86,6 +86,36 @@ such: the `Record` model and the on-disk export formats documented in
   pixel ratio, which is what most Macs run at. `docs/design/gui.md` §12 records
   the whole pass, including that.
 
+### Planned
+
+**Nothing in this section is built.** It is the rest of the must-have list from
+the GUI redesign — [docs/research/gui-redesign/05-interaction.md](docs/research/gui-redesign/05-interaction.md)
+§10 — of which 0.1.1 took the affordable half. It is here rather than only in
+that document so the backlog sits where the next release gets written, and it
+is labelled so nobody reads it as a list of things that shipped.
+
+- **A Doctor window**, reachable from Help and offered as a banner action. The
+  checks exist and only the command line can run them, so a graphical user
+  meets a dead end at exactly the moment something is wrong.
+- **A row context menu**, including *Filter by this process* — narrowing without
+  retyping what is already on screen.
+- **An unseen-record count** beside the follow indicator. The indicator shipped
+  in 0.1.1 and this is the half `docs/design/gui.md` §4 calls the more useful
+  one: a reader who has scrolled away has no idea how far behind they now are.
+- **A viewport marker on the minimap.** The strip shows where the errors are
+  and not where you are.
+- **Jump to time** (`Ctrl+J`), and a **hideable detail pane** (`Ctrl+I`).
+- **Recent filters**, without naming them.
+- **A reconnect banner**, which needs the `capture(on_state=…)` callback, and a
+  **capture-finished banner** offering Export.
+- **Accessible names on the icon-only controls**, and a banner that announces
+  itself as an alert.
+- `Ctrl+Q` beside `StandardKey.Quit`, and a test that a letter typed into the
+  search field does not fire the single-letter aliases.
+
+The nice-to-have and later tiers stay in that document rather than being copied
+here. A backlog long enough to skim is one nobody reads.
+
 ## 0.1.1 - 2026-08-10
 
 The first release that exists. 0.1.0 was published and withdrawn the day
