@@ -851,6 +851,39 @@ whatever event it raised, including none.
 
 ---
 
+## 11b. Qt behaviours that do not fail the way you expect
+
+Three of them, each of which cost a debugging session, and none of which
+announces itself as the cause.
+
+**A modal `exec` does not fail a test — it hangs it.** The job sits there until
+something kills it, and the traceback names nothing. So anything ending in one
+is split in two: a method that *builds* and a method that *shows*. Three pairs
+follow this — `export_dialog` / `export_capture`, `ask_for_time` /
+`go_to_time`, `row_menu` / `_on_context_menu` — and every one of them was
+written after a run had to be killed. New code that opens a dialog, a message
+box or a context menu splits the same way, and the test drives the first half.
+
+**`setChecked` emits `toggled`; only a person emits `clicked`.** A control that
+*reports* derived state therefore has to sync through `clicked`, or block
+signals around `setChecked` — otherwise reporting the state is indistinguishable
+from choosing it and the handler fires, which is a loop when the handler is what
+computes the state. This project has walked into it twice, once with the theme
+checkbox and once with the follow indicator; §4's "one derivation, read by both"
+is the rule that survived it.
+
+Related, and the same shape: connecting `QAction.setChecked` to a
+`QToolButton.clicked` binds the *parameterless* overload and calls it with no
+argument. PySide reports that on stderr and otherwise swallows it.
+
+**A `QThread` still running when Python drops its last reference aborts the
+process.** Not an exception — `0xC0000409` on Windows, which cannot be caught
+and leaves no traceback. Anything owning a thread waits for it on the way out;
+`DoctorWindow.closeEvent` is the example, because that window is closable two
+seconds into a socket timeout.
+
+---
+
 ## 12. What CI can and cannot verify
 
 `QWidget.grab()` and `QWidget.render()` produce **real pixels under the

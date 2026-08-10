@@ -122,12 +122,52 @@ The full licence text lives in `LICENSE` once, not repeated in every file.
 
 ## Commits and pull requests
 
+`main` takes changes only through a pull request — a ruleset enforces it, so a
+direct push is rejected rather than reviewed. **Branch before the first
+commit.** The way people end up committing on `main` is starting there, and
+`gh pr merge --delete-branch` leaves the checkout back on it, so the next piece
+of work begins on `main` unless `git status` says otherwise.
+
 - Conventional-ish subject lines (`fix:`, `feat:`, `docs:`, `refactor:`,
   `test:`, `ci:`). Not enforced by a hook; it just makes the changelog easier.
 - One logical change per pull request.
 - Update `CHANGELOG.md` under `## [Unreleased]` for anything user-visible.
 - New behaviour comes with a test. Bug fixes come with the test that fails
-  without the fix.
+  without the fix — and **verify that by removing the fix and watching it go
+  red**, rather than by reasoning about it. A test that passes either way is
+  worse than no test, because it reports a rule nobody is keeping. Doing this
+  has twice found the opposite too: code that could be deleted, because the
+  test claiming to cover it stayed green without it.
+
+### Stacking one pull request on another
+
+Sometimes a second change has to build on a first that has not merged yet, so
+its branch is cut from the first and its pull request opened with
+`--base <first branch>`. That works, and the failure mode is worth knowing
+before you meet it.
+
+**GitHub does not reliably retarget a stacked pull request.** Merging the first
+one with `--delete-branch` removes the base of the second: it may be retargeted
+to `main`, and it may simply be **closed**. That happened here — the closure
+went unnoticed, the third pull request was then merged into the closed one's
+branch instead of into `main`, and two changes ended up in a branch nothing
+pointed at.
+
+So do the retargeting by hand, after each merge:
+
+```bash
+git branch backup/my-branch my-branch          # before anything rewrites it
+git rebase --onto origin/main <last commit of the merged change> my-branch
+git push --force-with-lease origin my-branch
+gh pr edit <N> --base main
+```
+
+Two things about checking the result. A stacked pull request runs **fewer
+checks** than one targeting `main` — CodeQL and the CodeQL-adjacent jobs are
+skipped until it is retargeted, so a green stacked pull request has not been
+through everything. And after a squash merge the commit SHAs differ from the
+originals, so `git branch -d` will call merged work unmerged: **verify by file
+content**, not by commit.
 
 ## Before a release
 
