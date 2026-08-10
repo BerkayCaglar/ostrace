@@ -61,6 +61,7 @@ __all__ = [
     "severity_for",
     "stylesheet_for",
     "token",
+    "viewport_marker",
 ]
 
 #: Qt's own preference for Windows 11, and the only widely-styled option that
@@ -98,6 +99,7 @@ TOKENS: dict[Scheme, dict[str, str]] = {
         "control-border": "#7e8590",
         "scrollbar-handle": "#7e8590",
         "scrollbar-handle-hover": "#5f6773",
+        "viewport-marker": "#5f6773",
         "text-primary": "#14161a",
         "text-secondary": "#474e59",
         "text-muted": "#5f6773",
@@ -128,6 +130,7 @@ TOKENS: dict[Scheme, dict[str, str]] = {
         "control-border": "#6b7381",
         "scrollbar-handle": "#5a626f",
         "scrollbar-handle-hover": "#79828f",
+        "viewport-marker": "#99a2b0",
         "text-primary": "#e7eaf0",
         "text-secondary": "#b4bbc7",
         "text-muted": "#99a2b0",
@@ -182,6 +185,12 @@ _ROLES: dict[QPalette.ColorRole, str] = {
 #: `test_gui_theme.py`, because a mark that makes an Error unreadable is worse
 #: than no mark.
 MARK_TINT: dict[Scheme, str] = {scheme: values["mark"] for scheme, values in TOKENS.items()}
+
+#: How opaque the viewport marker's fill is, out of 255. Low enough that an
+#: error stripe underneath it is still the colour of an error rather than a
+#: muddied version of one -- the marker says where you are, and the stripes are
+#: what you are looking for.
+_VIEWPORT_FILL_ALPHA = 38
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +276,22 @@ def mark_tint(scheme: Scheme) -> QColor:
 def mark_accent(scheme: Scheme) -> QColor:
     """The mark, where it has to be visible as a thin line rather than a wash."""
     return token("mark-accent", scheme)
+
+
+def viewport_marker(scheme: Scheme) -> tuple[QColor, QColor]:
+    """The fill and the edge of the minimap's viewport marker, in that order.
+
+    Two colours from one token, because the marker is drawn *over* the stripes
+    rather than instead of them. The fill has to be a wash or it hides the
+    errors it is supposed to be located among; the edge has to be solid or the
+    marker is invisible on the long quiet stretches where there are no stripes
+    to be washed over -- and those are exactly the stretches somebody scrolling
+    is trying to get across.
+    """
+    edge = token("viewport-marker", scheme)
+    fill = QColor(edge)
+    fill.setAlpha(_VIEWPORT_FILL_ALPHA)
+    return fill, edge
 
 
 def selection_row(scheme: Scheme) -> QColor:

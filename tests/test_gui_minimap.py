@@ -309,6 +309,125 @@ def test_the_strip_actually_draws_its_bands(qt_app: object) -> None:
     assert wanted in painted, f"the error colour {wanted} was never drawn"
 
 
+class TestTheViewportMarker:
+    """Where you are, on the strip that says what is there.
+
+    Without it the strip is a picture rather than a map -- and the click-to-jump
+    it has always had is aiming at a target the reader cannot see themselves on.
+    """
+
+    @staticmethod
+    def _strip(qt_app: object, scheme: Scheme = Scheme.LIGHT) -> Minimap:
+        del qt_app
+        model = RecordModel(scheme)
+        model.append([make_record(index) for index in range(1000)])
+        strip = Minimap(scheme)
+        strip.resize(10, 200)
+        strip.set_model(model)
+        return strip
+
+    @staticmethod
+    def _column(strip: Minimap) -> list[str]:
+        """Every pixel down the middle of the strip, top to bottom."""
+        image = QImage(strip.size(), QImage.Format.Format_ARGB32)
+        strip.render(image)
+        return [image.pixelColor(5, y).name() for y in range(strip.height())]
+
+    @staticmethod
+    def _marked(column: list[str], base: str) -> list[int]:
+        return [y for y, colour in enumerate(column) if colour != base]
+
+    def test_it_is_drawn_where_the_reader_is(self, qt_app: object) -> None:
+        """Read off the picture, not off the stored range.
+
+        The whole failure mode here is a marker that is computed correctly and
+        painted nowhere -- which is what `paintEvent` returning early already
+        did to the bands once, with the suite green throughout.
+        """
+        strip = self._strip(qt_app)
+        base = self._column(strip)[0]
+
+        strip.set_viewport(0, 39)
+        top = self._marked(self._column(strip), base)
+
+        strip.set_viewport(600, 639)
+        low = self._marked(self._column(strip), base)
+
+        assert top, "nothing was drawn for a viewport at the top"
+        assert low, "nothing was drawn for a viewport further down"
+        assert max(top) < min(low), "the marker did not move down with the viewport"
+
+    def test_it_covers_the_share_of_the_capture_that_is_on_screen(self, qt_app: object) -> None:
+        """Half the rows on screen is half the strip, near enough.
+
+        Near enough because the edge is drawn on the boundary and the fill is
+        rounded to whole pixels; the assertion is the proportion rather than an
+        exact pixel count, which would be asserting the rounding.
+        """
+        strip = self._strip(qt_app)
+        base = self._column(strip)[0]
+
+        strip.set_viewport(0, 499)
+        half = self._marked(self._column(strip), base)
+
+        assert 90 <= len(half) <= 110, f"{len(half)} of 200 pixels for half the capture"
+
+    def test_a_viewport_too_small_to_see_is_still_drawn(self, qt_app: object) -> None:
+        """Forty rows in two hundred thousand is a third of a pixel.
+
+        Rounded away, and the reader concludes the strip has no marker at all.
+        """
+        strip = self._strip(qt_app)
+        base = self._column(strip)[0]
+
+        strip.set_viewport(500, 501)
+
+        assert len(self._marked(self._column(strip), base)) >= 3
+
+    def test_an_empty_range_draws_nothing(self, qt_app: object) -> None:
+        """What a window with no capture in it reports, and there is nowhere in
+        an empty strip for a reader to be."""
+        strip = self._strip(qt_app)
+        base = self._column(strip)[0]
+
+        strip.set_viewport(0, -1)
+
+        assert self._marked(self._column(strip), base) == []
+
+    def test_it_follows_the_scheme(self, qt_app: object) -> None:
+        """The marker itself, not the background behind it.
+
+        Comparing two whole strips would pass without a marker at all, because
+        the two schemes fill their backgrounds differently to begin with.
+        """
+        marks = {}
+        for scheme in (Scheme.LIGHT, Scheme.DARK):
+            strip = self._strip(qt_app, scheme)
+            base = self._column(strip)[0]
+            strip.set_viewport(0, 99)
+            column = self._column(strip)
+            marks[scheme] = {column[y] for y in self._marked(column, base)}
+            assert marks[scheme], f"nothing was drawn under {scheme}"
+
+        assert marks[Scheme.LIGHT].isdisjoint(marks[Scheme.DARK])
+
+    def test_the_same_range_twice_does_not_repaint(self, qt_app: object) -> None:
+        """Asked on every scroll, every resize and every batch of arrivals, and
+        a reader stopped on one screen of a growing capture gets the same
+        answer every time."""
+        strip = self._strip(qt_app)
+        strip.set_viewport(10, 50)
+
+        updates: list[int] = []
+        strip.update = lambda: updates.append(1)  # type: ignore[assignment,method-assign]
+
+        strip.set_viewport(10, 50)
+        assert updates == []
+
+        strip.set_viewport(10, 51)
+        assert updates == [1]
+
+
 def test_the_drawn_colours_follow_the_scheme(qt_app: object) -> None:
     """`set_scheme` rebuilds the prebuilt colours; nothing checked they reach
     the paint."""

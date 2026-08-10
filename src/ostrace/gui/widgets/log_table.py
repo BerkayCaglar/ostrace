@@ -55,7 +55,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QAbstractItemModel, QModelIndex, QPersistentModelIndex, Qt
+from PySide6.QtCore import (
+    QAbstractItemModel,
+    QModelIndex,
+    QPersistentModelIndex,
+    QPoint,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import (
     QBrush,
     QFont,
@@ -233,6 +240,12 @@ class MiddleElidingDelegate(SeverityDelegate):
 class LogTable(QTableView):
     """The record table."""
 
+    #: Which rows are on screen has changed: scrolled, resized, or the model
+    #: grew or was trimmed under it. One signal for all four because the
+    #: question anybody asks afterwards is the same one, and a widget that has
+    #: to subscribe to four things to answer it will miss the fourth.
+    viewport_changed = Signal()
+
     def __init__(self, parent: QWidget | None = None, *, scheme: Scheme = Scheme.LIGHT) -> None:
         super().__init__(parent)
         self._scheme = scheme
@@ -264,6 +277,17 @@ class LogTable(QTableView):
         self.setCornerButtonEnabled(False)
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+
+        # The scrollbar outlives every model this view will be given, so this
+        # is connected once. `valueChanged` rather than `actionTriggered`:
+        # this is about where the view *is*, however it got there, and the tail
+        # scrolling it programmatically moves it as surely as a hand does.
+        # `rangeChanged` is the other half -- appending and trimming both
+        # change which rows the same scroll position covers without the
+        # position itself moving at all.
+        bar = self.verticalScrollBar()
+        bar.valueChanged.connect(self.viewport_changed)
+        bar.rangeChanged.connect(self.viewport_changed)
 
         vertical = self.verticalHeader()
         vertical.setVisible(False)
@@ -392,10 +416,37 @@ class LogTable(QTableView):
         -- a widget that has not been laid out has no width to answer with.
         """
         super().resizeEvent(event)
+        self.viewport_changed.emit()
         if self._columns_fitted or self.model() is None or self.viewport().width() <= 0:
             return
         self._columns_fitted = True
         self.apply_column_widths()
+
+    def visible_rows(self) -> tuple[int, int]:
+        """The first and last rows with a pixel on screen, both inclusive.
+
+        ``(0, -1)`` when there is nothing to show, which is an empty range on
+        the same arithmetic rather than a special case the callers have to test
+        for separately.
+
+        The bottom falls back to the last row rather than to nothing: an
+        invalid index at the bottom edge means the rows ran out before the
+        viewport did, so everything there is *is* on screen. Reading it as
+        "nothing is visible" is how a count of what lies below ends up
+        reporting the whole capture when the whole capture fits.
+        """
+        # ``self.model()`` rather than a local, which is the shape
+        # ``resizeEvent`` above already uses: the stubs declare it non-optional
+        # and it plainly is not -- a view has none until one is set -- and a
+        # local would let the checker narrow the guard away as dead code.
+        if self.model() is None or self.viewport().height() <= 0:
+            return (0, -1)
+        rows = self.model().rowCount()
+        if rows == 0:
+            return (0, -1)
+        first = self.indexAt(QPoint(0, 0))
+        last = self.indexAt(QPoint(0, self.viewport().height() - 1))
+        return (first.row() if first.isValid() else 0, last.row() if last.isValid() else rows - 1)
 
     def restore_column_widths(self, widths: list[int]) -> None:
         """Put back what a previous session left, and stop fitting.

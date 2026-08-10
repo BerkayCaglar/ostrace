@@ -24,6 +24,7 @@ from PySide6.QtWidgets import QAbstractSlider, QApplication
 
 from ostrace.gui.columns import Column
 from ostrace.gui.filters import Filter
+from ostrace.gui.markers import when
 from ostrace.gui.models import Find, RecordModel
 from ostrace.gui.theme import Scheme
 from ostrace.gui.widgets.status_bar import BEHIND, FOLLOWING, NOT_FOLLOWING
@@ -550,6 +551,100 @@ class TestTheFollowIndicator:
         window.go_to_bottom()
 
         assert window.following
+
+
+class TestGoToTime:
+    """The only navigation that correlates the log with the world outside it.
+
+    Somebody watched their phone misbehave at twenty past two. Every other way
+    of finding that moment in seven minutes of device output is scrolling.
+
+    Driven through `go_to_time` rather than through the dialog: the asking half
+    calls a modal ``exec``, and a test that reaches one does not fail, it hangs.
+    """
+
+    @staticmethod
+    def _first_at_or_after(window: MainWindow, moment: datetime) -> int | None:
+        """The answer, computed here rather than asked of the thing under test.
+
+        A scan, deliberately: comparing against the row before the landing
+        would assume the capture is sorted, and a device log is only *roughly*
+        chronological -- the relay interleaves several subsystems.
+        """
+        return next(
+            (
+                row
+                for row in range(window.model.rowCount())
+                if when(window.model.row_at(row)) >= moment
+            ),
+            None,
+        )
+
+    def test_a_clock_reading_lands_on_the_first_row_at_or_after_it(
+        self, window: MainWindow
+    ) -> None:
+        target = when(window.model.row_at(1500)).replace(microsecond=0)
+
+        window.go_to_time(f"{target:%H:%M:%S}")
+
+        assert window.table.currentIndex().row() == self._first_at_or_after(window, target)
+
+    def test_an_offset_is_measured_from_the_row_the_reader_is_on(self, window: MainWindow) -> None:
+        """Not from the start of the capture, which is where they were an hour
+        of scrolling ago."""
+        window.go_to(100)
+        target = when(window.model.row_at(100)) + timedelta(seconds=30)
+
+        window.go_to_time("+30s")
+
+        landed = window.table.currentIndex().row()
+        assert landed == self._first_at_or_after(window, target)
+        assert landed > 100, "the offset was measured from somewhere else"
+
+    def test_with_nothing_selected_it_starts_from_the_top_of_the_screen(
+        self, window: MainWindow
+    ) -> None:
+        """Where the reader is, before they have clicked anything."""
+        window.table.resize(600, 300)
+        window.table.show()
+        QApplication.processEvents()
+        window.go_to(2000)
+        window.deselect()
+        top = window.table.visible_rows()[0]
+        target = when(window.model.row_at(top)) + timedelta(seconds=10)
+
+        window.go_to_time("+10s")
+
+        assert top > 0, "the view never scrolled, so this proves nothing"
+        assert window.table.currentIndex().row() == self._first_at_or_after(window, target)
+
+    def test_a_time_past_the_end_says_so_and_moves_nothing(self, window: MainWindow) -> None:
+        """The usual cause is a digit typed wrong rather than a capture that
+        really ends there, so the message carries the time back."""
+        window.go_to(42)
+
+        window.go_to_time("23:59:59")
+
+        assert window.table.currentIndex().row() == 42
+        assert "23:59:59" in window.banner.text
+
+    def test_something_unreadable_says_what_would_work(self, window: MainWindow) -> None:
+        window.go_to(42)
+
+        window.go_to_time("half past two")
+
+        assert window.table.currentIndex().row() == 42
+        assert "+30s" in window.banner.text
+
+    def test_an_empty_window_has_nowhere_to_jump(self, qt_app: object) -> None:
+        """No capture, no anchor, and therefore no timezone to read a clock
+        reading in. Silent rather than guessing at the host's."""
+        del qt_app
+        window = MainWindow()
+
+        window.go_to_time("14:22:31")
+
+        assert not window.table.currentIndex().isValid()
 
 
 class TestTheUnseenCount:

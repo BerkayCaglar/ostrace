@@ -14,6 +14,44 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Added
 
+- **The minimap shows where you are, not only what is there.** The strip has
+  always drawn the errors, gaps and marks across a whole capture, and clicking
+  it has always jumped — at a target the reader could not see themselves on. A
+  translucent marker with a solid edge now covers the rows on screen.
+
+  The fill is a wash because a solid one hides the errors it is supposed to
+  locate you among; the edge is not, because on the long quiet stretches there
+  are no stripes for a wash to be seen against, and those are exactly the
+  stretches somebody is scrolling to get across. It is never thinner than three
+  pixels: forty rows on screen out of two hundred thousand rounds to nothing,
+  and a marker that rounds away teaches the reader there is none.
+
+  Fed from the table's own report of which rows it is showing — scrolling,
+  resizing, arrivals and trims all count — rather than from the capture tick. A
+  file that is not being captured has no ticks, and a marker driven by them
+  would sit at the top of every capture anybody opened, which is how most of
+  this program is used.
+
+- **`Ctrl+J` goes to a time.** The only navigation here that correlates the log
+  with the world outside it: somebody watched their phone misbehave at twenty
+  past two, and every other way of finding that moment in seven minutes of
+  device output is scrolling. It takes a clock reading (`14:22:31`,
+  `14:22:31.500`) or an offset from where you are (`+30s`, `-2m`), and lands on
+  the first row at or after it — markers included, because a gap is often the
+  thing being looked for and skipping it would put the row that explains a
+  silence out of reach.
+
+  The timezone comes from the row you are on, which carries the *device's*
+  offset. A target built on the host's clock would search a different zone
+  silently, which is the whole reason this project refuses a naive timestamp on
+  read. A reading with no date on it means that reading on your day, so a
+  capture running through midnight reads `00:05` as the day you are looking at;
+  `2026-08-10 00:05` says the other thing when the other thing is meant.
+
+  Scanned rather than bisected. A device log arrives in roughly chronological
+  order and is not guaranteed sorted — the relay interleaves subsystems — and a
+  binary search over a nearly-sorted sequence answers confidently and wrongly.
+
 - **The status bar says how far behind you are.** The follow indicator shipped
   in 0.1.1 and answered half the question: it says the tail has stopped, and
   says nothing about whether five records or fifty thousand have gone past
@@ -118,9 +156,7 @@ is labelled so nobody reads it as a list of things that shipped.
   meets a dead end at exactly the moment something is wrong.
 - **A row context menu**, including *Filter by this process* — narrowing without
   retyping what is already on screen.
-- **A viewport marker on the minimap.** The strip shows where the errors are
-  and not where you are.
-- **Jump to time** (`Ctrl+J`), and a **hideable detail pane** (`Ctrl+I`).
+- A **hideable detail pane** (`Ctrl+I`).
 - **Recent filters**, without naming them.
 - **A reconnect banner**, which needs the `capture(on_state=…)` callback, and a
   **capture-finished banner** offering Export.

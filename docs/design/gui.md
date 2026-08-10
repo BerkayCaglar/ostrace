@@ -194,6 +194,25 @@ rescan measured at 282 ms over 200,000 rows against 0.59 ms for buckets. Gaps
 and marks are rare and are the whole point, so they are placed exactly: by
 bucket, two gaps in a short capture lit 79 bands out of 180.
 
+**It also shows where the reader is.** Without that the strip says *what* is in
+the capture and not *where you are in it*, which makes it a picture rather than
+a map — and the click-to-jump it has always had is aiming at a target the
+reader cannot see themselves on. The marker is a translucent fill with a solid
+edge, drawn last: the fill has to be a wash or it hides the errors it is
+supposed to locate you among, and the edge has to be solid or the marker
+disappears on the long quiet stretches where there are no stripes for a wash to
+be seen against — which are exactly the stretches somebody is scrolling to get
+across. It is never drawn thinner than three pixels, because forty rows on
+screen out of two hundred thousand rounds to nothing and a marker that rounds
+away teaches the reader that the strip has none.
+
+The range is pushed in by the window rather than pulled from the table: a strip
+that reached for a table would be one that only works next to one. It is fed
+from the table's own `viewport_changed`, which covers scrolling, resizing,
+arrivals and trims — deliberately **not** from the capture tick, because a
+file that is not being captured has no ticks and the marker would sit at the
+top of every capture anybody opened.
+
 ---
 
 ## 4. Follow
@@ -479,6 +498,31 @@ now, and `F3` / `Shift+F3` — the find-next key on Windows and klogg's — mean
 *next of whatever I am looking for*. Every kind keeps its own explicit binding,
 so choosing a target in the toolbar never takes a key away from somebody who
 already knows `Ctrl+Shift+G`.
+
+**`Ctrl+J` goes to a time.** It is the only navigation in the program that
+correlates the log with the world outside it — somebody watched their phone
+misbehave at twenty past two, and every other way of finding that moment is
+scrolling. It accepts a clock reading (`14:22:31`, `14:22:31.500`) or an offset
+from where the reader is (`+30s`, `-2m`), and lands on the first row *at or
+after* the result, markers included: a gap is often the thing being looked for,
+and skipping it would make the one row that explains a silence the one row this
+cannot reach.
+
+Three rules the parser keeps, none of them cosmetic. The timezone comes from
+the anchor row, which carries the *device's* offset — building a target on the
+host's clock would search a different zone silently. A date-less reading means
+that reading on the anchor's day, so a capture running through midnight reads
+`00:05` as the day the reader is in rather than the day the capture started;
+`2026-08-10 00:05` says the other thing when the other thing is meant. And the
+anchor is the selected row, or the top of the screen when nothing is selected —
+not the first row of the capture, which is where the reader was an hour of
+scrolling ago.
+
+The search is a scan rather than a bisection. A device log arrives in roughly
+chronological order and is not guaranteed sorted — the relay interleaves
+subsystems — and a binary search over a nearly-sorted sequence answers
+confidently and wrongly. At 200,000 rows the scan is about ten milliseconds, on
+a keypress a person made.
 
 **Icons do not appear in menus.** The toolbar and the menus share their action
 objects, so an icon put on one for the toolbar's sake is drawn by the other in
