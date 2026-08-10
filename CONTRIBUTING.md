@@ -129,6 +129,26 @@ The full licence text lives in `LICENSE` once, not repeated in every file.
 - New behaviour comes with a test. Bug fixes come with the test that fails
   without the fix.
 
+## Before a release
+
+Two things that are only true at release time, and are wrong to do early.
+
+**Refresh the README screenshots.** They are meant to show the program a reader
+can actually install, so they track the *published* version rather than `main`.
+Regenerating them while `main` is ahead would put controls in the picture that
+`pip install ostrace` does not give you. The Windows pair comes from the
+`screenshots` workflow; the macOS pair has to be rendered on a Mac under the
+`cocoa` plugin, because the offscreen plugin resolves the interface font to
+Qt's generic `Sans Serif` — right about layout, wrong about the one thing
+anybody looks at a macOS screenshot for.
+
+**Run `tools/audit_capture.py` over the fixtures inside the built `sdist`**,
+not the ones in the working tree. 0.1.0 was withdrawn over exactly that
+distinction: the working tree was clean and the artifact was not.
+
+Tagging is what publishes. `release.yml` fires on `v*` and goes to PyPI with no
+approval step, so a tag pushed by accident is a release.
+
 ## Reporting a bug
 
 Include the output of `ostrace doctor`, plus your device model and iOS version.

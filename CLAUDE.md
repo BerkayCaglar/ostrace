@@ -6,6 +6,12 @@ model, sources and storage (phases 0-1), `analysis/` plus all six exporters
 (phase 3), the PySide6 viewer in `gui/` (phase 4), and the release machinery
 itself (phase 5).
 
+**`main` is well ahead of what is released.** The last tag is `v0.1.1`;
+everything since is under `## [Unreleased]` in `CHANGELOG.md`, and it is not a
+small amount — the GUI redesign's whole must-have tier landed after it. So a
+bug reproduced against the published package is not necessarily a bug here, and
+the next version is 0.1.2.
+
 0.1.0 does not exist. It was published and withdrawn the next day over the
 fixtures inside its `sdist`, and the number will not be reused — so there is
 deliberately no `v0.1.0` tag, and a commit or document referring to one is
