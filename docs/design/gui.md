@@ -258,8 +258,28 @@ The control is live only during a capture. There is no tail to follow in a
 file, and a control that is enabled with nothing to do is one that has to be
 tried before it can be understood.
 
-**Still not built:** how many records have arrived unseen. A reader who has
-scrolled up has no idea how far behind they now are.
+**How far behind is beside it, and is derived the same way.** `Not following`
+says the tail has stopped and says nothing about whether five records or fifty
+thousand have gone past since, which is the question the reader actually has.
+`MainWindow.behind` answers it from the row at the bottom edge of the viewport
+rather than by counting arrivals: O(1), and right after a filter change, a trim
+or a jump — each of which moves the reader relative to the end without a record
+arriving at all. A partially visible row at that edge counts as behind, which
+errs towards "you have not read this one".
+
+**It is silent more often than it speaks**, and both silences are rules rather
+than omissions. Following, because a followed view is at the end by definition —
+including in the hundred milliseconds where `_follow` has coalesced the
+scrolling and the view has not caught up, which is several times a second of
+every capture and would otherwise flicker. And in a file, because a capture that
+is not running has no arrivals: every row below the viewport has been there
+since it opened. That second silence is asked of the control's own enabled
+state, so the count goes quiet exactly when the button beside it does.
+
+This is the `set_shown` rule and not the gap-count rule. A gap counter that
+appears only on bad news is indistinguishable from a broken one; here "nothing
+behind" and "not counting" are the same state, so there is no ambiguity for an
+always-present zero to resolve.
 
 ---
 

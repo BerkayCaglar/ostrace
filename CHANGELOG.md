@@ -12,6 +12,27 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
+### Added
+
+- **The status bar says how far behind you are.** The follow indicator shipped
+  in 0.1.1 and answered half the question: it says the tail has stopped, and
+  says nothing about whether five records or fifty thousand have gone past
+  since. `docs/design/gui.md` §4 listed the count as missing and called it the
+  more useful half. It reads `1,204 behind`, beside the indicator.
+
+  Derived from the row at the bottom edge of the viewport rather than by
+  counting arrivals — O(1), and right after a filter change, a trim or a jump,
+  each of which moves the reader relative to the end without a record arriving
+  at all. Follow itself is derived and not stored for the same reason, and a
+  counter kept alongside it would be a second thing able to disagree with the
+  view.
+
+  Silent while following, and silent in a file. Both are rules: a followed view
+  is at the end by definition, and a capture that is not running has no
+  arrivals, so calling the rows below the viewport "behind" would invent one.
+  The second silence is asked of the control's own enabled state, so the number
+  goes quiet exactly when the button beside it does.
+
 ### Changed
 
 - **The README shows the window as it is, and shows it on both platforms.** The
@@ -28,34 +49,6 @@ such: the `Record` model and the on-disk export formats documented in
   thing anybody looks at a macOS screenshot for. It was rendered under `cocoa`
   on a real Mac, which is the first picture of this program on macOS that shows
   the face a Mac user actually sees.
-
-### Fixed
-
-- **The detail pane drew the previous record's rows over the new one.**
-  Replacing the contents took each old row out of the grid and handed it to
-  `deleteLater`, which destroys it whenever the event loop next drains — and
-  `takeAt` only unhooks a widget from its *layout*. In between, every old row
-  was still a visible child sitting at its last geometry, painting straight
-  over the rows that replaced it: the `Nothing selected` placeholder printed
-  across `Device time`.
-
-  Interactive use never showed it, because the loop drains before the next
-  paint. What sees it is anything that rebuilds and renders in one pass —
-  every `grab()` in the suite, and `tools/capture_screens.py`, whose entire job
-  is to show what this window looks like on macOS. The screenshot job had been
-  rendering the bug faithfully since the pane was redesigned and nobody had
-  opened the image. **This is the second bug in this pane that only a picture
-  could reveal**, and as with the first one every existing assertion — all of
-  which read text — passed throughout.
-
-- **The window printed a Qt warning every time it closed.** `saveState` names
-  each toolbar by object name and warns when one has none, and `closeEvent`
-  calls it, so `QMainWindow::saveState(): 'objectName' not set for QToolBar`
-  went to stderr on every quit. The layout did still come back — with a single
-  toolbar Qt falls back to position — which is exactly the fallback that stops
-  working the first time a second toolbar or a dock exists.
-
-### Changed
 
 - **macOS has been run by hand for the first time**, on macOS 26.3.1 with
   PySide6 6.11.1 — every documented assumption checked, including the eleven
@@ -86,6 +79,32 @@ such: the `Record` model and the on-disk export formats documented in
   pixel ratio, which is what most Macs run at. `docs/design/gui.md` §12 records
   the whole pass, including that.
 
+### Fixed
+
+- **The detail pane drew the previous record's rows over the new one.**
+  Replacing the contents took each old row out of the grid and handed it to
+  `deleteLater`, which destroys it whenever the event loop next drains — and
+  `takeAt` only unhooks a widget from its *layout*. In between, every old row
+  was still a visible child sitting at its last geometry, painting straight
+  over the rows that replaced it: the `Nothing selected` placeholder printed
+  across `Device time`.
+
+  Interactive use never showed it, because the loop drains before the next
+  paint. What sees it is anything that rebuilds and renders in one pass —
+  every `grab()` in the suite, and `tools/capture_screens.py`, whose entire job
+  is to show what this window looks like on macOS. The screenshot job had been
+  rendering the bug faithfully since the pane was redesigned and nobody had
+  opened the image. **This is the second bug in this pane that only a picture
+  could reveal**, and as with the first one every existing assertion — all of
+  which read text — passed throughout.
+
+- **The window printed a Qt warning every time it closed.** `saveState` names
+  each toolbar by object name and warns when one has none, and `closeEvent`
+  calls it, so `QMainWindow::saveState(): 'objectName' not set for QToolBar`
+  went to stderr on every quit. The layout did still come back — with a single
+  toolbar Qt falls back to position — which is exactly the fallback that stops
+  working the first time a second toolbar or a dock exists.
+
 ### Planned
 
 **Nothing in this section is built.** It is the rest of the must-have list from
@@ -99,9 +118,6 @@ is labelled so nobody reads it as a list of things that shipped.
   meets a dead end at exactly the moment something is wrong.
 - **A row context menu**, including *Filter by this process* — narrowing without
   retyping what is already on screen.
-- **An unseen-record count** beside the follow indicator. The indicator shipped
-  in 0.1.1 and this is the half `docs/design/gui.md` §4 calls the more useful
-  one: a reader who has scrolled away has no idea how far behind they now are.
 - **A viewport marker on the minimap.** The strip shows where the errors are
   and not where you are.
 - **Jump to time** (`Ctrl+J`), and a **hideable detail pane** (`Ctrl+I`).

@@ -32,6 +32,7 @@ from PySide6.QtCore import (
     QByteArray,
     QElapsedTimer,
     QModelIndex,
+    QPoint,
     QSettings,
     QSize,
     Qt,
@@ -1190,6 +1191,11 @@ class MainWindow(QMainWindow):
         # whichever way the capture started or ended.
         self._update_placeholder()
         self._retitle()
+        # Last, and after the control's own enabled state: the unseen count is
+        # silent when there is no tail, so a capture that ends while the reader
+        # is half way up would otherwise leave its final "1,204 behind" on the
+        # bar for as long as the window stayed open.
+        self._show_follow_state()
         if not capturing:
             self.action_pause.setChecked(False)
             self.status.set_rate(None)
@@ -1296,6 +1302,30 @@ class MainWindow(QMainWindow):
             return False
         return self._at_bottom
 
+    @property
+    def behind(self) -> int:
+        """How many records sit below the bottom of the viewport, unseen.
+
+        Derived from the view on every read, like `following` and for the same
+        reason: a counter kept alongside the tail is a second thing that can
+        disagree with it, and this window has already been bitten once by a
+        follow state that did.
+
+        Read off the *bottom row* rather than by counting arrivals, which makes
+        it O(1) and makes it right after a filter change, a trim or a jump --
+        each of which moves the reader relative to the end without a record
+        arriving at all. A partially visible row at the bottom edge counts as
+        behind, which errs towards "you have not read this one".
+        """
+        last = self.model.rowCount() - 1
+        if last < 0:
+            return 0
+        bottom = self.table.indexAt(QPoint(0, self.table.viewport().height() - 1))
+        if not bottom.isValid():
+            # The last row is above the bottom edge: the whole capture fits.
+            return 0
+        return last - bottom.row()
+
     def set_following(self, *, follow: bool) -> None:
         """Turn the tail on or off, from the status bar or the keyboard.
 
@@ -1336,7 +1366,13 @@ class MainWindow(QMainWindow):
         the theme checkbox and once here.
         """
         following = self.following
-        self.status.set_following(following=following)
+        # The count is about a tail, and a file has none: in a loaded capture
+        # every row below the viewport has already been there since it opened,
+        # and calling that "behind" would invent an arrival. Asked of the
+        # control rather than of the capture thread so the two cannot disagree
+        # -- the number is silent exactly when the button beside it is dead.
+        behind = self.behind if self.status.follow.isEnabled() else 0
+        self.status.set_following(following=following, behind=behind)
         self.action_follow.blockSignals(True)
         self.action_follow.setChecked(following)
         self.action_follow.blockSignals(False)

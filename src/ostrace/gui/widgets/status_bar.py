@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from ostrace.model import DeviceInfo
 
-__all__ = ["FOLLOWING", "NOT_FOLLOWING", "StatusBar"]
+__all__ = ["BEHIND", "FOLLOWING", "NOT_FOLLOWING", "StatusBar"]
 
 #: Shown before anything has been captured, so the fields have a resting state
 #: rather than appearing from nowhere on the first record.
@@ -35,8 +35,16 @@ FOLLOWING = "Following"
 NOT_FOLLOWING = "Not following"
 
 
+#: The unseen count, said in one place so a test asks for the wording rather
+#: than repeating it. "Behind" rather than "new" because the number is about
+#: the reader's position and not about the records: `docs/design/gui.md` §4
+#: asks for it in those words -- a reader who has scrolled up "has no idea how
+#: far behind they now are".
+BEHIND = "{count:,} behind"
+
+
 class StatusBar(QStatusBar):
-    """Four independent readouts, each owning one fact."""
+    """Independent readouts, each owning one fact."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -61,6 +69,16 @@ class StatusBar(QStatusBar):
         #: were a key nobody had been told about and a menu item two levels
         #: down. Logcat, Wireshark, DebugView and klogg all carry the same
         #: control, and all four put the state on it rather than the verb.
+        #: How many records have arrived below the bottom of the viewport.
+        #:
+        #: Its own label rather than more text on the button, for two reasons.
+        #: The button is a click target whose width would then change with
+        #: every tick a reader spends scrolled away, walking the whole
+        #: right-hand end of the bar under the cursor. And this number is
+        #: silent far more often than it speaks, which is a label appearing and
+        #: not a control changing shape.
+        self._behind = QLabel("", self)
+
         self.follow = QToolButton(self)
         self.follow.setCheckable(True)
         self.follow.setAutoRaise(True)
@@ -73,26 +91,46 @@ class StatusBar(QStatusBar):
         for widget in (self._rate, self._device, self._shown, self._volume, self._gaps):
             self.addPermanentWidget(widget)
         # Last, so it sits at the end of the bar where the view's own bottom
-        # is, which is what it is about.
+        # is, which is what it is about -- and the count immediately before it,
+        # because it is the reason the control is worth pressing.
+        self.addPermanentWidget(self._behind)
         self.addPermanentWidget(self.follow)
 
         self.set_gap_count(0)
         self.set_following(following=True)
 
-    def set_following(self, *, following: bool) -> None:
-        """Show whether the tail is being followed.
+    def set_following(self, *, following: bool, behind: int = 0) -> None:
+        """Show whether the tail is being followed, and how far behind it is.
 
         ``setChecked`` does not emit ``clicked``, which is the signal this
         control is read through, so syncing it from derived state cannot be
         mistaken for a person pressing it. That distinction is the one this
         project has already got wrong twice with ``toggled``.
+
+        The two facts are set together, from one call, because they are one
+        reading of one view. The state without the count is the half
+        `docs/design/gui.md` §4 calls the less useful one -- knowing the tail
+        has stopped says nothing about whether five records or fifty thousand
+        have gone past since.
+
+        Silent while following, and silent at zero. Unlike the gap count in
+        this module's docstring there is no ambiguity to guard against: a
+        followed view is at the end by definition, so "nothing behind" and
+        "not counting" are the same state. This is the rule `set_shown`
+        already follows for the same reason.
         """
         self.follow.setChecked(following)
         self.follow.setText(FOLLOWING if following else NOT_FOLLOWING)
+        silent = following or behind <= 0
+        self._behind.setText("" if silent else BEHIND.format(count=behind))
 
     @property
     def follow_text(self) -> str:
         return self.follow.text()
+
+    @property
+    def behind_text(self) -> str:
+        return self._behind.text()
 
     def set_rate(self, records_per_second: float | None) -> None:
         """Live throughput, or ``None`` when nothing is streaming."""

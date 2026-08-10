@@ -26,7 +26,7 @@ from ostrace.gui.columns import Column
 from ostrace.gui.filters import Filter
 from ostrace.gui.models import Find, RecordModel
 from ostrace.gui.theme import Scheme
-from ostrace.gui.widgets.status_bar import FOLLOWING, NOT_FOLLOWING
+from ostrace.gui.widgets.status_bar import BEHIND, FOLLOWING, NOT_FOLLOWING
 from ostrace.gui.windows.main import MainWindow
 from ostrace.storage.capture import open_capture
 
@@ -550,6 +550,95 @@ class TestTheFollowIndicator:
         window.go_to_bottom()
 
         assert window.following
+
+
+class TestTheUnseenCount:
+    """The other half of §4, and the one it calls more useful.
+
+    The indicator says the tail has stopped. It does not say whether five
+    records or fifty thousand have gone past since, which is the question a
+    reader who has scrolled away actually has.
+    """
+
+    @staticmethod
+    def _scrolled_away(window: MainWindow) -> None:
+        """A reader part way up a live capture, with the view really laid out.
+
+        Shown and sized on purpose, and this is not the usual boilerplate.
+        `behind` is read off the row at the *bottom edge of the viewport*,
+        which is a question an unshown table answers with an invalid index
+        whatever the state -- so a test that skipped this would pass against
+        a `behind` that always returned zero.
+        """
+        window._set_capturing(capturing=True)
+        window.table.resize(600, 300)
+        window.table.show()
+        QApplication.processEvents()
+        bar = window.table.verticalScrollBar()
+        bar.actionTriggered.emit(QAbstractSlider.SliderAction.SliderPageStepSub.value)
+        bar.setValue(0)
+        window._follow()
+
+    def test_it_counts_every_record_that_arrives_below_the_viewport(
+        self, window: MainWindow
+    ) -> None:
+        """Exactly, and without measuring a font.
+
+        Appending raises the scrollbar's maximum and leaves its value alone, so
+        the row at the bottom edge does not move. Whatever the row height turns
+        out to be on this machine, a hundred new records are a hundred more
+        records behind -- which is the assertion `docs/design/gui.md` §12 wants
+        instead of one that reads a font metric under the offscreen plugin.
+        """
+        self._scrolled_away(window)
+        before = window.behind
+
+        window.model.append([make_record(i) for i in range(100)])
+        window._follow()
+
+        assert not window.following
+        assert before > 0, "the viewport was never laid out, so nothing was below it"
+        assert window.behind == before + 100
+        assert window.status.behind_text == BEHIND.format(count=before + 100)
+
+    def test_it_says_nothing_while_the_tail_is_being_followed(self, window: MainWindow) -> None:
+        """Silent at the bottom -- including in the hundred milliseconds where
+        the view has not caught up yet.
+
+        `_follow` coalesces the scrolling and not the draining, so a followed
+        view is briefly behind on purpose several times a second. A count that
+        spoke during that window would flicker on every tick of every capture,
+        which is a readout teaching the eye to skip it.
+        """
+        window._set_capturing(capturing=True)
+        window.table.resize(600, 300)
+        window.table.show()
+        QApplication.processEvents()
+        window.set_following(follow=True)
+        window._follow()  # arms the scroll throttle, which starts unarmed
+
+        window.model.append([make_record(i) for i in range(500)])
+        window._follow()  # throttled: reports the state, does not move the view
+
+        assert window.following
+        assert window.behind > 0
+        assert window.status.behind_text == ""
+
+    def test_it_says_nothing_once_there_is_no_tail(self, window: MainWindow) -> None:
+        """A file has no arrivals. Every row below the viewport has been there
+        since it opened, so calling that number "behind" would invent one.
+
+        The derivation stays honest -- it is the readout that goes quiet, on
+        the same condition that greys out the control beside it, so the two
+        cannot end up saying different things about the same capture.
+        """
+        self._scrolled_away(window)
+        assert window.status.behind_text != "", "nothing was behind to begin with"
+
+        window._set_capturing(capturing=False)
+
+        assert window.behind > 0
+        assert window.status.behind_text == ""
 
 
 def test_escape_does_not_move_the_view(window: MainWindow) -> None:
