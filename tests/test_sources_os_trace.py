@@ -27,6 +27,7 @@ from ostrace.errors import (
 )
 from ostrace.model import DeviceInfo, Gap, Level, Platform, Record
 from ostrace.sources import os_trace
+from ostrace.sources.base import RECONNECTING, STREAMING
 from ostrace.sources.os_trace import OsTraceSource, ReconnectPolicy
 
 if TYPE_CHECKING:
@@ -478,3 +479,77 @@ def test_a_source_that_forgets_aclose_is_loud_rather_than_leaky() -> None:
 
     with pytest.raises(NotImplementedError):
         asyncio.run(Forgetful().aclose())
+
+
+class TestSayingSoWhileItHappens:
+    """`on_state`, which exists for one reason the `Gap` cannot cover.
+
+    A gap is the *record* of an outage and travels in the stream in position,
+    which is where its meaning is. But it can only be written once the device
+    is back, and the question somebody watching a stalled window has is being
+    asked several seconds before that.
+    """
+
+    def test_it_says_reconnecting_during_the_outage_and_streaming_after(
+        self, seam: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        del seam
+        states: list[str] = []
+        emitting(
+            [record(0), StreamInterruptedError("socket closed")],
+            [record(1)],
+            monkeypatch=monkeypatch,
+        )
+        source = OsTraceSource(reconnect=ReconnectPolicy(delay=0.0), on_state=states.append)
+
+        asyncio.run(take(source, 3))
+
+        assert states == [STREAMING, RECONNECTING, STREAMING]
+
+    def test_a_capture_with_no_outage_says_streaming_once(
+        self, seam: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        del seam
+        states: list[str] = []
+        emitting([record(0), record(1)], monkeypatch=monkeypatch)
+        source = OsTraceSource(reconnect=ReconnectPolicy.disabled(), on_state=states.append)
+
+        asyncio.run(take(source, 2))
+
+        assert states == [STREAMING]
+
+    def test_a_listener_that_raises_does_not_cost_the_capture(
+        self, seam: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The records are the product and the notification is a courtesy.
+
+        A device released because a banner threw would lose everything the
+        device says next, which is the opposite of what a log viewer is for.
+        """
+
+        def explode(state: str) -> None:
+            msg = f"listener is broken ({state})"
+            raise RuntimeError(msg)
+
+        del seam
+        emitting(
+            [record(0), StreamInterruptedError("socket closed")],
+            [record(1)],
+            monkeypatch=monkeypatch,
+        )
+        source = OsTraceSource(reconnect=ReconnectPolicy(delay=0.0), on_state=explode)
+
+        items = asyncio.run(take(source, 3))
+
+        assert [type(item).__name__ for item in items] == ["Record", "Gap", "Record"]
+
+    def test_no_listener_is_the_ordinary_case(
+        self, seam: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The CLI passes none, and the code path with nobody watching is the
+        one that runs on every capture this project has ever taken."""
+        del seam
+        emitting([record(0)], [record(1)], monkeypatch=monkeypatch)
+        source = OsTraceSource(reconnect=ReconnectPolicy(delay=0.0))
+
+        assert len(asyncio.run(take(source, 3))) == 3

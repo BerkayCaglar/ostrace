@@ -24,10 +24,10 @@ from typing import TYPE_CHECKING, Any
 from ostrace.devices.discovery import open_lockdown, read_device_info
 from ostrace.errors import OstraceError, StreamInterruptedError, translate
 from ostrace.model import Gap, Level, Platform, Record, basename
-from ostrace.sources.base import SourceCloseMixin
+from ostrace.sources.base import RECONNECTING, STREAMING, SourceCloseMixin
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Callable
     from datetime import tzinfo
 
     from ostrace.model import DeviceInfo
@@ -119,6 +119,7 @@ class OsTraceSource(SourceCloseMixin):
         stream_flags: int = DEFAULT_STREAM_FLAGS,
         pid: int = -1,
         reconnect: ReconnectPolicy | None = None,
+        on_state: Callable[[str], None] | None = None,
     ) -> None:
         _guard_optimized_interpreter()
 
@@ -126,6 +127,19 @@ class OsTraceSource(SourceCloseMixin):
         self.stream_flags = stream_flags
         self.pid = pid
         self.reconnect = reconnect if reconnect is not None else ReconnectPolicy()
+        #: Told `RECONNECTING` and `STREAMING` as the connection comes and
+        #: goes. A constructor argument on this class rather than anything on
+        #: `LogSource`: consumers take the protocol and must never reach for a
+        #: method one implementation has and another does not, and the only
+        #: code that names `OsTraceSource` is the code that builds one.
+        #:
+        #: An outage is *also* reported in the stream, as a `Gap`, and that
+        #: stays the record of what happened -- a gap between these two records
+        #: and not those two loses its meaning through a side channel. This is
+        #: the other thing: it fires *while* the outage is happening, which is
+        #: the only moment at which anybody can be told the device is gone
+        #: rather than quiet. Nothing in the file depends on it.
+        self._on_state = on_state
 
         self._device: DeviceInfo | None = None
         self._last_seen: datetime | None = None
@@ -283,6 +297,7 @@ class OsTraceSource(SourceCloseMixin):
                 return
 
             connected_once = True
+            self._notify(STREAMING)
 
             # Identity comes from the session we just opened, and is refreshed
             # on every connect: free, because the values are already in hand,
@@ -315,11 +330,28 @@ class OsTraceSource(SourceCloseMixin):
                 return
 
             pending_gap = (self._last_seen or self._device_now(), outage)
+            # Before the wait, not after it: the whole value of this is that it
+            # arrives during the outage, and the delay is the outage.
+            self._notify(RECONNECTING)
             await asyncio.sleep(self.reconnect.delay)
             # Checked again after the wait: a stop that lands during the
             # reconnect delay must not be answered by reconnecting.
             if self._stopped():
                 return
+
+    def _notify(self, state: str) -> None:
+        """Tell whoever is watching, and never fail because of them.
+
+        A listener that raises must not tear down a capture: the records are
+        the product and the notification is a courtesy, and a device released
+        because a banner threw would lose everything the device says next. It
+        is swallowed rather than logged because this module has no logger and
+        acquiring one for a callback the caller wrote is the wrong trade.
+        """
+        if self._on_state is None:
+            return
+        with contextlib.suppress(Exception):
+            self._on_state(state)
 
     def _outage_reason(self, exc: OstraceError | None) -> str | None:
         """What to write in the gap, or ``None`` to end the stream.

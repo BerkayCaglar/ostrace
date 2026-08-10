@@ -14,6 +14,42 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Added
 
+- **A Doctor window.** The checks have existed since phase 1 and only
+  `ostrace doctor` could run them, so somebody who installed this for the
+  window met a dead end at exactly the moment something was wrong — and the
+  answer is almost never in the program. It is a service that was never
+  installed, a device that was never trusted, or a cable that only carries
+  power. `Help` → `Doctor…`, on `Ctrl+Shift+D`.
+
+  It runs on a thread, because the checks wait on sockets with a two-second
+  timeout apiece and on the interface thread that is a frozen window for as
+  long as the diagnosis takes — longest in exactly the case somebody is running
+  it. `Run Again` is guarded while one is in flight: a second lockdown against
+  a device is the thing this project already knows stalls the first.
+
+  Each check shows its status as a **word** and not only a colour, a hint gets
+  a row of its own, and the whole report copies out as text — the reason to run
+  this is usually to tell somebody else what it said.
+
+- **The viewer says the device dropped out, while it is happening.** The source
+  retries an outage for up to a minute and the window used to say nothing: the
+  user saw a stream that had stopped, and found out only when a `Gap` row
+  appeared or the capture gave up.
+
+  The `Gap` is the *record* of an outage and stays that — it travels in the
+  stream in position, which is where its meaning is. But it can only be written
+  once the device is back, and the question somebody staring at a stalled
+  window has is being asked several seconds earlier. `OsTraceSource` gained an
+  `on_state` callback for that, and the banner offers `Disconnect`, which is
+  the only decision left while the source is already retrying. Coming back
+  clears that banner and only that one.
+
+- **Two dead ends got the right action instead of a second Retry.** A capture
+  that ran and then died offers `Diagnose…` — pressing Capture again is one
+  click away on the toolbar, and what the user does not have is any way to find
+  out why. A capture that finished offers `Export…`, which until now was a
+  moment nothing marked at all.
+
 - **The detail pane can be put away.** `Ctrl+I`, and a ticked item in `View` so
   it is recoverable without knowing the key. The visibility is remembered
   between sessions and restored *through* the menu item rather than around it —
@@ -205,20 +241,18 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Planned
 
-**Nothing in this section is built.** It is the rest of the must-have list from
-the GUI redesign — [docs/research/gui-redesign/05-interaction.md](docs/research/gui-redesign/05-interaction.md)
-§10 — of which 0.1.1 took the affordable half. It is here rather than only in
-that document so the backlog sits where the next release gets written, and it
-is labelled so nobody reads it as a list of things that shipped.
-
-- **A Doctor window**, reachable from Help and offered as a banner action. The
-  checks exist and only the command line can run them, so a graphical user
-  meets a dead end at exactly the moment something is wrong.
-- **A reconnect banner**, which needs the `capture(on_state=…)` callback, and a
-  **capture-finished banner** offering Export.
+**The must-have tier is finished.** This section held the rest of it —
+[docs/research/gui-redesign/05-interaction.md](docs/research/gui-redesign/05-interaction.md)
+§10 — of which 0.1.1 took the affordable half; the other half is in `Added`
+above. Nothing is left in the first tier.
 
 The nice-to-have and later tiers stay in that document rather than being copied
 here. A backlog long enough to skim is one nobody reads.
+
+Two things from the published mockup are in neither tier and are still worth
+doing: a left gutter carrying severity in one slot and selection or a mark in
+another, so a selected Error still reads as an Error; and a dash in a blanked
+repeat cell, so it does not read as missing data.
 
 ## 0.1.1 - 2026-08-10
 
