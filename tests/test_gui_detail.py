@@ -24,6 +24,7 @@ pytest.importorskip("PySide6", reason="the gui extra is not installed")
 from PySide6.QtWidgets import QApplication, QLabel
 
 from ostrace.gui.widgets.detail_pane import ABSENT, DetailPane
+from ostrace.gui.windows.main import MainWindow
 
 pytestmark = pytest.mark.gui
 
@@ -251,3 +252,81 @@ def test_show_item_dispatches_on_the_kind(pane: DetailPane, records: list[Record
     )
     assert pane.field("Message") is None
     assert pane.field("Reason") == "device disconnected"
+
+
+class TestPuttingThePaneAway:
+    """`Ctrl+I`, and the two things that made it not a one-liner.
+
+    Driven through the menu item rather than through `set_detail_visible`,
+    because the item is the only thing that calls it and a window whose tick
+    and pane disagreed would need two presses to show it -- the first of which
+    appears to do nothing.
+    """
+
+    @staticmethod
+    def _shown(qt_app: object) -> MainWindow:
+        del qt_app
+        window = MainWindow()
+        window.resize(900, 600)
+        window.show()
+        QApplication.processEvents()
+        return window
+
+    def test_it_starts_showing(self, qt_app: object) -> None:
+        window = self._shown(qt_app)
+
+        assert window.detail.isVisible()
+        assert window.action_detail_pane.isChecked()
+
+    def test_the_key_puts_it_away_and_brings_it_back(self, qt_app: object) -> None:
+        window = self._shown(qt_app)
+
+        window.action_detail_pane.setChecked(False)
+        assert not window.detail.isVisible()
+
+        window.action_detail_pane.setChecked(True)
+        assert window.detail.isVisible()
+
+    def test_it_comes_back_the_size_it_went_away(self, qt_app: object) -> None:
+        """A pane that came back bigger than it went away is one there is no
+        way to put right that a second press does not undo again.
+
+        This pins a *Qt* behaviour rather than ours: `QSplitter` keeps a hidden
+        child's size and gives it back. The window used to save and restore the
+        sizes by hand, and this test stayed green with that removed -- which is
+        how the two lines were found to be restoring numbers Qt had already
+        restored. Worth keeping: the day somebody replaces `setVisible` with
+        `removeWidget`, the sizes stop coming back and nothing else notices.
+        """
+        window = self._shown(qt_app)
+        window._split.setSizes([500, 100])
+        QApplication.processEvents()
+        before = window._split.sizes()
+
+        window.action_detail_pane.setChecked(False)
+        QApplication.processEvents()
+        window.action_detail_pane.setChecked(True)
+        QApplication.processEvents()
+
+        assert window._split.sizes() == before
+
+    def test_the_table_takes_the_room(self, qt_app: object) -> None:
+        """Otherwise the pane is hidden and its share of the window is not,
+        which reads as a rendering fault rather than as a hidden pane."""
+        window = self._shown(qt_app)
+        before = window.table.height()
+
+        window.action_detail_pane.setChecked(False)
+        QApplication.processEvents()
+
+        assert window.table.height() > before
+
+    def test_it_is_remembered(self, qt_app: object) -> None:
+        window = self._shown(qt_app)
+        window.action_detail_pane.setChecked(False)
+        window._save_layout()
+
+        reopened = self._shown(qt_app)
+
+        assert not reopened.detail.isVisible()
+        assert not reopened.action_detail_pane.isChecked(), "the tick disagreed with the pane"

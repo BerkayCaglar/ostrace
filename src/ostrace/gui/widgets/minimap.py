@@ -77,6 +77,13 @@ class Minimap(QWidget):
             "Errors, gaps and marks across the whole capture, and where you are in it. "
             "Click to jump."
         )
+        # It is a control -- clicking it jumps -- drawn entirely by us, so it
+        # has no text, no icon and nothing else an assistive technology could
+        # read a purpose out of.
+        self.setAccessibleName("Capture overview")
+        self.setAccessibleDescription(
+            "Errors, gaps and marks across the whole capture, and where you are in it"
+        )
 
         self._refresh = QTimer(self)
         self._refresh.setInterval(REFRESH_MS)

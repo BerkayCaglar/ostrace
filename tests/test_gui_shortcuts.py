@@ -12,7 +12,8 @@ import pytest
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QAction, QKeyEvent, QKeySequence
 
 from ostrace.gui.shortcuts import BINDINGS, key_table, sequences, unbound
 from ostrace.gui.windows.main import MainWindow
@@ -129,3 +130,46 @@ def test_pause_is_bound_which_neither_logcat_nor_console_manages(window: MainWin
     """Both are asked for it. It is one line."""
     assert not window.action_pause.shortcut().isEmpty()
     assert window.action_pause.isCheckable()
+
+
+def test_quit_is_reachable_on_windows_too(window: MainWindow) -> None:
+    """`StandardKey.Quit` is `⌘Q` on macOS and a key called `Exit` on Windows.
+
+    Measured rather than assumed -- `QKeySequence.keyBindings` answers
+    `['Exit']` there -- and no keyboard has an Exit key, so on the platform
+    this is developed on the only way out of the program was the window's
+    close button. `Ctrl+Q` is the alias; Qt resolves it to the same `⌘Q` the
+    standard key already gives on macOS, so it costs nothing where it is not
+    needed.
+    """
+    bound = {sequence.toString() for sequence in window.action_quit.shortcuts()}
+
+    assert QKeySequence("Ctrl+Q").toString() in bound
+    assert bound - {""}, "Quit ended up with no key at all"
+
+
+def test_a_letter_typed_into_search_does_not_fire_its_alias(window: MainWindow) -> None:
+    """The single-letter aliases are safe, and this is *why* they are.
+
+    `E`, `M`, `N`, `/` and the rest are window-level shortcuts, and the search
+    field is a plain `QLineEdit` in the same window. What stops `e` jumping to
+    the next error instead of typing a letter is `ShortcutOverride`: Qt offers
+    the key to the focused widget first, and a line edit claims anything it
+    would insert. Nothing in the code says so, which is exactly why it is worth
+    an assertion -- a future field that did not claim the key would break the
+    filter bar silently, and the aliases would look like the culprit.
+    """
+    punctuation = {"/": Qt.Key.Key_Slash, "[": Qt.Key.Key_BracketLeft, "]": Qt.Key.Key_BracketRight}
+    field = window.filter_bar._search
+    aliases = {alias for binding in BINDINGS for alias in binding.aliases if len(alias) == 1}
+    assert aliases, "there are no single-character aliases left to protect"
+
+    for alias in sorted(aliases):
+        # Every one of them, and a new alias whose key is not derivable here
+        # fails loudly rather than being quietly skipped.
+        key = getattr(Qt.Key, f"Key_{alias.upper()}") if alias.isalpha() else punctuation[alias]
+        event = QKeyEvent(
+            QEvent.Type.ShortcutOverride, key, Qt.KeyboardModifier.NoModifier, alias.lower()
+        )
+        field.event(event)
+        assert event.isAccepted(), f"the search field would lose {alias!r} to its alias"

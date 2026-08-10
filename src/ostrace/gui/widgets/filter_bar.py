@@ -67,7 +67,10 @@ class FilterBar(QWidget):
             self._level.addItem(f"{level.title} and above", level)
         self._level.setCurrentIndex(0)
         self._level.currentIndexChanged.connect(self.changed)
-        layout.addWidget(QLabel("Level", self))
+        self._level.setAccessibleName("Level")
+        level_caption = QLabel("Level", self)
+        level_caption.setBuddy(self._level)
+        layout.addWidget(level_caption)
         layout.addWidget(self._level)
 
         self._process = self._add_field(layout, "Process", "name or pid")
@@ -98,7 +101,15 @@ class FilterBar(QWidget):
         field.setPlaceholderText(placeholder)
         field.setClearButtonEnabled(True)
         field.textChanged.connect(self.changed)
-        layout.addWidget(QLabel(label, self))
+        caption = QLabel(label, self)
+        # A `QLabel` beside a field is a label to somebody looking at it and
+        # nothing at all to anything reading the window: the association has to
+        # be declared. `setBuddy` also gives the label's accelerator somewhere
+        # to go, and the accessible name is belt and braces for the platforms
+        # whose bridge reads one and not the other.
+        caption.setBuddy(field)
+        field.setAccessibleName(label)
+        layout.addWidget(caption)
         layout.addWidget(field, stretch=stretch)
         return field
 

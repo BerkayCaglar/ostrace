@@ -185,6 +185,7 @@ class MainWindow(QMainWindow):
     action_bottom: QAction
     action_go_time: QAction
     action_follow: QAction
+    action_detail_pane: QAction
     action_next_jump: QAction
     action_previous_jump: QAction
     action_next_error: QAction
@@ -482,6 +483,12 @@ class MainWindow(QMainWindow):
             button = self.toolbar.widgetForAction(action)
             if isinstance(button, QToolButton) and not labelled:
                 button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+                # Stripping the label strips the only thing a screen reader
+                # had. The accelerator marker goes with it: `&Export…` is read
+                # out as "ampersand Export", and the ellipsis means "this asks
+                # something first", which is worth keeping.
+                button.setAccessibleName(action.text().replace("&", ""))
+                button.setAccessibleDescription(action.toolTip())
 
         # Immediately after the two chevrons, because it is what they mean. An
         # arrow whose target is stated somewhere else is an arrow you have to
@@ -535,6 +542,7 @@ class MainWindow(QMainWindow):
         self.action_top.triggered.connect(self.go_to_top)
         self.action_bottom.triggered.connect(self.go_to_bottom)
         self.action_go_time.triggered.connect(self.ask_for_time)
+        self.action_detail_pane.toggled.connect(lambda on: self.set_detail_visible(visible=on))
         self.action_follow.toggled.connect(lambda on: self.set_following(follow=on))
         self.status.follow.clicked.connect(self._on_follow_clicked)
         self.action_next_jump.triggered.connect(lambda: self.find_next(self._jump))
@@ -645,11 +653,17 @@ class MainWindow(QMainWindow):
         if self._sized:
             return
         self._sized = True
-        if self._restore_layout():
-            return
-        total = self._split.height()
-        share = _TABLE_STRETCH + _DETAIL_STRETCH
-        self._split.setSizes([total * _TABLE_STRETCH // share, total * _DETAIL_STRETCH // share])
+        # After the sizes, whichever way they were arrived at: putting the pane
+        # away and then dividing the split would hand the hidden pane a share
+        # of the window, which it takes back the moment it is shown again.
+        restored = self._restore_layout()
+        if not restored:
+            total = self._split.height()
+            share = _TABLE_STRETCH + _DETAIL_STRETCH
+            self._split.setSizes(
+                [total * _TABLE_STRETCH // share, total * _DETAIL_STRETCH // share]
+            )
+        self._restore_detail_visible()
 
     # -- what the window remembers ---------------------------------------
 
@@ -663,6 +677,21 @@ class MainWindow(QMainWindow):
         owns: no file of ours is being placed.
         """
         return QSettings()
+
+    def _restore_detail_visible(self) -> None:
+        """Put the pane back the way the last session left it.
+
+        Through the menu item rather than around it, so the tick and the pane
+        cannot start out disagreeing -- a window that opened with the pane
+        hidden and the item ticked would need two presses to show it, the first
+        of which appears to do nothing.
+
+        Only on the way to *hidden*. Visible is the default and the state the
+        window is built in, and setting a checkable action to the value it
+        already holds emits nothing.
+        """
+        if self._settings().value("window/detail", defaultValue=True, type=bool) is False:
+            self.action_detail_pane.setChecked(False)
 
     def _save_recent(self) -> None:
         """Keep the recent filters between sessions.
@@ -733,6 +762,7 @@ class MainWindow(QMainWindow):
         # with the geometry and not with the filter, which is deliberately not
         # remembered.
         settings.setValue("table/jump", self._jump.value)
+        settings.setValue("window/detail", self.detail.isVisible())
 
     def _restore_layout(self) -> bool:
         """Put it back, and say whether there was anything to put.
@@ -785,6 +815,9 @@ class MainWindow(QMainWindow):
         for binding in BINDINGS:
             keys = sequences(binding)
             action = self._action(binding.text, keys[0], checkable=binding.checkable)
+            # Before anything is connected, so a default state is a default
+            # rather than an action taken on a window still being built.
+            action.setChecked(binding.checked)
             if len(keys) > 1:
                 # Aliases are real bindings, not documentation. A menu shows
                 # one; `setShortcuts` registers all of them.
@@ -799,6 +832,15 @@ class MainWindow(QMainWindow):
         # table because their roles, not their keys, are the point.
         self.action_quit = self._action(
             "&Quit", QKeySequence.StandardKey.Quit, role=QAction.MenuRole.QuitRole
+        )
+        # `StandardKey.Quit` is `⌘Q` on macOS and, on Windows, a key called
+        # `Exit` -- measured, not assumed: `QKeySequence.keyBindings` answers
+        # `['Exit']` there. No keyboard has that key, so on the platform this
+        # is developed on the only way out was the window's close button. Qt
+        # resolves `Ctrl+Q` to the same `⌘Q` the standard key already gives on
+        # macOS, so the alias costs nothing where it is not needed.
+        self.action_quit.setShortcuts(
+            [QKeySequence(QKeySequence.StandardKey.Quit), QKeySequence("Ctrl+Q")]
         )
         self.action_about = self._action("&About ostrace", role=QAction.MenuRole.AboutRole)
 
@@ -1356,6 +1398,23 @@ class MainWindow(QMainWindow):
             # who has stopped tailing, read from the view rather than stored.
             return False
         return self._at_bottom
+
+    def set_detail_visible(self, *, visible: bool) -> None:
+        """Put the detail pane away, or bring it back where it was.
+
+        One line, and it was two more until the test that claimed to cover them
+        stayed green with them removed: `QSplitter` keeps a hidden child's size
+        and gives it back on the way in, so saving the sizes by hand was
+        restoring numbers Qt had already restored. The assertion is kept
+        because the behaviour matters -- a pane that came back bigger than it
+        went away is one there is no way to put right that a second press does
+        not undo -- and because it pins a Qt behaviour rather than ours.
+
+        The menu item is not synced here. It is the only thing that calls this,
+        and `setChecked` from inside its own `toggled` handler is the loop this
+        project has already walked into twice.
+        """
+        self.detail.setVisible(visible)
 
     def _show_viewport(self) -> None:
         """Tell the minimap which rows are on screen."""
