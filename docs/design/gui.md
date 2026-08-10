@@ -364,6 +364,38 @@ history. The threshold semantics survive either way — Apple's level values are
 not severity-ordered, so it is a threshold over our own enum, expressed here as
 a combo rather than as `level:`.
 
+**Half of what the text field was for is now covered without one.** The two
+things it bought were *saying what is in front of you without retyping it* and
+*going back to what you typed yesterday*. Neither needs a parser.
+
+**Right-clicking a row offers its process and its subsystem.** The values come
+off the *record*, not the cell — the table blanks a cell that repeats the row
+above, so a right-click half way down a run of one process would otherwise
+offer to filter by nothing. A marker row is offered neither, because it has
+neither, and an entry that filtered by the empty string would quietly mean
+"everything", which is the opposite of narrowing. The other entries on the menu
+are the window's existing actions: a context menu with its own copy or its own
+mark would be a second implementation to keep in step with the first.
+
+Narrowing **adds** to the standing filter rather than replacing it. The
+right-click is almost always the second step — somebody already at `Error and
+above` who spots one noisy process is asking for the errors *from it*.
+
+**The last ten filters are offered, unnamed.** Naming is the expensive half and
+going back is the useful one, and a viewer that asks for a name before it will
+remember anything gets asked for nothing. A filter is remembered when it has
+**stood for two seconds**, not when it is applied: every keystroke applies, so
+remembering on apply would fill the list with `d`, `da`, `das`, `dasd` — three
+entries nobody asked for, pushing out the ones they did.
+
+They survive a restart, and that is not the same decision as §1's refusal to
+remember the *applied* filter. A filter that comes back applied is one the user
+has to remember they set, which is "where did my logs go" with a longer fuse; a
+filter that is merely on a menu changes nothing until somebody picks it. Stored
+as JSON per entry so a line written by another version can be dropped on its
+own — a window that refuses to open because a remembered filter is malformed
+has turned a convenience into a way of losing the application.
+
 ---
 
 ## 6. States that must be visible
