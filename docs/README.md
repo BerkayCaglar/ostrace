@@ -26,12 +26,15 @@ does. Read [formats/](formats/) if you are writing something that consumes an
 | 4 | PySide6 GUI | **done**, against [its contract](design/gui.md) |
 | 5 | Release: PyPI via Trusted Publishing, tagged 0.1.0 | in progress — everything but the tag |
 
-Phases 1 and 2 carried the real risk, and phase 4 carried the rest of it: it is
-the one part of the program whose macOS behaviour cannot be run here. See
+Phases 1 and 2 carried the real risk, and phase 4 carried the rest of it: it was
+the one part of the program whose macOS behaviour could not be run here. See
 [design/gui.md §12](design/gui.md) for what CI can and cannot prove about it —
 the short version is that the model, the colour maths and the key bindings are
 verified on all three operating systems, and native menu placement is not
 verifiable at all, so it is guarded by a property test rather than by looking.
+That section now ends with a first hands-on pass on macOS 26.3.1: which of its
+claims were watched happening, which one was wrong, and the 2× device pixel
+ratio the pass still did not exercise.
 
 The documentation under `formats/` and `design/` describes contracts, which are
 specified before they are implemented so that the shape is a decision rather

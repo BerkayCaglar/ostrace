@@ -161,10 +161,12 @@ than a fact about the device.
   keeps macOS from quarantining anything.
 - **Nothing is code-signed.** It does not need to be on the install route
   above.
-- **macOS is verified by CI, not by hand.** The test suite and a screenshot job
-  run on a macOS runner every change, but no Mac has ever run this
-  interactively. Assumptions that could not be checked are marked
-  `# UNVERIFIED-MACOS` in the source. Reports from an actual Mac are welcome.
+- **macOS has now been run by hand, once.** Every test including the eleven
+  that need a real iPhone passes on macOS 26.3.1, and the assumptions that were
+  marked unverified in the source have been checked. That is one pass on one
+  machine, not a support commitment: that machine drove a single non-Retina
+  display, so nothing here has yet been seen at the 2× device pixel ratio most
+  Macs run at. Reports are still welcome.
 - **Only iOS is supported.** The device layer is written around lockdown and
   `os_trace_relay`.
 

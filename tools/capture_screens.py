@@ -1,6 +1,13 @@
 # SPDX-FileCopyrightText: 2026 Berkay ÇAĞLAR
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Render the GUI to PNG files, so a maintainer with no Mac can see the macOS UI.
+"""Render the GUI to PNG files, so the macOS UI can be looked at from anywhere.
+
+Written when there was no Mac to hand and still the cheapest way to see one:
+it needs no display and runs on any of the three platforms, so a change can be
+eyeballed on macOS without owning the hardware. The first hands-on pass on a
+real Mac found a bug *in a picture this tool had been producing correctly all
+along* -- see `docs/design/gui.md` §12 -- which is the argument for looking at
+the output rather than merely generating it.
 
 Qt clips layouts differently on macOS under a device pixel ratio that is always
 an integer there, and picks a system font nobody here can preview. Neither is

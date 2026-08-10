@@ -26,8 +26,8 @@ pytest -m "not device"
 
 All of these run in CI. mypy runs three times on purpose: it narrows `sys.platform`
 to whatever it runs on, so a single pass leaves the other platforms' branches
-unchecked — which is where the bugs would be, since only Windows can be tested
-here.
+unchecked — which is where the bugs would be, since one machine can only ever
+run one of the three.
 
 Clone with full history. The version comes from git tags via hatch-vcs and a
 shallow clone builds as `0.0.0`.
@@ -57,7 +57,10 @@ Each of these has cost real time at least once.
   form, not a named constant — type checkers narrow on the literal and not on a
   constant, and the three-platform mypy run depends on that.
 - **Mark unverified macOS assumptions `# UNVERIFIED-MACOS`** so they can be
-  grepped and confirmed. There is no Mac here; that code is written blind.
+  grepped and confirmed. A Mac is available now and the four markers that
+  existed have been checked, so this is a rule about what gets written next
+  rather than a backlog. One of the four was wrong, which is the argument for
+  keeping the convention rather than against it.
 - **Only `paths.py` decides where files go.** Building a path from a literal is
   how the predecessor ended up unable to run anywhere but Windows. File *names
   inside* an export are the format contract, not a location decision, and

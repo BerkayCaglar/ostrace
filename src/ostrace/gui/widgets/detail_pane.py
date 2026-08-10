@@ -167,6 +167,18 @@ class DetailPane(QScrollArea):
             item = self._grid.takeAt(0)
             widget = item.widget() if item is not None else None
             if widget is not None:
+                # Hidden as well as deleted, and the hiding is the load-bearing
+                # half. `takeAt` removes the row from the *layout*, which stops
+                # the layout positioning it and nothing else; `deleteLater`
+                # then defers the destruction to whenever the event loop next
+                # drains. In between, the widget is still a visible child at
+                # its old geometry, painting straight over the rows that
+                # replaced it. An interactive session hides that -- the loop
+                # drains before the next paint -- but anything that rebuilds
+                # and renders in one pass sees it, which is every `grab()` in
+                # the suite and `tools/capture_screens.py`, whose entire job is
+                # to show what this looks like on macOS.
+                widget.hide()
                 widget.deleteLater()
         self._rows.clear()
 
