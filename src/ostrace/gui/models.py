@@ -57,7 +57,7 @@ from PySide6.QtCore import (
 from ostrace.exporters.plaintext import gap_line
 from ostrace.gui.columns import COLUMNS, Column
 from ostrace.gui.filters import Filter
-from ostrace.gui.markers import Eviction, is_record
+from ostrace.gui.markers import Eviction, is_record, when
 from ostrace.gui.theme import Scheme, Severity, mark_tint, severity_for
 from ostrace.model import Gap, Level, Record
 
@@ -354,6 +354,25 @@ class RecordModel(QAbstractTableModel):
             row = (start + step * offset) % total
             if matches(self, row):
                 return row
+        return None
+
+    def row_at_time(self, moment: datetime) -> int | None:
+        """The first visible row at or after ``moment``, or ``None``.
+
+        Scanned rather than bisected. A device log arrives in roughly
+        chronological order and is not guaranteed to be sorted -- records from
+        several subsystems are interleaved by the relay -- and a binary search
+        over a nearly-sorted sequence answers confidently and wrongly. "The
+        first row at or after" is well defined either way, and at 200,000 rows
+        the scan is about ten milliseconds on a keypress a person made.
+
+        Markers count. A gap is exactly the thing somebody jumping to a time is
+        often looking for, and skipping it would make the one row that explains
+        a silence the one row this cannot reach.
+        """
+        for view_row, source in enumerate(self._visible):
+            if when(self._rows[source]) >= moment:
+                return view_row
         return None
 
     def cell_text(self, view_row: int, column: int) -> str:

@@ -170,6 +170,13 @@ BINDINGS: tuple[Binding, ...] = (
         description="Last row. Press again at the bottom to resume following",
     ),
     Binding(
+        "go_time",
+        "Go to &Time…",
+        "Ctrl+J",
+        group="ends",
+        description="Jump to a clock reading, or to an offset from where you are",
+    ),
+    Binding(
         "follow",
         "&Follow the Tail",
         "Ctrl+Shift+F",

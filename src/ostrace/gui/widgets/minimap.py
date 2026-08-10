@@ -27,7 +27,7 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QWidget
 
 from ostrace.gui.models import Band
-from ostrace.gui.theme import Scheme, mark_accent, palette_for, severity_for
+from ostrace.gui.theme import Scheme, mark_accent, palette_for, severity_for, viewport_marker
 from ostrace.model import Level
 
 if TYPE_CHECKING:
@@ -52,6 +52,11 @@ _WIDTH_CHARS = 2.0
 #: still something the eye can catch. Two device-independent pixels.
 _MIN_STRIPE = 2
 
+#: The viewport marker is never drawn thinner than this. Forty rows on screen
+#: out of two hundred thousand is a third of a pixel, and a marker that rounds
+#: away is worse than none: the reader concludes the strip does not have one.
+_MIN_MARKER = 3
+
 
 class Minimap(QWidget):
     """One stripe per band of rows, coloured by what is in it."""
@@ -64,13 +69,21 @@ class Minimap(QWidget):
         self.scheme = scheme
         self.model: RecordModel | None = None
         self._bands: list[Band] = []
-        self.setToolTip("Errors, gaps and marks across the whole capture. Click to jump.")
+        #: The rows on screen in the table beside this, inclusive, or an empty
+        #: range. Pushed in rather than pulled, because a widget that reached
+        #: for the table would be a strip that only works next to one.
+        self._viewport = (0, -1)
+        self.setToolTip(
+            "Errors, gaps and marks across the whole capture, and where you are in it. "
+            "Click to jump."
+        )
 
         self._refresh = QTimer(self)
         self._refresh.setInterval(REFRESH_MS)
         self._refresh.timeout.connect(self.rebuild)
 
         self._colours = self._build_colours()
+        self._marker_fill, self._marker_edge = viewport_marker(self.scheme)
         self.setFixedWidth(int(self.fontMetrics().horizontalAdvance("0") * _WIDTH_CHARS))
 
     def _build_colours(self) -> dict[Band, QColor]:
@@ -84,7 +97,20 @@ class Minimap(QWidget):
     def set_scheme(self, scheme: Scheme) -> None:
         self.scheme = scheme
         self._colours = self._build_colours()
+        self._marker_fill, self._marker_edge = viewport_marker(self.scheme)
         self.update()
+
+    def set_viewport(self, first: int, last: int) -> None:
+        """Which rows the table beside this is showing.
+
+        Repainted only when the answer changes. It is asked on every scroll,
+        every resize and every batch of arrivals, and a reader who has stopped
+        on one screen of a capture that is still growing gets the same answer
+        every time.
+        """
+        if (first, last) != self._viewport:
+            self._viewport = (first, last)
+            self.update()
 
     def set_model(self, model: RecordModel | None) -> None:
         """Attach the model whose rows this summarises."""
@@ -131,6 +157,30 @@ class Minimap(QWidget):
             for index, flags in enumerate(self._bands):
                 if flags & kind:
                     painter.fillRect(0, index * height // len(self._bands), width, stripe, colour)
+        self._paint_marker(painter)
+
+    def _paint_marker(self, painter: QPainter) -> None:
+        """Draw where the reader is, over the stripes rather than among them.
+
+        Last, so nothing is drawn on top of it. Without this the strip says
+        *what* is in the capture and not *where you are in it*, which makes it
+        a picture rather than a map -- and the click-to-jump it already has is
+        aiming at a target the reader cannot see themselves on.
+        """
+        first, last = self._viewport
+        if self.model is None or last < first:
+            return
+        rows = self.model.rowCount()
+        if rows <= 0:
+            return
+        height = self.height()
+        top = min(first * height // rows, max(0, height - _MIN_MARKER))
+        bottom = max((last + 1) * height // rows, top + _MIN_MARKER)
+        painter.fillRect(0, top, self.width(), bottom - top, self._marker_fill)
+        painter.setPen(self._marker_edge)
+        # `drawRect` puts the pen *on* the boundary, so the right and bottom
+        # edges land one pixel outside a rectangle given the full width.
+        painter.drawRect(0, top, self.width() - 1, bottom - top - 1)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         self._jump(event)

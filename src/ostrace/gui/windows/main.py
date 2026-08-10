@@ -32,7 +32,6 @@ from PySide6.QtCore import (
     QByteArray,
     QElapsedTimer,
     QModelIndex,
-    QPoint,
     QSettings,
     QSize,
     Qt,
@@ -44,6 +43,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -62,10 +62,12 @@ from ostrace.gui.columns import COLUMNS
 from ostrace.gui.filters import Filter
 from ostrace.gui.live import CaptureThread
 from ostrace.gui.loader import CaptureLoader
+from ostrace.gui.markers import when
 from ostrace.gui.models import Find, RecordModel
 from ostrace.gui.pump import Pump
 from ostrace.gui.shortcuts import BINDINGS, key_table, sequences
 from ostrace.gui.theme import Scheme, apply_theme, scheme_for
+from ostrace.gui.timeinput import EXAMPLES, parse_jump
 from ostrace.gui.widgets.banner import Banner
 from ostrace.gui.widgets.detail_pane import DetailPane
 from ostrace.gui.widgets.device_button import DeviceButton
@@ -80,6 +82,8 @@ from ostrace.paths import export_stem, sessions_dir
 from ostrace.storage.capture import Capture, open_capture
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from PySide6.QtWidgets import QWidget as QWidgetType
 
     from ostrace.sources.base import LogSource
@@ -170,6 +174,7 @@ class MainWindow(QMainWindow):
     action_clear_marks: QAction
     action_top: QAction
     action_bottom: QAction
+    action_go_time: QAction
     action_follow: QAction
     action_next_jump: QAction
     action_previous_jump: QAction
@@ -394,6 +399,11 @@ class MainWindow(QMainWindow):
         # Once: the scrollbar belongs to the view, which outlives every
         # model the window will attach to it.
         self.table.verticalScrollBar().actionTriggered.connect(self._on_user_scroll)
+        # Where the reader is, told to the strip that draws it. Not routed
+        # through the pump: scrolling a file that is not being captured has no
+        # ticks, and a marker that only moved during a live capture would be
+        # stuck to the top of every capture anybody opened.
+        self.table.viewport_changed.connect(self._show_viewport)
 
     #: The toolbar, in order: which device, what to do with it, then the file
     #: verbs, then the two jumps a reader makes constantly. ``None`` is a
@@ -504,6 +514,7 @@ class MainWindow(QMainWindow):
         self.action_clear_marks.triggered.connect(self.clear_marks)
         self.action_top.triggered.connect(self.go_to_top)
         self.action_bottom.triggered.connect(self.go_to_bottom)
+        self.action_go_time.triggered.connect(self.ask_for_time)
         self.action_follow.toggled.connect(lambda on: self.set_following(follow=on))
         self.status.follow.clicked.connect(self._on_follow_clicked)
         self.action_next_jump.triggered.connect(lambda: self.find_next(self._jump))
@@ -1302,6 +1313,10 @@ class MainWindow(QMainWindow):
             return False
         return self._at_bottom
 
+    def _show_viewport(self) -> None:
+        """Tell the minimap which rows are on screen."""
+        self.minimap.set_viewport(*self.table.visible_rows())
+
     @property
     def behind(self) -> int:
         """How many records sit below the bottom of the viewport, unseen.
@@ -1317,14 +1332,8 @@ class MainWindow(QMainWindow):
         arriving at all. A partially visible row at the bottom edge counts as
         behind, which errs towards "you have not read this one".
         """
-        last = self.model.rowCount() - 1
-        if last < 0:
-            return 0
-        bottom = self.table.indexAt(QPoint(0, self.table.viewport().height() - 1))
-        if not bottom.isValid():
-            # The last row is above the bottom edge: the whole capture fits.
-            return 0
-        return last - bottom.row()
+        _, bottom = self.table.visible_rows()
+        return max(0, self.model.rowCount() - 1 - bottom)
 
     def set_following(self, *, follow: bool) -> None:
         """Turn the tail on or off, from the status bar or the keyboard.
@@ -1517,6 +1526,62 @@ class MainWindow(QMainWindow):
             self.set_following(follow=True)
             return
         self.go_to(last)
+
+    def ask_for_time(self) -> None:
+        """Ask where to jump to, then jump there.
+
+        Split from `go_to_time` because this half calls a modal ``exec``, and a
+        test that reaches a modal dialog does not fail -- it hangs, holding the
+        job until it is killed. That has cost this suite once already, in the
+        export dialog, and the fix is the same shape: the asking and the doing
+        are separate methods and the tests drive the doing.
+        """
+        current = self._time_anchor()
+        if current is None:
+            self.banner.show_message("There is nothing to jump through yet.", "Dismiss")
+            return
+        text, chosen = QInputDialog.getText(
+            self,
+            "Go to Time",
+            f"Time, or an offset from {current:%H:%M:%S} ({EXAMPLES}):",
+        )
+        if chosen:
+            self.go_to_time(text)
+
+    def _time_anchor(self) -> datetime | None:
+        """The instant a typed time is read relative to.
+
+        The selected row if there is one, and otherwise the top of the screen:
+        both are "where the reader is", and the second is what that means
+        before they have clicked anything. Not the first row of the capture,
+        which is where they were an hour of scrolling ago.
+        """
+        if self.model.rowCount() == 0:
+            return None
+        current = self.table.currentIndex()
+        row = current.row() if current.isValid() else self.table.visible_rows()[0]
+        return when(self.model.row_at(row))
+
+    def go_to_time(self, text: str) -> None:
+        """Jump to the first row at or after the time ``text`` names."""
+        anchor = self._time_anchor()
+        if anchor is None:
+            return
+        try:
+            moment = parse_jump(text, anchor=anchor)
+        except ValueError as exc:
+            self.banner.show_message(str(exc), "Dismiss")
+            return
+        row = self.model.row_at_time(moment)
+        if row is None:
+            # Said with the time in it, because the usual cause is a digit
+            # typed wrong rather than a capture that really ends there.
+            self.banner.show_message(
+                f"No record at or after {moment:%H:%M:%S} — the capture ends before it.",
+                "Dismiss",
+            )
+            return
+        self.go_to(row)
 
     def find_next(self, kind: Find, *, backwards: bool = False) -> None:
         current = self.table.currentIndex()

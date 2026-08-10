@@ -32,7 +32,7 @@ from ostrace.model import Gap, Record
 if TYPE_CHECKING:
     from datetime import datetime
 
-__all__ = ["Eviction", "Row", "is_marker", "is_record"]
+__all__ = ["Eviction", "Row", "is_marker", "is_record", "when"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +64,26 @@ class Eviction:
 
 #: What a row of the model holds.
 Row: TypeAlias = Record | Gap | Eviction
+
+
+def when(row: Row) -> datetime:
+    """When a row happened, whichever of the three kinds it is.
+
+    The three carry the instant under three different names, and each name is
+    right for its own kind: a record has one timestamp, a gap has a start and
+    an end, and an eviction is a running total whose only instant is the newest
+    record it covers. A search by time has to treat them as one sequence, so
+    the mapping lives here beside the alias rather than as a chain of
+    ``isinstance`` in whoever is searching.
+
+    A gap answers with its *start*: it begins where the records stopped, which
+    is the moment somebody looking for "when did it go quiet" means.
+    """
+    if isinstance(row, Record):
+        return row.timestamp
+    if isinstance(row, Gap):
+        return row.start
+    return row.through
 
 
 def is_record(row: Row) -> TypeGuard[Record]:

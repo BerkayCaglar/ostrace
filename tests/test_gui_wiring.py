@@ -401,3 +401,38 @@ class TestChoosingATheme:
         reopened = MainWindow()
         assert reopened.scheme is Scheme.DARK
         assert reopened.action_dark_mode.isChecked()
+
+
+class TestTheMinimapKnowsWhereTheReaderIs:
+    """The strip draws a viewport marker; this is the half that feeds it.
+
+    Both pieces can be right and the picture still wrong, which is why the
+    painting is asserted next door and the connection is asserted here.
+    """
+
+    def test_scrolling_moves_the_marker(self, window: MainWindow) -> None:
+        load(window, ERRORS)
+        window.table.resize(600, 300)
+        window.table.show()
+        QApplication.processEvents()
+        started = window.minimap._viewport
+
+        window.go_to(2_500)
+        QApplication.processEvents()
+
+        assert started[1] >= started[0], "the marker never got a range to begin with"
+        assert window.minimap._viewport[0] > started[0]
+
+    def test_it_is_told_without_a_capture_running(self, window: MainWindow) -> None:
+        """Nothing here is routed through the pump.
+
+        A marker fed from the capture tick would sit at the top of every file
+        anybody opened, which is the only way most people will use this.
+        """
+        load(window, ERRORS)
+        window.table.resize(600, 300)
+        window.table.show()
+        QApplication.processEvents()
+
+        assert window._pump is None, "a capture was running, so this proves nothing"
+        assert window.minimap._viewport != (0, -1)
