@@ -24,7 +24,14 @@ does. Read [formats/](formats/) if you are writing something that consumes an
 | 2 | `analysis/` and `exporters/`, six-column agent bundle | **done** |
 | 3b | CLI: `export` | **done** |
 | 4 | PySide6 GUI | **done**, against [its contract](design/gui.md) |
-| 5 | Release: PyPI via Trusted Publishing, tagged 0.1.0 | in progress — everything but the tag |
+| 5 | Release: PyPI via Trusted Publishing | **done** — `v0.1.1`, [on PyPI](https://pypi.org/project/ostrace/) |
+
+0.1.0 is missing from that row on purpose. It was published and withdrawn the
+next day, over the fixtures its `sdist` carried, and the number will not be
+reused — PyPI does not allow a deleted version to be re-uploaded, and a tag
+pointing at a release that cannot exist would be worse than no tag. The
+[changelog](../CHANGELOG.md) keeps its entry in full, because the work in it is
+real; only the artifact is gone.
 
 Phases 1 and 2 carried the real risk, and phase 4 carried the rest of it: it was
 the one part of the program whose macOS behaviour could not be run here. See
