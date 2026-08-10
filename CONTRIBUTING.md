@@ -86,12 +86,18 @@ at package import because it is a constraint of that one library — offline wor
 such as replaying a session or re-exporting a capture never touches it and is
 not blocked by it.
 
-**macOS is written blind.** The maintainer has no Mac. Every macOS-specific
-assumption is marked `# UNVERIFIED-MACOS` in the source so it can be grepped and
-confirmed by anyone who does. If you have one, checking those is genuinely the
-most useful contribution available. The concrete rules — Qt menu roles,
+**macOS was written blind, and has now been run.** Every macOS-specific
+assumption was marked `# UNVERIFIED-MACOS` in the source so it could be grepped
+and confirmed; the four that existed were checked by hand on macOS 26.3.1, and
+none is left. Three were right. The fourth said `SF Mono` is what a Mac renders
+the log in, and no stock Mac can resolve that family at all — it is `Menlo`.
+
+Nobody has sat in front of this on Linux, and nothing marks the places that
+matters — CI runs the whole suite there every change, which is a different
+thing from having looked at the window. The concrete rules — Qt menu roles,
 `QFileDialog` filters, high-DPI, dark mode — are in the design notes under
-[docs/](docs/).
+[docs/](docs/), which now say which of them were watched happening and which
+are still inference.
 
 **Do not use `QSortFilterProxyModel`.** Filtering 100k rows through it measures
 0.607 s per filter change against 0.130 s for a direct predicate over our own

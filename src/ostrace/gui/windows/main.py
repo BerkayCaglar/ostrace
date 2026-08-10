@@ -427,6 +427,12 @@ class MainWindow(QMainWindow):
         tool dated, and these three are the ones whose consequences differ.
         """
         self.toolbar = QToolBar("Main", self)
+        # `saveState` identifies each toolbar and dock by object name, and warns
+        # on every close without one -- which `closeEvent` triggers, so the
+        # warning was printed every time the window shut. The single unnamed
+        # toolbar still came back, by position, but that fallback is the thing
+        # that stops working the moment a second toolbar or a dock exists.
+        self.toolbar.setObjectName("Main")
         self.toolbar.setMovable(False)
         self.toolbar.setFloatable(False)
         self.toolbar.setIconSize(QSize(icons.ICON_SIZE, icons.ICON_SIZE))

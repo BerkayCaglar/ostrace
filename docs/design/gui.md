@@ -629,7 +629,9 @@ desynchronises the view.
 `QWidget.grab()` and `QWidget.render()` produce **real pixels under the
 offscreen plugin**, on a widget that was never shown *(measured)*. So a
 screenshot needs no display, no window manager and no xvfb — including on
-macOS, which is the only way this project will ever see its own macOS UI.
+macOS, which was for a long time the only way this project was going to see its
+own macOS UI. It is no longer the only way; see the hands-on pass at the end of
+this section, which the screenshot job is what made worth doing.
 
 One trap, and it is invisible until you look at the image: **the offscreen
 plugin's font database is empty on Windows** *(measured: 0 families against 154
@@ -674,6 +676,43 @@ than an appearance: every clickable item in the menu bar declares a `MenuRole`,
 so no item is left on the text heuristic that would relocate it.
 
 Do not read the presence of a macOS screenshot as coverage of the menu trap.
+
+### The first hands-on pass, on macOS 26.3.1
+
+Run on a `Mac16,10` with PySide6 6.11.1 and Python 3.13.14. Everything above
+was written without one, so what follows says which of it was watched happening
+rather than inferred.
+
+**Confirmed as written.** `setColorScheme` really is a no-op under `offscreen`
+— `colorScheme()` stays `Unknown`, the signal never fires — and `grab()` really
+does produce pixels there. `menuBar().isNativeMenuBar()` is `True` under
+`cocoa` and `False` under `offscreen`, which is exactly why the picture cannot
+contain the menu bar and why the menu-role test above is the only guard for it.
+Fusion is available. The empty-font-database trap is Windows-only: macOS
+offscreen reports 181 families.
+
+**Verified for the first time, natively.** The table above lists colour-scheme
+switching as not verifiable in the offscreen lane, and that stands — but under
+`cocoa` it works: `Light` → `Dark` moved `colorScheme()` and fired
+`colorSchemeChanged`, which until now had only been watched on Windows.
+
+**Contradicted.** `gui/fonts.py` named `SF Mono` as the macOS face. No stock
+Mac resolves it — Apple keeps the SF family out of the font database — so what
+the log has always been rendered in there is `Menlo`.
+
+**Still not verified, and it is a real gap.** The machine drives one non-Retina
+display, so every measurement here was taken at a device pixel ratio of **1.0**.
+The rule that macOS reports an *integer* ratio where Windows reports a
+fractional one is consistent with that and is not exercised by it: nothing in
+this project has yet been rendered at 2×, which is what most Macs run at, and
+the column-fitting arithmetic in §11 is exactly the kind of thing that would
+show a defect there first.
+
+The pass also found a bug the screenshot job had been rendering all along and
+nobody had looked at: rebuilding the detail pane left the previous rows parented
+and visible until the event loop drained, so the placeholder printed across
+`Device time`. Interactive use never showed it. That is twice now that this pane
+has been wrong in a way only a picture could reveal.
 
 ---
 

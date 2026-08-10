@@ -154,6 +154,40 @@ def test_a_record_is_not_squeezed_into_the_previous_one_s_height(
     assert not squeezed, f"{len(squeezed)} rows rendered shorter than their text"
 
 
+def test_a_rebuild_leaves_nothing_of_the_previous_contents_on_screen(
+    pane: DetailPane, records: list[Record]
+) -> None:
+    """``takeAt`` unhooks a row from the layout; it does not stop it painting.
+
+    Replacing the contents took each old row out of the grid and handed it to
+    ``deleteLater``, which destroys it whenever the event loop next drains.
+    Until then it was still a visible child sitting at its old geometry, drawn
+    straight over the rows that replaced it -- the "Nothing selected"
+    placeholder printed across ``Device time``.
+
+    Interactive use hides this, because the loop drains before the next paint.
+    What sees it is anything that rebuilds and renders in one pass: every
+    ``grab()`` in this suite, and ``tools/capture_screens.py``, whose whole job
+    is to show what this window looks like on macOS. It is the second bug in
+    this pane found by looking at a picture rather than by reading text, and
+    like the first one every existing assertion passed throughout.
+
+    Asserted without ``processEvents``, which is both what a synchronous render
+    observes and the honest test: ``processEvents`` does not deliver
+    ``DeferredDelete`` anyway, so the stale rows survive it too.
+    """
+    pane.resize(600, 400)
+    pane.show()
+    pane.show_record(records[0])
+
+    stale = [
+        label.text()
+        for label in pane.findChildren(QLabel)
+        if label.isVisible() and label.text().startswith("Nothing selected")
+    ]
+    assert not stale, f"{len(stale)} row(s) of the previous contents are still on screen"
+
+
 def test_the_message_is_a_block_of_its_own(pane: DetailPane, records: list[Record]) -> None:
     """The one field with anything to say does not share a column with ``PID``.
 

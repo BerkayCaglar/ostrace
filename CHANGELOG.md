@@ -12,6 +12,63 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
+### Fixed
+
+- **The detail pane drew the previous record's rows over the new one.**
+  Replacing the contents took each old row out of the grid and handed it to
+  `deleteLater`, which destroys it whenever the event loop next drains — and
+  `takeAt` only unhooks a widget from its *layout*. In between, every old row
+  was still a visible child sitting at its last geometry, painting straight
+  over the rows that replaced it: the `Nothing selected` placeholder printed
+  across `Device time`.
+
+  Interactive use never showed it, because the loop drains before the next
+  paint. What sees it is anything that rebuilds and renders in one pass —
+  every `grab()` in the suite, and `tools/capture_screens.py`, whose entire job
+  is to show what this window looks like on macOS. The screenshot job had been
+  rendering the bug faithfully since the pane was redesigned and nobody had
+  opened the image. **This is the second bug in this pane that only a picture
+  could reveal**, and as with the first one every existing assertion — all of
+  which read text — passed throughout.
+
+- **The window printed a Qt warning every time it closed.** `saveState` names
+  each toolbar by object name and warns when one has none, and `closeEvent`
+  calls it, so `QMainWindow::saveState(): 'objectName' not set for QToolBar`
+  went to stderr on every quit. The layout did still come back — with a single
+  toolbar Qt falls back to position — which is exactly the fallback that stops
+  working the first time a second toolbar or a dock exists.
+
+### Changed
+
+- **macOS has been run by hand for the first time**, on macOS 26.3.1 with
+  PySide6 6.11.1 — every documented assumption checked, including the eleven
+  tests that need a physical iPhone, which had never executed anywhere but
+  Windows. The four `# UNVERIFIED-MACOS` markers are gone: three were right and
+  are now recorded as confirmed rather than assumed, and the fourth was wrong.
+
+  **`SF Mono` is not the face a Mac renders the log in.** It was listed as the
+  macOS first choice on the grounds that it ships with the system. The file
+  does ship, as `/System/Library/Fonts/SFNSMono.ttf`, but Apple registers the
+  SF faces under a restricted family name and keeps them out of the font list —
+  so `QFontDatabase` offers 181 families there and `SF Mono` is not among them,
+  and neither is it in `system_profiler`'s. Every Mac has been reading its logs
+  in `Menlo`, which is the next entry. The entry stays, because it resolves for
+  anyone who installed Apple's separately distributed copy; the claim about it
+  is what was wrong, and is corrected where it stood.
+
+  Also confirmed rather than assumed: the native menu bar leaves the window on
+  macOS and the offscreen one does not, `setColorScheme` is genuinely inert
+  under the offscreen plugin, the offscreen font database is empty only on
+  Windows, `usbmux` needs nothing installed, `/var/db/lockdown` is unreadable,
+  and the config and data directories really are one path. Colour-scheme
+  switching, which the design notes list as unverifiable in the offscreen lane,
+  was watched working natively — until now it had only been seen on Windows.
+
+  **One gap is left, and it is stated rather than closed:** the machine drives a
+  single non-Retina display, so nothing has yet been rendered at a 2× device
+  pixel ratio, which is what most Macs run at. `docs/design/gui.md` §12 records
+  the whole pass, including that.
+
 ## 0.1.1 - 2026-08-10
 
 The first release that exists. 0.1.0 was published and withdrawn the day

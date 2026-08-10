@@ -22,12 +22,20 @@ __all__ = ["MONO_FAMILIES", "MONO_POINT_BONUS", "monospace"]
 #: Fixed-width faces, most-wanted first; Qt takes the first that resolves. Not
 #: a platform branch -- the list is the same on all three, which is precisely
 #: why it can live here rather than in `compat`. `Cascadia Mono` ships with
-#: Windows 11, `SF Mono` and `Menlo` with macOS, and the rest are what Linux
-#: distributions actually install.
+#: Windows 11 and the tail is what Linux distributions actually install.
+#:
+#: `SF Mono` was listed here as the macOS first choice and is not one: a stock
+#: Mac never resolves it. The file ships, as `/System/Library/Fonts/
+#: SFNSMono.ttf`, but Apple registers the SF faces under a restricted family
+#: name and keeps them out of the font list, so neither `QFontDatabase` nor
+#: `system_profiler` offers `SF Mono` -- measured on macOS 26.3.1 with PySide6
+#: 6.11.1, 181 families and that not among them. It is kept ahead of `Menlo`
+#: because it does resolve for anyone who installed Apple's separately
+#: distributed copy, and `Menlo` is what everybody else gets.
 MONO_FAMILIES = (
     "Cascadia Mono",
-    "SF Mono",  # UNVERIFIED-MACOS
-    "Menlo",  # UNVERIFIED-MACOS
+    "SF Mono",
+    "Menlo",
     "DejaVu Sans Mono",
     "Noto Sans Mono",
     "Liberation Mono",

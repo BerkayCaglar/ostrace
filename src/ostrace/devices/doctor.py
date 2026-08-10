@@ -110,9 +110,11 @@ def _check_usbmux(report: Report) -> bool:
     """
     endpoint = local_usbmux_endpoint()
     if endpoint is None:
-        # UNVERIFIED-MACOS: usbmuxd is part of the OS on macOS and a package on
-        # Linux, both reached over a unix socket. Probing the socket path adds
-        # a failure mode of its own, so this defers to the device listing.
+        # usbmuxd is part of the OS on macOS and a package on Linux, both
+        # reached over a unix socket. Probing the socket path adds a failure
+        # mode of its own, so this defers to the device listing. Confirmed on
+        # macOS 26.3.1: `/var/run/usbmuxd` is present and owned by root with
+        # nothing installed, and the listing below found the attached iPhone.
         report.add("usbmux", Status.OK, "provided by the operating system")
         return True
 
