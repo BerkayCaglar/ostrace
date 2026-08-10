@@ -178,6 +178,12 @@ start <TAB> end <TAB> seconds <TAB> reason
 
 **Header only means no gaps**, which is not the same as the file being absent.
 
+`reason` is prose for a person to read — free text, no vocabulary, nothing may
+switch on it — carried through from the session file, where the same rule and
+its history are recorded. Bundles exported from a session written by 0.1.1 or
+earlier can therefore hold a `pymobiledevice3` class name in this column, and
+are as valid as one holding a sentence.
+
 This file exists because a gap is not a record and therefore cannot live in
 `session.log` without breaking the one-record-per-line rule every recipe here
 depends on. Without it a gap appeared nowhere a search could reach: `grep`

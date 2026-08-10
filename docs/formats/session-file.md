@@ -110,12 +110,24 @@ When a connection drops and is re-established, records emitted during the gap
 are unrecoverable. A gap is recorded explicitly:
 
 ```json
-{"gap": true, "from": "2026-08-08T01:12:04+00:00", "to": "2026-08-08T01:12:09+00:00", "reason": "ConnectionTerminatedError"}
+{"gap": true, "from": "2026-08-08T01:12:04+00:00", "to": "2026-08-08T01:12:09+00:00", "reason": "the connection to the device was lost"}
 ```
 
 Exports state the gap rather than hiding it. A log with a silent hole in it is
 worse than one with a labelled hole, because the reader draws conclusions from
 the absence.
+
+`reason` is **prose for a person**, not an identifier: free text, no vocabulary,
+and nothing may switch on it. Its audience is whoever is reading the log at the
+point the log stops, so it is written as a lower-case fragment with no full
+stop — it lands inside `---- gap {from} to {to} ({reason}) ----` in the text
+exports and in a `Reason` field in the viewer.
+
+Sessions written by 0.1.1 and earlier can carry a `pymobiledevice3` class name
+here, such as `ConnectionTerminatedError`, for the outages whose underlying
+exception had no message of its own. Those files stay valid and are read
+unchanged: the field's type and meaning have not moved, only the wording
+ostrace itself puts in it. This example previously showed one such name.
 
 ## `session.json`
 
