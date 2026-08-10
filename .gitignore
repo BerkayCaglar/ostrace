@@ -26,6 +26,7 @@ coverage.xml
 .vscode/
 .DS_Store
 Thumbs.db
+.claude/settings.local.json
 
 # Local captures: never commit a log from a real device by accident.
 # Test fixtures under tests/fixtures/ are added explicitly with `git add -f`.
