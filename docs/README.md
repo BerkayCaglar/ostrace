@@ -43,6 +43,16 @@ That section now ends with a first hands-on pass on macOS 26.3.1: which of its
 claims were watched happening, which one was wrong, and the 2× device pixel
 ratio the pass still did not exercise.
 
+Since 0.1.1 the work has been the GUI backlog: phase 4 shipped a subset of
+[design/gui.md](design/gui.md), and the redesign that followed
+([research/gui-redesign/](research/gui-redesign/)) split what was left into
+three tiers. **The must-have tier is now finished** — the unseen count, the
+minimap's viewport marker, `Go to Time`, the row context menu, recent filters,
+a hideable detail pane, accessible names, `Ctrl+Q`, the Doctor window and the
+reconnect and capture-finished banners. The nice-to-have and later tiers stay
+in [research/gui-redesign/05-interaction.md](research/gui-redesign/05-interaction.md)
+§10; the [changelog](../CHANGELOG.md) is where what shipped is written down.
+
 The documentation under `formats/` and `design/` describes contracts, which are
 specified before they are implemented so that the shape is a decision rather
 than an accident. Where something is not built yet, the document says so —
