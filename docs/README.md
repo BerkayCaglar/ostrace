@@ -53,6 +53,10 @@ reconnect and capture-finished banners. The nice-to-have and later tiers stay
 in [research/gui-redesign/05-interaction.md](research/gui-redesign/05-interaction.md)
 §10; the [changelog](../CHANGELOG.md) is where what shipped is written down.
 
+**None of it is released.** The last tag is `v0.1.1` and all of the above is
+under `## [Unreleased]`, so what PyPI serves is a good deal older than this
+tree. The next version is 0.1.2.
+
 The documentation under `formats/` and `design/` describes contracts, which are
 specified before they are implemented so that the shape is a decision rather
 than an accident. Where something is not built yet, the document says so —
