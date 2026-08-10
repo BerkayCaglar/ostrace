@@ -59,6 +59,11 @@ class JumpButton(QToolButton):
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.setToolTip("What the jump arrows move between")
+        # Its text is the *value* -- `Errors`, `Gaps` -- so read out on its own
+        # it names a thing rather than a control, and gives no clue that the
+        # thing is settable or what setting it would change.
+        self.setAccessibleName("Jump target")
+        self.setAccessibleDescription("What the jump arrows move between")
         self.setText(target.label)
 
     def set_target(self, target: Find) -> None:

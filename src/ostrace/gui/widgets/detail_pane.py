@@ -91,7 +91,14 @@ class DetailPane(QScrollArea):
         self._close = QToolButton(self._body)
         self._close.setText("✕")
         self._close.setAutoRaise(True)
-        self._close.setToolTip("Close this record (Esc)")
+        self._close.setToolTip("Let go of the selected row (Esc)")
+        # A glyph is not a name. `✕` is announced as "multiplication sign" by
+        # anything reading this aloud, and it is the one control here whose
+        # label carries no word at all. It says what it does rather than what
+        # it looks like, and what it does is release the row -- putting the
+        # *pane* away is `Ctrl+I`, and two controls a keystroke apart must not
+        # both read as "close".
+        self._close.setAccessibleName("Let go of the selected row")
         self._close.clicked.connect(self.closed)
 
         header = QHBoxLayout()

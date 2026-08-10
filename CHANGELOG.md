@@ -14,6 +14,37 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Added
 
+- **The detail pane can be put away.** `Ctrl+I`, and a ticked item in `View` so
+  it is recoverable without knowing the key. The visibility is remembered
+  between sessions and restored *through* the menu item rather than around it —
+  a window that opened with the pane hidden and the item ticked would need two
+  presses to show it, the first of which appears to do nothing.
+
+  The `✕` on the pane still lets go of the selected row and does not hide
+  anything. Two controls a keystroke apart must not read as the same one, so
+  its accessible name says what it does: on its own, `✕` is announced as
+  "multiplication sign".
+
+- **Every icon-only control has a name now**, and the banner announces itself.
+  A tooltip is not a name — it needs a pointer hovering over it — and stripping
+  a toolbar label to make the row look modern takes away the only thing a
+  screen reader had. The four unlabelled toolbar buttons, the overview strip,
+  the detail pane's `✕`, and the device and jump buttons whose text is an
+  answer rather than a question all carry one; the filter fields are tied to
+  their labels with `setBuddy` as well.
+
+  Every state this project calls "must be visible" arrives in the banner, and a
+  screen reader follows focus, which the banner never takes. It now raises
+  `QAccessible.Event.Alert` — the one event announced without focus — with its
+  accessible name set to the message, because the alert carries no text of its
+  own and what gets announced is whatever the name says when it fires.
+
+- **`Ctrl+Q` quits.** `StandardKey.Quit` is `⌘Q` on macOS and, on Windows, a
+  key called `Exit` — measured rather than assumed, `QKeySequence.keyBindings`
+  answers `['Exit']` there. No keyboard has that key, so on the platform this
+  is developed on the only way out of the program was the window's close
+  button.
+
 - **Right-click a row to filter by its process or its subsystem.** Narrowing
   without retyping what is already on the screen. The values come off the
   record rather than the cell — the table blanks a cell that repeats the row
@@ -183,13 +214,8 @@ is labelled so nobody reads it as a list of things that shipped.
 - **A Doctor window**, reachable from Help and offered as a banner action. The
   checks exist and only the command line can run them, so a graphical user
   meets a dead end at exactly the moment something is wrong.
-- A **hideable detail pane** (`Ctrl+I`).
 - **A reconnect banner**, which needs the `capture(on_state=…)` callback, and a
   **capture-finished banner** offering Export.
-- **Accessible names on the icon-only controls**, and a banner that announces
-  itself as an alert.
-- `Ctrl+Q` beside `StandardKey.Quit`, and a test that a letter typed into the
-  search field does not fire the single-letter aliases.
 
 The nice-to-have and later tiers stay in that document rather than being copied
 here. A backlog long enough to skim is one nobody reads.

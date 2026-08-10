@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAccessible, QAccessibleEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy
 
 if TYPE_CHECKING:
@@ -79,6 +80,15 @@ class Banner(QFrame):
         self._action.setVisible(action is not None)
         self._handler = on_action
         self.show()
+        # A screen reader follows focus, and nothing here takes it: a paused
+        # stream, a filter hiding everything and a capture that died all
+        # appear silently for anyone not looking at this strip. `Alert` is the
+        # one event that is announced without being focused, which is exactly
+        # what this widget is for -- `docs/design/gui.md` §6 calls every one of
+        # these a state that must be visible, and visible is not the same as
+        # perceivable.
+        self.setAccessibleName(text)
+        QAccessible.updateAccessibility(QAccessibleEvent(self, QAccessible.Event.Alert))
 
     def act(self) -> None:
         """Take the way out, whatever it was, and dismiss."""
