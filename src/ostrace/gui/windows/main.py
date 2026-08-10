@@ -32,6 +32,7 @@ from PySide6.QtCore import (
     QByteArray,
     QElapsedTimer,
     QModelIndex,
+    QPoint,
     QSettings,
     QSize,
     Qt,
@@ -59,7 +60,7 @@ from ostrace.errors import OstraceError
 from ostrace.exporters.base import escape
 from ostrace.gui import icons
 from ostrace.gui.columns import COLUMNS
-from ostrace.gui.filters import Filter
+from ostrace.gui.filters import RECENT_KEPT, Filter, remember
 from ostrace.gui.live import CaptureThread
 from ostrace.gui.loader import CaptureLoader
 from ostrace.gui.markers import when
@@ -77,7 +78,7 @@ from ostrace.gui.widgets.jump_button import JumpButton
 from ostrace.gui.widgets.log_table import LogTable
 from ostrace.gui.widgets.minimap import Minimap
 from ostrace.gui.widgets.status_bar import StatusBar
-from ostrace.model import DeviceInfo
+from ostrace.model import DeviceInfo, Record
 from ostrace.paths import export_stem, sessions_dir
 from ostrace.storage.capture import Capture, open_capture
 
@@ -136,6 +137,14 @@ _FOLLOW_MIN_MS = 100
 #: detached from the keyboard.
 _FILTER_DEBOUNCE_MS = 200
 
+#: How long a filter has to stand before it counts as one the user *used*
+#: rather than one they typed through on the way to it. Without this the recent
+#: list fills with `d`, `da`, `das`, `dasd` -- four entries, three of which
+#: nobody ever asked for, pushing out the ones they did. Two seconds is long
+#: enough that no intermediate state survives it and short enough that a filter
+#: somebody is reading results under is remembered before they move on.
+_FILTER_SETTLED_MS = 2_000
+
 #: What the window opens at when there is nothing saved, or when what was saved
 #: turned out to be unusable. Wide enough for the fixed columns and the start of
 #: a message, which is the narrowest the table is worth reading at.
@@ -176,6 +185,7 @@ class MainWindow(QMainWindow):
     action_bottom: QAction
     action_go_time: QAction
     action_follow: QAction
+    action_detail_pane: QAction
     action_next_jump: QAction
     action_previous_jump: QAction
     action_next_error: QAction
@@ -237,6 +247,15 @@ class MainWindow(QMainWindow):
         self._filter_debounce.setSingleShot(True)
         self._filter_debounce.setInterval(_FILTER_DEBOUNCE_MS)
         self._filter_debounce.timeout.connect(self._apply_filter)
+
+        #: The last few filters, newest first, and the timer that decides one
+        #: has been used rather than typed through. See `_remember_filter`.
+        self._recent: list[Filter] = self._restore_recent()
+        self.filter_bar.set_recent(self._recent)
+        self._filter_settled = QTimer(self)
+        self._filter_settled.setSingleShot(True)
+        self._filter_settled.setInterval(_FILTER_SETTLED_MS)
+        self._filter_settled.timeout.connect(self._remember_filter)
 
         self._build_actions()
         self._build_menus()
@@ -464,6 +483,12 @@ class MainWindow(QMainWindow):
             button = self.toolbar.widgetForAction(action)
             if isinstance(button, QToolButton) and not labelled:
                 button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+                # Stripping the label strips the only thing a screen reader
+                # had. The accelerator marker goes with it: `&Export…` is read
+                # out as "ampersand Export", and the ellipsis means "this asks
+                # something first", which is worth keeping.
+                button.setAccessibleName(action.text().replace("&", ""))
+                button.setAccessibleDescription(action.toolTip())
 
         # Immediately after the two chevrons, because it is what they mean. An
         # arrow whose target is stated somewhere else is an arrow you have to
@@ -497,6 +522,8 @@ class MainWindow(QMainWindow):
         reads.
         """
         self.filter_bar.changed.connect(self._on_filter_changed)
+        self.filter_bar.recent_chosen.connect(self._on_recent_chosen)
+        self.table.customContextMenuRequested.connect(self._on_context_menu)
         self.action_open.triggered.connect(self.choose_capture)
         self.action_close.triggered.connect(self.close_capture)
         self.action_capture.triggered.connect(self.capture_from_device)
@@ -515,6 +542,7 @@ class MainWindow(QMainWindow):
         self.action_top.triggered.connect(self.go_to_top)
         self.action_bottom.triggered.connect(self.go_to_bottom)
         self.action_go_time.triggered.connect(self.ask_for_time)
+        self.action_detail_pane.toggled.connect(lambda on: self.set_detail_visible(visible=on))
         self.action_follow.toggled.connect(lambda on: self.set_following(follow=on))
         self.status.follow.clicked.connect(self._on_follow_clicked)
         self.action_next_jump.triggered.connect(lambda: self.find_next(self._jump))
@@ -625,11 +653,17 @@ class MainWindow(QMainWindow):
         if self._sized:
             return
         self._sized = True
-        if self._restore_layout():
-            return
-        total = self._split.height()
-        share = _TABLE_STRETCH + _DETAIL_STRETCH
-        self._split.setSizes([total * _TABLE_STRETCH // share, total * _DETAIL_STRETCH // share])
+        # After the sizes, whichever way they were arrived at: putting the pane
+        # away and then dividing the split would hand the hidden pane a share
+        # of the window, which it takes back the moment it is shown again.
+        restored = self._restore_layout()
+        if not restored:
+            total = self._split.height()
+            share = _TABLE_STRETCH + _DETAIL_STRETCH
+            self._split.setSizes(
+                [total * _TABLE_STRETCH // share, total * _DETAIL_STRETCH // share]
+            )
+        self._restore_detail_visible()
 
     # -- what the window remembers ---------------------------------------
 
@@ -643,6 +677,45 @@ class MainWindow(QMainWindow):
         owns: no file of ours is being placed.
         """
         return QSettings()
+
+    def _restore_detail_visible(self) -> None:
+        """Put the pane back the way the last session left it.
+
+        Through the menu item rather than around it, so the tick and the pane
+        cannot start out disagreeing -- a window that opened with the pane
+        hidden and the item ticked would need two presses to show it, the first
+        of which appears to do nothing.
+
+        Only on the way to *hidden*. Visible is the default and the state the
+        window is built in, and setting a checkable action to the value it
+        already holds emits nothing.
+        """
+        if self._settings().value("window/detail", defaultValue=True, type=bool) is False:
+            self.action_detail_pane.setChecked(False)
+
+    def _save_recent(self) -> None:
+        """Keep the recent filters between sessions.
+
+        Deliberately not the same decision as `_save_layout`'s refusal to
+        remember the *applied* filter. A filter that survived a restart is one
+        the user has to remember they set, which is "where did my logs go" with
+        a longer fuse; a filter that is merely *offered* changes nothing about
+        what the window shows until somebody picks it.
+        """
+        self._settings().setValue("filters/recent", [entry.as_stored() for entry in self._recent])
+
+    def _restore_recent(self) -> list[Filter]:
+        """What the last session left, minus anything unreadable.
+
+        Entry by entry rather than all or nothing: one line written by a
+        version that spelled a field differently should cost that line, not the
+        other nine.
+        """
+        stored = self._settings().value("filters/recent")
+        if not isinstance(stored, list):
+            return []
+        entries = (Filter.from_stored(line) for line in stored if isinstance(line, str))
+        return [entry for entry in entries if entry is not None][:RECENT_KEPT]
 
     def _restore_jump(self) -> Find:
         """Which jump target the last session left the toolbar on."""
@@ -689,6 +762,7 @@ class MainWindow(QMainWindow):
         # with the geometry and not with the filter, which is deliberately not
         # remembered.
         settings.setValue("table/jump", self._jump.value)
+        settings.setValue("window/detail", self.detail.isVisible())
 
     def _restore_layout(self) -> bool:
         """Put it back, and say whether there was anything to put.
@@ -741,6 +815,9 @@ class MainWindow(QMainWindow):
         for binding in BINDINGS:
             keys = sequences(binding)
             action = self._action(binding.text, keys[0], checkable=binding.checkable)
+            # Before anything is connected, so a default state is a default
+            # rather than an action taken on a window still being built.
+            action.setChecked(binding.checked)
             if len(keys) > 1:
                 # Aliases are real bindings, not documentation. A menu shows
                 # one; `setShortcuts` registers all of them.
@@ -755,6 +832,15 @@ class MainWindow(QMainWindow):
         # table because their roles, not their keys, are the point.
         self.action_quit = self._action(
             "&Quit", QKeySequence.StandardKey.Quit, role=QAction.MenuRole.QuitRole
+        )
+        # `StandardKey.Quit` is `⌘Q` on macOS and, on Windows, a key called
+        # `Exit` -- measured, not assumed: `QKeySequence.keyBindings` answers
+        # `['Exit']` there. No keyboard has that key, so on the platform this
+        # is developed on the only way out was the window's close button. Qt
+        # resolves `Ctrl+Q` to the same `⌘Q` the standard key already gives on
+        # macOS, so the alias costs nothing where it is not needed.
+        self.action_quit.setShortcuts(
+            [QKeySequence(QKeySequence.StandardKey.Quit), QKeySequence("Ctrl+Q")]
         )
         self.action_about = self._action("&About ostrace", role=QAction.MenuRole.AboutRole)
 
@@ -1313,6 +1399,23 @@ class MainWindow(QMainWindow):
             return False
         return self._at_bottom
 
+    def set_detail_visible(self, *, visible: bool) -> None:
+        """Put the detail pane away, or bring it back where it was.
+
+        One line, and it was two more until the test that claimed to cover them
+        stayed green with them removed: `QSplitter` keeps a hidden child's size
+        and gives it back on the way in, so saving the sizes by hand was
+        restoring numbers Qt had already restored. The assertion is kept
+        because the behaviour matters -- a pane that came back bigger than it
+        went away is one there is no way to put right that a second press does
+        not undo -- and because it pins a Qt behaviour rather than ours.
+
+        The menu item is not synced here. It is the only thing that calls this,
+        and `setChecked` from inside its own `toggled` handler is the loop this
+        project has already walked into twice.
+        """
+        self.detail.setVisible(visible)
+
     def _show_viewport(self) -> None:
         """Tell the minimap which rows are on screen."""
         self.minimap.set_viewport(*self.table.visible_rows())
@@ -1684,6 +1787,85 @@ class MainWindow(QMainWindow):
         the user to the bottom of the buffer on every key they press.
         """
         self._filter_debounce.start()
+        # Restarted, so only a filter left alone is ever remembered.
+        self._filter_settled.start()
+
+    def _remember_filter(self) -> None:
+        """Add the standing filter to the recent list, if it is worth having.
+
+        Driven by a timer rather than by the apply, because every keystroke
+        applies: remembering there would fill the list with the prefixes of the
+        one filter somebody typed.
+        """
+        before = self._recent
+        self._recent = remember(before, self.model.filter)
+        if self._recent != before:
+            self.filter_bar.set_recent(self._recent)
+            self._save_recent()
+
+    def _on_recent_chosen(self, entry: object) -> None:
+        """Put a remembered filter back in the bar, which applies it."""
+        if isinstance(entry, Filter):
+            self.filter_bar.set_filter(entry)
+
+    def _on_context_menu(self, position: QPoint) -> None:
+        """Pop the row menu where it was asked for.
+
+        Split from `row_menu` because this half is a modal ``exec``, and a test
+        that reaches one does not fail -- it hangs, holding the job until it is
+        killed. The export dialog and `Go to Time` are split for the same
+        reason; this one cost the suite two minutes before it was.
+
+        Mapped through the viewport: `position` arrives in viewport coordinates
+        and a menu popped at the widget's would sit one header height too high.
+        """
+        menu = self.row_menu(self.table.indexAt(position))
+        menu.exec(self.table.viewport().mapToGlobal(position))
+
+    def row_menu(self, index: QModelIndex) -> QMenu:
+        """The menu on a row: narrow by what is in front of you.
+
+        Built here rather than in the table because every entry on it is an
+        action this window already owns -- which is the same rule the toolbar
+        follows. A context menu that implemented its own copy or its own mark
+        would be a second implementation to keep in step with the first.
+        """
+        menu = QMenu(self)
+        row = self.model.row_at(index.row()) if index.isValid() else None
+        if isinstance(row, Record):
+            # `row.process` rather than the cell, which the table blanks when
+            # it repeats the row above: right-clicking half way down a run of
+            # one process would otherwise offer to filter by nothing.
+            menu.addAction(
+                f"Filter by process {row.process}", lambda: self.filter_by_process(row.process)
+            )
+            if row.subsystem:
+                menu.addAction(
+                    f"Filter by subsystem {row.subsystem}",
+                    lambda: self.filter_by_subsystem(row.subsystem or ""),
+                )
+            menu.addSeparator()
+        menu.addAction(self.action_copy)
+        menu.addAction(self.action_mark)
+        menu.addSeparator()
+        menu.addAction(self.action_go_time)
+        return menu
+
+    def filter_by_process(self, process: str) -> None:
+        """Narrow to one process, keeping everything else that is set.
+
+        Keeping, because the right-click is almost always the second step:
+        somebody already at `Error and above` who spots one noisy process is
+        asking for the errors *from it*, not for a fresh start.
+
+        Written into the bar rather than built from `model.filter`, which is
+        the *applied* filter and lags the bar by the debounce -- a right-click
+        a fifth of a second after a keystroke would silently discard it.
+        """
+        self.filter_bar.set_process(process)
+
+    def filter_by_subsystem(self, subsystem: str) -> None:
+        self.filter_bar.set_subsystem(subsystem)
 
     def _apply_filter(self) -> None:
         try:

@@ -364,6 +364,38 @@ history. The threshold semantics survive either way — Apple's level values are
 not severity-ordered, so it is a threshold over our own enum, expressed here as
 a combo rather than as `level:`.
 
+**Half of what the text field was for is now covered without one.** The two
+things it bought were *saying what is in front of you without retyping it* and
+*going back to what you typed yesterday*. Neither needs a parser.
+
+**Right-clicking a row offers its process and its subsystem.** The values come
+off the *record*, not the cell — the table blanks a cell that repeats the row
+above, so a right-click half way down a run of one process would otherwise
+offer to filter by nothing. A marker row is offered neither, because it has
+neither, and an entry that filtered by the empty string would quietly mean
+"everything", which is the opposite of narrowing. The other entries on the menu
+are the window's existing actions: a context menu with its own copy or its own
+mark would be a second implementation to keep in step with the first.
+
+Narrowing **adds** to the standing filter rather than replacing it. The
+right-click is almost always the second step — somebody already at `Error and
+above` who spots one noisy process is asking for the errors *from it*.
+
+**The last ten filters are offered, unnamed.** Naming is the expensive half and
+going back is the useful one, and a viewer that asks for a name before it will
+remember anything gets asked for nothing. A filter is remembered when it has
+**stood for two seconds**, not when it is applied: every keystroke applies, so
+remembering on apply would fill the list with `d`, `da`, `das`, `dasd` — three
+entries nobody asked for, pushing out the ones they did.
+
+They survive a restart, and that is not the same decision as §1's refusal to
+remember the *applied* filter. A filter that comes back applied is one the user
+has to remember they set, which is "where did my logs go" with a longer fuse; a
+filter that is merely on a menu changes nothing until somebody picks it. Stored
+as JSON per entry so a line written by another version can be dropped on its
+own — a window that refuses to open because a remembered filter is malformed
+has turned a convenience into a way of losing the application.
+
 ---
 
 ## 6. States that must be visible
@@ -524,6 +556,22 @@ subsystems — and a binary search over a nearly-sorted sequence answers
 confidently and wrongly. At 200,000 rows the scan is about ten milliseconds, on
 a keypress a person made.
 
+**`Ctrl+Q` quits, beside the standard key.** `StandardKey.Quit` is `⌘Q` on
+macOS and, on Windows, a key called `Exit` — measured, not assumed:
+`QKeySequence.keyBindings` answers `['Exit']` there. No keyboard has that key,
+so on the platform this is developed on the only way out was the window's close
+button. Qt resolves `Ctrl+Q` to the same `⌘Q` on macOS, so the alias costs
+nothing where it is not needed.
+
+**The single-letter aliases are safe because of `ShortcutOverride`, and that is
+now asserted.** `E`, `M`, `N`, `/`, `[` and `]` are window-level shortcuts and
+the filter bar is full of line edits in the same window. What stops `e` jumping
+to the next error instead of typing a letter is that Qt offers the key to the
+focused widget first and a line edit claims anything it would insert. Nothing
+in the code says so, which is why a test does: a future field that did not
+claim the key would break the filter bar silently, and the aliases would look
+like the culprit.
+
 **Icons do not appear in menus.** The toolbar and the menus share their action
 objects, so an icon put on one for the toolbar's sake is drawn by the other in
 the column a checkmark occupies: `Next Error` and `Previous Error` rendered in
@@ -561,8 +609,26 @@ or a hex dump in them.
 **It carries a close control, and the control asks rather than acts.** `Esc`
 was the only way to let go of a record, which is a key you have to be told
 about. The `✕` emits and the window turns that into a deselect; the pane never
-hides itself, because a pane that can disappear is one the reader has to work
-out how to bring back.
+hides itself.
+
+**The pane can be put away, and that is a different verb from the `✕`.**
+`Ctrl+I` and a ticked item in `View` hide and show it — the item is what makes
+it recoverable, which is the objection the paragraph above was answering when
+hiding did not exist at all. So there are two controls a keystroke apart and
+they must not read as the same one: the `✕` **lets go of the row** and its
+accessible name says exactly that, because `✕` on its own is announced as
+"multiplication sign" and would otherwise be read as closing the pane.
+
+The visibility is remembered between sessions and restored *through the menu
+item*, not around it: a window that opened with the pane hidden and the item
+ticked would need two presses to show it, the first of which appears to do
+nothing.
+
+`QSplitter` gives a hidden child's size back when it is shown again, so nothing
+here saves or restores the split. That was two lines until the test claiming to
+cover them stayed green with them removed. The assertion is kept — a pane that
+came back bigger than it went away is one there is no way to put right that a
+second press does not undo — but it pins Qt's behaviour rather than ours.
 
 Do not budget performance work for the detail pane. Wireshark's own guidance
 names real-time list update, **colouring rules** and name resolution as the
@@ -685,6 +751,40 @@ producer thread → `deque.append` → `QTimer` drain every 50 ms → one
 a hard cap around 200k, trimmed only once it overflows by 10% and then in a
 single `beginRemoveRows`, never `deque(maxlen=)`, which evicts silently and
 desynchronises the view.
+
+---
+
+## 11a. What the window says to something that cannot see it
+
+Two rules, and both were broken in the way that leaves a suite green.
+
+**A control whose only label is an icon has no name.** A tooltip is not a name:
+it needs a pointer hovering over it. Every icon-only control now carries one —
+the four unlabelled toolbar buttons, whose accessible name is the action's text
+with the accelerator marker stripped because `&Export…` is read aloud as
+"ampersand Export"; the overview strip, which is a control drawn entirely by us
+with no text and no icon to infer a purpose from; the detail pane's `✕`; and
+the two buttons whose text is an *answer* rather than a question — the device
+button says a device name and the jump button says `Errors`, so read out alone
+neither gives any clue that the thing is settable. The filter fields get
+`setBuddy` as well as a name, because a `QLabel` beside a field is a label to
+somebody looking at it and nothing at all to anything reading the window.
+
+**A widget that announces state by appearing announces it to nobody who is not
+looking at that part of the screen.** Every state §6 calls "must be visible"
+arrives in the banner, and a screen reader follows focus, which the banner
+never takes. It raises `QAccessible.Event.Alert` — the one event announced
+without focus — and sets its accessible name to the message first, because the
+alert carries no text of its own and what gets announced is whatever the name
+says at the moment it fires.
+
+None of this needs a screen reader to test. Qt's accessibility interface is
+queryable from the same process, which is what makes these assertions rather
+than a manual pass somebody has to remember to repeat. The alert is observed by
+standing in for `QAccessible` in the banner's own module: PySide6 exposes no
+update handler to listen with, and `updateAccessibility` is a no-op while
+nothing is reading the screen, so a test that merely called it would pass
+whatever event it raised, including none.
 
 ---
 

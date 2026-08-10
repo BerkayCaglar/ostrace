@@ -14,6 +14,66 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Added
 
+- **The detail pane can be put away.** `Ctrl+I`, and a ticked item in `View` so
+  it is recoverable without knowing the key. The visibility is remembered
+  between sessions and restored *through* the menu item rather than around it —
+  a window that opened with the pane hidden and the item ticked would need two
+  presses to show it, the first of which appears to do nothing.
+
+  The `✕` on the pane still lets go of the selected row and does not hide
+  anything. Two controls a keystroke apart must not read as the same one, so
+  its accessible name says what it does: on its own, `✕` is announced as
+  "multiplication sign".
+
+- **Every icon-only control has a name now**, and the banner announces itself.
+  A tooltip is not a name — it needs a pointer hovering over it — and stripping
+  a toolbar label to make the row look modern takes away the only thing a
+  screen reader had. The four unlabelled toolbar buttons, the overview strip,
+  the detail pane's `✕`, and the device and jump buttons whose text is an
+  answer rather than a question all carry one; the filter fields are tied to
+  their labels with `setBuddy` as well.
+
+  Every state this project calls "must be visible" arrives in the banner, and a
+  screen reader follows focus, which the banner never takes. It now raises
+  `QAccessible.Event.Alert` — the one event announced without focus — with its
+  accessible name set to the message, because the alert carries no text of its
+  own and what gets announced is whatever the name says when it fires.
+
+- **`Ctrl+Q` quits.** `StandardKey.Quit` is `⌘Q` on macOS and, on Windows, a
+  key called `Exit` — measured rather than assumed, `QKeySequence.keyBindings`
+  answers `['Exit']` there. No keyboard has that key, so on the platform this
+  is developed on the only way out of the program was the window's close
+  button.
+
+- **Right-click a row to filter by its process or its subsystem.** Narrowing
+  without retyping what is already on the screen. The values come off the
+  record rather than the cell — the table blanks a cell that repeats the row
+  above, so a right-click half way down a run of one process would otherwise
+  offer to filter by nothing. A marker row is offered neither, because it has
+  neither.
+
+  It adds to the standing filter instead of replacing it: the right-click is
+  almost always the second step, and somebody already at `Error and above` who
+  spots one noisy process is asking for the errors *from it*. The rest of the
+  menu is Copy, Mark and Go to Time — the window's own actions, so the menu
+  cannot drift from the keyboard.
+
+- **The last ten filters are offered back, unnamed.** Naming is the expensive
+  half of saved filters and going back is the useful one; a viewer that asks
+  for a name before it will remember anything gets asked for nothing.
+
+  A filter is remembered once it has *stood* for two seconds, not when it is
+  applied. Every keystroke applies, so remembering on apply would fill the list
+  with `d`, `da`, `das`, `dasd` — three entries nobody asked for, pushing out
+  the ones they did.
+
+  They survive a restart, which is deliberately not the same decision as the
+  refusal to remember the *applied* filter: one that comes back applied is one
+  the user has to remember they set, and one that is merely on a menu changes
+  nothing until somebody picks it. Each entry is stored on its own line of
+  JSON, so a line written by another version is dropped by itself rather than
+  costing the other nine or the window.
+
 - **The minimap shows where you are, not only what is there.** The strip has
   always drawn the errors, gaps and marks across a whole capture, and clicking
   it has always jumped — at a target the reader could not see themselves on. A
@@ -154,16 +214,8 @@ is labelled so nobody reads it as a list of things that shipped.
 - **A Doctor window**, reachable from Help and offered as a banner action. The
   checks exist and only the command line can run them, so a graphical user
   meets a dead end at exactly the moment something is wrong.
-- **A row context menu**, including *Filter by this process* — narrowing without
-  retyping what is already on screen.
-- A **hideable detail pane** (`Ctrl+I`).
-- **Recent filters**, without naming them.
 - **A reconnect banner**, which needs the `capture(on_state=…)` callback, and a
   **capture-finished banner** offering Export.
-- **Accessible names on the icon-only controls**, and a banner that announces
-  itself as an alert.
-- `Ctrl+Q` beside `StandardKey.Quit`, and a test that a letter typed into the
-  search field does not fire the single-letter aliases.
 
 The nice-to-have and later tiers stay in that document rather than being copied
 here. A backlog long enough to skim is one nobody reads.

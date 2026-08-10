@@ -155,6 +155,11 @@ class DeviceButton(QToolButton):
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.setText(NO_DEVICE)
         self.setToolTip("Choose which attached device to capture from")
+        # Same reason as the jump button: the text is the current answer and
+        # not the question, so on its own it reads as a device name rather than
+        # as the control that picks one.
+        self.setAccessibleName("Device")
+        self.setAccessibleDescription("Choose which attached device to capture from")
         self._menu.aboutToShow.connect(self.rescan)
         # Before the first press, not in response to it. `aboutToShow` fires
         # after Qt has decided whether there is a menu worth showing, so a menu

@@ -57,6 +57,10 @@ class Binding:
     #: jumps and a theme toggle -- which is a list nobody reads to the end of.
     group: str = ""
     checkable: bool = False
+    #: What a checkable action starts as. Declared rather than set afterwards
+    #: by name, so a window cannot forget one: an item that shows a thing and
+    #: starts unticked has a first press that appears to do nothing.
+    checked: bool = False
     #: One line for the help sheet. Says what it is *for*, not what it does.
     description: str = ""
 
@@ -263,6 +267,16 @@ BINDINGS: tuple[Binding, ...] = (
         "F7",
         group="rows",
         description="Previous row, even when the detail pane has focus",
+    ),
+    Binding(
+        "detail_pane",
+        "&Detail Pane",
+        "Ctrl+I",
+        menu="view",
+        group="panes",
+        checkable=True,
+        checked=True,
+        description="Show or hide the pane that spells the selected record out in full",
     ),
     Binding(
         "dark_mode",
