@@ -65,7 +65,7 @@ def row(record: Record) -> str:
 
 
 class AgentBundleExporter:
-    """Write the seven-file bundle."""
+    """Write the eight-file bundle."""
 
     name = "agent-bundle"
     description = "A directory of tab-separated text for grep-based investigation"

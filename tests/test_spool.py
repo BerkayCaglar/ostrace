@@ -12,17 +12,22 @@ from __future__ import annotations
 
 import gzip
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
 
-from ostrace.model import Gap, Level, Record
+from ostrace.errors import SessionCorruptError
+from ostrace.model import Gap, Level, Platform, Record
 from ostrace.storage.codec import decode, encode_gap, encode_record
 from ostrace.storage.spool import SpoolReader, SpoolWriter
 from tests.helpers import make_gap, make_record
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+#: The keys every record carries, whether or not anything labelled it.
+REQUIRED_KEYS = {"ts", "level", "pid", "process", "process_path", "message", "platform"}
 
 
 def test_round_trip_preserves_every_field(tmp_path: Path) -> None:
@@ -74,6 +79,29 @@ def test_gaps_are_written_in_stream_order(tmp_path: Path) -> None:
     assert [type(item) for item in items] == [Record, Gap, Record]
     assert len(list(SpoolReader(path).records())) == 2
     assert len(list(SpoolReader(path).gaps())) == 1
+
+
+def test_a_gap_reason_from_an_older_ostrace_is_read_unchanged(tmp_path: Path) -> None:
+    """Sessions written by 0.1.1 and earlier carry a pymobiledevice3 class name
+    in ``reason`` -- ``ConnectionTerminatedError`` -- for the outages whose
+    underlying exception had no message of its own.
+
+    ``docs/formats/session-file.md`` promises those files stay valid: the
+    field's type and meaning have not moved, only the wording ostrace itself
+    puts in it. Nothing may switch on the field, so nothing may quietly
+    normalise it on the way in either.
+    """
+    legacy = Gap(
+        start=datetime(2026, 8, 8, 13, 5, tzinfo=UTC),
+        end=datetime(2026, 8, 8, 13, 5, 4, tzinfo=UTC),
+        reason="ConnectionTerminatedError",
+    )
+    path = tmp_path / "s.jsonl.gz"
+    with SpoolWriter(path) as writer:
+        writer.write_gap(legacy)
+
+    (restored,) = SpoolReader(path).gaps()
+    assert restored == legacy
 
 
 def test_scanning_for_gaps_does_not_decode_every_record(tmp_path: Path) -> None:
@@ -251,6 +279,84 @@ class TestDamagedFiles:
         reader = SpoolReader(path)
         assert list(reader.records()) == []
         assert reader.malformed == 1
+
+
+class TestTheEncodedForm:
+    """What ends up in the file, read as bytes rather than round-tripped.
+
+    Everything else here writes something and reads it back, and a round trip
+    cannot see the difference between a key that was omitted and one written
+    ``null``: ``decode`` treats the two identically, on purpose, because the
+    format document requires readers to. So the write side's half of that clause
+    -- omit, never write null -- was held up by nothing but the four
+    conditionals in ``encode_record``. Replaced with unconditional writes, every
+    other test in the suite still passed, fixtures included.
+    """
+
+    def test_a_record_with_no_labels_omits_the_keys_rather_than_nulling_them(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Roughly 3% of real records carry no subsystem, category, thread id or
+        image path. Four ``null``s apiece is what the clause exists to avoid."""
+        path = tmp_path / "s.jsonl.gz"
+        with SpoolWriter(path) as writer:
+            writer.write(
+                Record(
+                    timestamp=datetime(2026, 8, 8, 13, 0, tzinfo=UTC),
+                    level=Level.NOTICE,
+                    pid=147,
+                    process="cloudd",
+                    process_path="/usr/libexec/cloudd",
+                    subsystem=None,
+                    category=None,
+                    thread_id=None,
+                    image_path=None,
+                    message="nothing labelled this one",
+                    platform=Platform.IOS,
+                )
+            )
+
+        # Parsed rather than searched for as text: a message is free-form and
+        # could contain the word `subsystem`, or the word `null`, itself.
+        obj = json.loads(gzip.decompress(path.read_bytes()))
+        assert set(obj) == REQUIRED_KEYS
+
+    def test_an_absent_key_and_an_explicit_null_read_alike(self) -> None:
+        """The read side of the same clause. Our writer omits, but the document
+        binds readers rather than writers here, because another tool's file has
+        to open."""
+        absent = encode_record(make_record(0))
+        nulled = dict(absent)
+        for key in ("subsystem", "category", "thread_id", "image_path"):
+            del absent[key]
+            nulled[key] = None
+
+        assert set(absent) == REQUIRED_KEYS, "make_record must label all four for this to prove it"
+        assert decode(absent) == decode(nulled)
+
+    def test_a_file_written_before_the_platform_key_existed_reads_as_ios(self) -> None:
+        """The one place a platform default is legitimate. Sources always state
+        it, so this is the only way a record can arrive without one."""
+        obj = encode_record(make_record(0))
+        del obj["platform"]
+
+        record = decode(obj)
+        assert isinstance(record, Record)
+        assert record.platform is Platform.IOS
+
+    def test_an_explicitly_null_platform_is_malformed_rather_than_ios(self) -> None:
+        """``platform`` is not one of the omit-don't-null four: every writer of
+        this format states it, so a ``null`` there did not come from an absent
+        label. It came from something that got the field wrong, and the file is
+        called damaged instead of being read as iOS -- the same posture as a
+        timestamp that arrives with no offset.
+        """
+        obj = encode_record(make_record(0))
+        obj["platform"] = None
+
+        with pytest.raises(SessionCorruptError, match="malformed record"):
+            decode(obj)
 
 
 def test_unknown_keys_are_ignored_so_the_format_can_grow() -> None:
