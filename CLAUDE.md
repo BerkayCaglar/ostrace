@@ -101,6 +101,16 @@ Each of these has cost real time at least once.
   in a trailing comment. A tag can be repointed by whoever owns the action; the
   repository enforces this, so a tag ref fails the run rather than the review.
   Let Dependabot do the bumping — it rewrites the SHA and the comment together.
+- **A comment explains the code; git explains the history.** Delete the diary —
+  dates, pull request numbers, "was broken until". Rationale that merely reads
+  as history gets rewritten forward rather than deleted: `it used to name the
+  first device found` becomes `not the first device found`, and the reason
+  after it survives word for word. But **a measurement and its method are never
+  removed, rounded, or summarised away**. The minimap summarises into fixed
+  buckets rather than pixel bands because bands measured 282 ms over 200,000
+  rows; trimming happens in one operation because three took 118 ms and one
+  takes 50. Take the numbers out and those become opinions, and the next
+  tidy-up reintroduces the problem they were paid for.
 - Two SPDX lines at the top of every new source file, matching the existing ones.
 
 ## Architecture
