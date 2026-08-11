@@ -108,6 +108,51 @@ notice and the marker exemption. See
 [docs/design/gui.md §11](docs/design/gui.md) and
 [docs/adr/0004](docs/adr/0004-pyside6-with-custom-filtered-model.md).
 
+**Comments explain the code; git explains the history.** This repository
+comments heavily and that is deliberate — most of what is here was measured or
+was arrived at the second time. But there is a difference between a reason and
+a diary, and only one of them earns its lines.
+
+Three rules, in order of how much they cost to get wrong.
+
+*Measurements stay, with their method.* `282 ms vs 0.59 ms`, `a third of the
+entire per-record cost`, `118 ms → 50 ms` — these are the evidence for
+decisions that look arbitrary and invite tidying. Removing a number, rounding
+it, or replacing it with "this is faster" turns a settled question back into an
+opinion, and the problem it was paid for comes back the next time somebody
+simplifies. If a number stops being true, re-measure and correct it; do not
+delete it.
+
+*Rationale phrased as history gets rewritten, not removed.* Plenty of comments
+here are shaped `it used to be X, and here is why that was wrong`. The content
+is a defence against a change somebody will otherwise make in good faith, which
+is exactly what a comment is for — only the framing points backwards. Turn it
+around:
+
+```python
+#: It used to name the first device found, on the reasoning that a capture
+#: would use it and the name should therefore be on screen. That is true and
+#: it is not worth what it cost: pressing the button to *see* the devices
+#: changed the label to a device, which reads as the control having connected.
+```
+
+becomes
+
+```python
+#: Not the first device found: pressing the button to *see* the devices would
+#: change the label to a device, which reads as the control having connected
+#: to it rather than having answered a question. Opening a menu is not
+#: choosing from it.
+```
+
+Same warning, same specificity, no archaeology.
+
+*Actual history goes.* Dates, pull request numbers, "fixed in the second
+round", "this was broken until last week". `git log` and `git blame` hold that
+and hold it better. A file is read by somebody deciding what to do next, and
+every line spent on what already happened competes with the lines that tell
+them.
+
 ## Licence headers
 
 Every source file carries two lines, per the
