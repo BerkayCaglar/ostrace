@@ -17,6 +17,7 @@ about how device output is interpreted.
 
 from __future__ import annotations
 
+from functools import cache
 from typing import TYPE_CHECKING
 
 import pytest
@@ -115,6 +116,46 @@ def _isolate_data_dir(
     it.
     """
     monkeypatch.setenv("OSTRACE_HOME", str(tmp_path_factory.mktemp("home")))
+
+
+@cache
+def _why_the_device_tier_cannot_run() -> str:
+    """Empty when a device answered, otherwise the reason it did not.
+
+    Cached: the answer cannot change mid-run in a way worth paying a usbmux
+    round trip per test for.
+    """
+    import asyncio
+
+    from ostrace.devices.discovery import list_devices
+    from ostrace.errors import OstraceError
+
+    try:
+        return "" if asyncio.run(list_devices()) else "no device attached over USB"
+    except OstraceError as exc:
+        return exc.message
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """A device-marked test with no device attached skips, never passes.
+
+    The marker says a physical iPhone is required and CI excludes it, but
+    `pytest -m device` at a desk with nothing plugged in reported a green run:
+    a test whose assertions are about window state reaches the end whether or
+    not a device ever answered. That is the one answer the tier must not be
+    able to give, because it claims hardware evidence nobody gathered.
+
+    A hook rather than an autouse fixture, because the fixtures these tests
+    request are module-scoped and connect to the device themselves -- they are
+    built before any function-scoped fixture, so a fixture here would run after
+    the failure it exists to prevent, and the tier would error instead of
+    skipping.
+    """
+    if item.get_closest_marker("device") is None:
+        return
+    reason = _why_the_device_tier_cannot_run()
+    if reason:
+        pytest.skip(reason)
 
 
 @pytest.fixture
