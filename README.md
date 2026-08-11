@@ -1,25 +1,23 @@
 # ostrace
 
+[![pypi](https://img.shields.io/pypi/v/ostrace)](https://pypi.org/project/ostrace/)
+[![python](https://img.shields.io/pypi/pyversions/ostrace)](https://pypi.org/project/ostrace/)
+[![ci](https://img.shields.io/github/actions/workflow/status/BerkayCaglar/ostrace/ci.yml?branch=main)](https://github.com/BerkayCaglar/ostrace/actions/workflows/ci.yml)
+[![licence](https://img.shields.io/pypi/l/ostrace?label=licence)](https://github.com/BerkayCaglar/ostrace/blob/main/LICENSE)
+
 Stream, inspect and export iOS device logs — on Windows, macOS and Linux.
 
 `ostrace` reads Apple's unified log over `com.apple.os_trace_relay`, the same
 service Console.app uses. That means structured records: subsystem, category,
 thread id and the emitting library, at DEBUG level and above — not just the
-NOTICE-tier text that the legacy `syslog_relay` path returns.
+NOTICE-tier text that the legacy `syslog_relay` path returns. On a 20-second
+capture from an `iPhone18,2`, 4,462 of the 5,140 records were DEBUG or INFO —
+the tier `idevicesyslog` never receives at all.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-dark.png">
   <img alt="The ostrace viewer on Windows, showing a capture from an iPhone with an error selected and every field of it in the detail pane" src="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-light.png">
 </picture>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-macos-dark.png">
-  <img alt="The same window on macOS, drawn in the system font, with no menu bar inside it because macOS puts one in the screen menu instead" src="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-macos-light.png">
-</picture>
-
-*Windows above, macOS below — the same capture and the same code, in whichever
-colour scheme you are reading this in. The macOS window carries no menu bar of
-its own: there it belongs to the screen.*
 
 ---
 
@@ -57,7 +55,7 @@ install.
 | | |
 | --- | --- |
 | Python | 3.11 or newer |
-| Windows | **Apple Mobile Device Service** must be installed. It ships with iTunes from apple.com — *not* the Microsoft Store build. See [docs/troubleshooting.md](docs/troubleshooting.md). |
+| Windows | **Apple Mobile Device Service** must be installed. It ships with iTunes from apple.com — *not* the Microsoft Store build. See [docs/troubleshooting.md](https://github.com/BerkayCaglar/ostrace/blob/main/docs/troubleshooting.md). |
 | macOS | Nothing beyond the pip install; `usbmuxd` is already present. The graphical viewer needs **macOS 13 or newer**, which is Qt 6.11's floor; the command line does not. |
 | Linux | Nothing beyond the pip install, plus a running `usbmuxd`. |
 | Device | Connected over USB and paired (tap **Trust** on the device). |
@@ -65,7 +63,7 @@ install.
 A note on install size: `ostrace` depends on `pymobiledevice3`, which pulls in
 roughly 40 packages of its own, and the GUI extra brings PySide6. The full
 install is in the hundreds of megabytes. This is documented rather than hidden;
-see [docs/adr/0002](docs/adr/0002-use-pymobiledevice3-over-libimobiledevice-cli.md).
+see [docs/adr/0002](https://github.com/BerkayCaglar/ostrace/blob/main/docs/adr/0002-use-pymobiledevice3-over-libimobiledevice-cli.md).
 
 ## The viewer
 
@@ -145,7 +143,7 @@ beside it, named after it.
 
 | `--format` | What it is for |
 | --- | --- |
-| `agent-bundle` *(default)* | A directory of eight tab-separated text files to investigate with `grep` and bounded line reads. The only format that loses nothing — see [docs/formats/agent-bundle.md](docs/formats/agent-bundle.md). |
+| `agent-bundle` *(default)* | A directory of eight tab-separated text files to investigate with `grep` and bounded line reads. The only format that loses nothing — see [docs/formats/agent-bundle.md](https://github.com/BerkayCaglar/ostrace/blob/main/docs/formats/agent-bundle.md). |
 | `text` | Aligned columns, one record per line, for reading in a terminal. |
 | `markdown` | A document with a summary and the records verbatim, to paste into an issue. |
 | `jsonl` | One JSON object per record — the session format without the gzip. |
@@ -176,6 +174,14 @@ than a fact about the device.
   machine, not a support commitment: that machine drove a single non-Retina
   display, so nothing here has yet been seen at the 2× device pixel ratio most
   Macs run at. Reports are still welcome.
+
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-macos-dark.png">
+    <img alt="The same window on macOS, drawn in the system font, with no menu bar inside it because macOS puts one in the screen menu instead" src="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-macos-light.png">
+  </picture>
+
+  *The same capture and the same code on macOS. The window carries no menu bar
+  of its own: there it belongs to the screen.*
 - **Only iOS is supported.** The device layer is written around lockdown and
   `os_trace_relay`.
 
@@ -183,21 +189,21 @@ than a fact about the device.
 
 | | |
 | --- | --- |
-| [docs/adr/](docs/adr/) | Architecture decision records: what was decided and why |
-| [docs/design/gui.md](docs/design/gui.md) | The viewer's behaviour contract, written before the code |
-| [docs/research/](docs/research/) | The measurements and comparisons the decisions rest on |
-| [docs/formats/](docs/formats/) | On-disk format contracts |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | When no device shows up |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup |
+| [docs/adr/](https://github.com/BerkayCaglar/ostrace/tree/main/docs/adr/) | Architecture decision records: what was decided and why |
+| [docs/design/gui.md](https://github.com/BerkayCaglar/ostrace/blob/main/docs/design/gui.md) | The viewer's behaviour contract, written before the code |
+| [docs/research/](https://github.com/BerkayCaglar/ostrace/tree/main/docs/research/) | The measurements and comparisons the decisions rest on |
+| [docs/formats/](https://github.com/BerkayCaglar/ostrace/tree/main/docs/formats/) | On-disk format contracts |
+| [docs/troubleshooting.md](https://github.com/BerkayCaglar/ostrace/blob/main/docs/troubleshooting.md) | When no device shows up |
+| [CONTRIBUTING.md](https://github.com/BerkayCaglar/ostrace/blob/main/CONTRIBUTING.md) | Development setup |
 
 ## Licence
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+GPL-3.0-or-later. See [LICENSE](https://github.com/BerkayCaglar/ostrace/blob/main/LICENSE).
 
 `ostrace` imports `pymobiledevice3`, which is GPL-3.0-or-later; under the
 standard FSF reading that makes a combined work, so matching the licence is the
 clean answer rather than a reluctant one. Reasoning in
-[docs/adr/0003](docs/adr/0003-license-gpl-3-0-or-later.md).
+[docs/adr/0003](https://github.com/BerkayCaglar/ostrace/blob/main/docs/adr/0003-license-gpl-3-0-or-later.md).
 
 ## Acknowledgements
 

@@ -10,6 +10,38 @@ Two things are treated as public API from the start and will be versioned as
 such: the `Record` model and the on-disk export formats documented in
 [docs/formats/](docs/formats/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Every link in the README pointed at a page that does not exist on PyPI.**
+  Ten of them — the troubleshooting guide, four ADRs, the design contract, the
+  format contracts, `CONTRIBUTING.md`, `LICENSE` — were written relative to the
+  repository, and PyPI resolves a relative link against `pypi.org` rather than
+  against the source repository the way GitHub does. Every one now carries its
+  absolute form, which renders identically on GitHub and reaches the right page
+  from both.
+
+- **The screenshot caption claimed a colour scheme it cannot deliver on PyPI.**
+  `readme_renderer`'s allowlist contains `picture` but not `source`, and
+  `srcset` is not an allowed attribute on `img`, so the dark variant is stripped
+  and the `<img>` fallback is the only thing that renders there. The claim is
+  gone; the mechanism still works on GitHub, where it is real. **Anything added
+  to this README from here on must put the light variant in `<img src>`.**
+
+### Changed
+
+- The README carries the version, supported Python versions, CI status and
+  licence as badges, and states above the fold the number the case for this
+  project rests on: 4,462 of 5,140 records in a 20-second capture were DEBUG or
+  INFO — the tier a `syslog_relay` tool never receives.
+
+- The macOS screenshot moved down beside the paragraph that discusses macOS,
+  rather than sitting at the top under a shared caption with the Windows one.
+
+- `Documentation` added to `project.urls`, which earns the entry an icon on the
+  PyPI sidebar and a place under Verified details.
+
 ## 0.1.2 - 2026-08-11
 
 ### Added

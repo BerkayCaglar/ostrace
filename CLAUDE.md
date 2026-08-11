@@ -6,16 +6,16 @@ model, sources and storage (phases 0-1), `analysis/` plus all six exporters
 (phase 3), the PySide6 viewer in `gui/` (phase 4), and the release machinery
 itself (phase 5).
 
-**`main` and the last tag are the same thing again**, as of `v0.1.2`. The GUI
+**`main` is ahead of `v0.1.2`**, and `CHANGELOG.md`'s `## [Unreleased]` section
+says by how much. The gap is worth stating whenever there is one, because a bug
+reproduced against the published package is not necessarily a bug here. The GUI
 redesign's must-have tier is finished and released, and so are the fixes that
-came out of the 0.2.0 analysis. The next version is 0.2.0 and it is a
-structural one: the plan lives outside this repository, beside the design
-notes.
+came out of the 0.2.0 analysis.
 
-When work resumes, `CHANGELOG.md` gains a `## [Unreleased]` section again and
-this paragraph goes back to saying how far ahead `main` has got — the gap is
-worth stating whenever there is one, because a bug reproduced against the
-published package is not necessarily a bug here.
+The next version is 0.2.0 and it is a structural one: the plan lives outside
+this repository, beside the design notes. It now opens with a package that is
+not structural at all — the project's public presence and its identity to the
+operating system — placed first because it edits files the later packages move.
 
 0.1.0 does not exist. It was published and withdrawn the next day over the
 fixtures inside its `sdist`, and the number will not be reused — so there is
