@@ -12,6 +12,15 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
+### Added
+
+- `tools/build_social_card.py`, which draws the GitHub social preview from the
+  mark and `theme.py`'s tokens. That card is the only image of this project most
+  people ever see — GitHub puts it above the repository name on every topic
+  listing, and every link to the repository unfurls as it. It is uploaded in the
+  repository settings rather than read from the tree, so the script exists to
+  keep it reproducible; it refuses to run rather than let Qt substitute a font.
+
 ### Changed
 
 - **A new application mark**, and the reason is arithmetic rather than taste.
@@ -34,14 +43,16 @@ such: the `Record` model and the on-disk export formats documented in
   size, and a `pip` install has no bundle to take one from, so Qt was upscaling
   256.
 
-### Added
+- The README carries the version, supported Python versions, CI status and
+  licence as badges, and states above the fold the number the case for this
+  project rests on: 4,462 of 5,140 records in a 20-second capture were DEBUG or
+  INFO — the tier a `syslog_relay` tool never receives.
 
-- `tools/build_social_card.py`, which draws the GitHub social preview from the
-  mark and `theme.py`'s tokens. That card is the only image of this project most
-  people ever see — GitHub puts it above the repository name on every topic
-  listing, and every link to the repository unfurls as it. It is uploaded in the
-  repository settings rather than read from the tree, so the script exists to
-  keep it reproducible; it refuses to run rather than let Qt substitute a font.
+- The macOS screenshot moved down beside the paragraph that discusses macOS,
+  rather than sitting at the top under a shared caption with the Windows one.
+
+- `Documentation` added to `project.urls`, which earns the entry an icon on the
+  PyPI sidebar and a place under Verified details.
 
 ### Fixed
 
@@ -59,19 +70,6 @@ such: the `Record` model and the on-disk export formats documented in
   and the `<img>` fallback is the only thing that renders there. The claim is
   gone; the mechanism still works on GitHub, where it is real. **Anything added
   to this README from here on must put the light variant in `<img src>`.**
-
-### Changed
-
-- The README carries the version, supported Python versions, CI status and
-  licence as badges, and states above the fold the number the case for this
-  project rests on: 4,462 of 5,140 records in a 20-second capture were DEBUG or
-  INFO — the tier a `syslog_relay` tool never receives.
-
-- The macOS screenshot moved down beside the paragraph that discusses macOS,
-  rather than sitting at the top under a shared caption with the Windows one.
-
-- `Documentation` added to `project.urls`, which earns the entry an icon on the
-  PyPI sidebar and a place under Verified details.
 
 ## 0.1.2 - 2026-08-11
 
