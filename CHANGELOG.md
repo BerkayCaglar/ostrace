@@ -224,6 +224,21 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Fixed
 
+- **Two banners offered no way out, and the keyboard check could not see two
+  of the actions.** A capture that will not open now offers *Open another…*
+  rather than *Dismiss* — whatever is wrong with the file, the next thing
+  wanted is a different one. A capture that has not released the device offers
+  *Diagnose…*, because that consequence arrives later and elsewhere, as the
+  next capture failing on a busy relay, by which time the banner is long gone.
+
+  The third was quieter: `Quit` and `About` are built apart from the bindings
+  table, since the window has to give them a macOS menu role, and so neither
+  the "every action is bound" check nor the keyboard sheet could see them.
+  `Ctrl+Q` has existed since 0.1.1 and has never appeared in the sheet. They
+  are `Binding`s now, kept in their own table for the role and read together
+  with the rest, and an action that genuinely wants no key — `About`, on every
+  platform — says so rather than being absent from the check.
+
 - **`DestinationInUseError` was missing from `errors.__all__`.** It is the
   exception raised when a write would destroy something already on disk —
   both an export whose default name lands on its own input and a capture
@@ -332,6 +347,11 @@ such: the `Record` model and the on-disk export formats documented in
 [docs/research/gui-redesign/05-interaction.md](docs/research/gui-redesign/05-interaction.md)
 §10 — of which 0.1.1 took the affordable half; the other half is in `Added`
 above. Nothing is left in the first tier.
+
+The claim was three items early when it was first written, and the three are
+now done: the banner shown when a capture will not open, the banner shown when
+a capture has not released the device, and the "every action is bound" check
+covering the actions macOS relocates. They are listed under `Fixed`.
 
 The nice-to-have and later tiers stay in that document rather than being copied
 here. A backlog long enough to skim is one nobody reads.

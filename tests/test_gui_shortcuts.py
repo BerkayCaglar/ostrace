@@ -15,7 +15,7 @@ pytest.importorskip("PySide6", reason="the gui extra is not installed")
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QAction, QKeyEvent, QKeySequence
 
-from ostrace.gui.shortcuts import BINDINGS, key_table, sequences, unbound
+from ostrace.gui.shortcuts import BINDINGS, RELOCATED, key_table, sequences, unbound
 from ostrace.gui.windows.main import MainWindow
 
 pytestmark = pytest.mark.gui
@@ -96,14 +96,33 @@ def test_the_two_keyboard_traditions_are_both_bound(qt_app: object) -> None:
 
 def test_the_documented_table_comes_from_the_bindings(qt_app: object) -> None:
     """klogg's fourth trap is a key table in a manual that drifted from the
-    code. Rendering it from the same list makes drift impossible."""
+    code. Rendering it from the same lists makes drift impossible.
+
+    Both lists: an action Qt relocates on macOS still answers to a key here,
+    and one the sheet omits is a key the program has and does not admit to.
+    Only the entries declaring themselves keyless are absent.
+    """
     del qt_app
+    documented = [binding for binding in (*BINDINGS, *RELOCATED) if not binding.unkeyed]
     table = key_table()
-    assert len(table) == len(BINDINGS)
-    for (label, keys, description), binding in zip(table, BINDINGS, strict=True):
+    assert len(table) == len(documented)
+    for (label, keys, description), binding in zip(table, documented, strict=True):
         assert label == binding.text.replace("&", "")
         assert keys, f"{binding.name} documented with no keys"
         assert description, f"{binding.name} documented with no description"
+
+
+def test_the_quit_key_is_on_the_sheet(qt_app: object) -> None:
+    """The key a Windows user actually presses to leave.
+
+    `StandardKey.Quit` resolves to a key called Exit on Windows, which no
+    keyboard has, so `Ctrl+Q` is bound alongside it. It reached the window
+    before it reached the help sheet, because the sheet was rendered from
+    `BINDINGS` alone and Quit is not in that list.
+    """
+    del qt_app
+    rows = {label: keys for label, keys, _ in key_table()}
+    assert "Ctrl+Q" in rows["Quit"]
 
 
 def test_every_binding_becomes_an_attribute_and_a_menu_item(window: MainWindow) -> None:

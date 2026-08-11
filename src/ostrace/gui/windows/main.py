@@ -67,7 +67,7 @@ from ostrace.gui.loader import CaptureLoader
 from ostrace.gui.markers import when
 from ostrace.gui.models import Find, RecordModel
 from ostrace.gui.pump import Pump
-from ostrace.gui.shortcuts import BINDINGS, key_table, sequences
+from ostrace.gui.shortcuts import BINDINGS, RELOCATED, key_table, sequences
 from ostrace.gui.theme import Scheme, apply_theme, scheme_for
 from ostrace.gui.timeinput import EXAMPLES, parse_jump
 from ostrace.gui.widgets.banner import Banner
@@ -168,6 +168,14 @@ def _submenu(action: QAction) -> QMenu | None:
 #: A constant because the window has to recognise its own message to know
 #: whether the banner it is about to hide is still this one.
 RECONNECT_MESSAGE = "The device stopped answering. Reconnecting — records arriving now are lost."
+
+#: The macOS menu role for each relocated action. Here rather than in
+#: `shortcuts`, which is Qt-light on purpose and describes keys rather than
+#: where a platform decides to put things.
+_ROLES = {
+    "quit": QAction.MenuRole.QuitRole,
+    "about": QAction.MenuRole.AboutRole,
+}
 
 
 class MainWindow(QMainWindow):
@@ -842,23 +850,18 @@ class MainWindow(QMainWindow):
             setattr(self, f"action_{binding.name}", action)
             self.actions_by_name[binding.name] = action
 
-        # Qt relocates these three on macOS by matching their text, and should:
-        # that is the native behaviour a Mac user expects. They get the real
-        # role rather than NoRole, and they are built here rather than in the
-        # table because their roles, not their keys, are the point.
-        self.action_quit = self._action(
-            "&Quit", QKeySequence.StandardKey.Quit, role=QAction.MenuRole.QuitRole
-        )
-        # `StandardKey.Quit` is `⌘Q` on macOS and, on Windows, a key called
-        # `Exit` -- measured, not assumed: `QKeySequence.keyBindings` answers
-        # `['Exit']` there. No keyboard has that key, so on the platform this
-        # is developed on the only way out was the window's close button. Qt
-        # resolves `Ctrl+Q` to the same `⌘Q` the standard key already gives on
-        # macOS, so the alias costs nothing where it is not needed.
-        self.action_quit.setShortcuts(
-            [QKeySequence(QKeySequence.StandardKey.Quit), QKeySequence("Ctrl+Q")]
-        )
-        self.action_about = self._action("&About ostrace", role=QAction.MenuRole.AboutRole)
+        # Qt relocates these on macOS by matching their text, and should: that
+        # is the native behaviour a Mac user expects. The role is the reason
+        # they are built here rather than in the loop above; the keys still come
+        # from `RELOCATED`, so `unbound` and the help sheet can see them.
+        for binding in RELOCATED:
+            action = self._action(binding.text, role=_ROLES[binding.name])
+            keys = [sequence for sequence in sequences(binding) if not sequence.isEmpty()]
+            if keys:
+                action.setShortcuts(keys)
+            action.setToolTip(binding.description)
+            setattr(self, f"action_{binding.name}", action)
+            self.actions_by_name[binding.name] = action
 
         self.action_quit.triggered.connect(self.close)
         self.action_about.triggered.connect(self.show_about)
@@ -1051,7 +1054,14 @@ class MainWindow(QMainWindow):
         try:
             capture = open_capture(path)
         except OstraceError as exc:
-            self.banner.show_message(f"Could not open {path.name}: {exc}", "Dismiss")
+            # The useful answer to a capture that will not open is the file
+            # chooser, not an acknowledgement: whatever went wrong, the next
+            # thing wanted is a different file.
+            self.banner.show_message(
+                f"Could not open {path.name}: {exc}",
+                "Open another…",
+                on_action=self.choose_capture,
+            )
             return
 
         self.stop_capture()
@@ -1319,9 +1329,14 @@ class MainWindow(QMainWindow):
         # emitted on the capture's: the object is destroyed by this thread once
         # the other has genuinely ended, and never from inside its own `run`.
         thread.finished.connect(self._reap)
+        # With an action, because the consequence is one the user will meet
+        # later and elsewhere: the next capture failing on a busy relay. Doctor
+        # is what tells them whether the device is free again.
         self.banner.show_message(
             "The capture has not released the device yet. It is still shutting "
-            "down, and a new capture may fail until it has."
+            "down, and a new capture may fail until it has.",
+            "Diagnose…",
+            on_action=self.show_doctor,
         )
 
     def _reap(self) -> None:
