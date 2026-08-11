@@ -71,6 +71,27 @@ such: the `Record` model and the on-disk export formats documented in
   gone; the mechanism still works on GitHub, where it is real. **Anything added
   to this README from here on must put the light variant in `<img src>`.**
 
+- **The Windows taskbar called the viewer Python, and grouped it with every
+  other Python program running.** Not the window icon, which was already
+  right — one level below it. Windows identifies a process by AppUserModelID,
+  and a process that sets none is identified by the executable owning its
+  windows. Measured on both install routes, that executable is three processes
+  down and is `pythonw.exe`, whose file description is the single word
+  `Python`: pip's launcher and pipx's `uv` trampoline differ in every respect
+  except where they end up. The viewer now declares `BerkayCaglar.Ostrace`
+  before its first window exists, which is fifteen lines and no dependency.
+
+  Two things this does not fix, so that nobody goes looking: Task Manager and
+  the launcher's Properties → Details tab both read the executable's own
+  metadata, and neither launcher is written by this project. The venv's carries
+  its version resource at resource id 102, where `GetFileVersionInfo` cannot
+  find it; pipx's carries none at all. Those need a bundle.
+
+- The application now names its Linux desktop entry. On Wayland that string
+  becomes the surface's `app_id`, the only handle a compositor has for matching
+  a window to an entry, its name and its icon. Nothing installs such an entry
+  yet, so on its own this changes nothing a user sees.
+
 ## 0.1.2 - 2026-08-11
 
 ### Added

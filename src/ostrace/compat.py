@@ -25,6 +25,7 @@ here or corrected where they were wrong.
 
 from __future__ import annotations
 
+import ctypes
 import os
 import subprocess
 import sys
@@ -33,7 +34,35 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["local_usbmux_endpoint", "open_in_file_manager"]
+__all__ = ["local_usbmux_endpoint", "open_in_file_manager", "set_app_identity"]
+
+
+def set_app_identity(app_id: str) -> None:
+    """Tell the shell that this process is an application of its own.
+
+    Windows groups taskbar buttons, resolves pinned shortcuts and builds jump
+    lists by AppUserModelID. A process that never sets one is identified by the
+    executable that owns its windows, and that executable is ``pythonw.exe`` on
+    every install route -- pip's launcher and pipx's trampoline both hand off to
+    it -- whose file description is the single word ``Python``. So the taskbar
+    reports Python and groups this window with every other Python program the
+    machine happens to be running.
+
+    Call it before the first window exists: the shell reads the identity when a
+    window is created, and a window created under the default one keeps it.
+
+    Nothing to do on macOS or Linux, where the equivalent is not a property of
+    the process at all -- the Dock reads a bundle, and a Wayland compositor
+    reads the surface's ``app_id``, which Qt sets from
+    ``QGuiApplication.setDesktopFileName``.
+    """
+    if sys.platform == "win32":
+        # The HRESULT is deliberately not checked. A shell that refuses this
+        # leaves the taskbar grouping wrong, and refusing to start over that
+        # would be the worse failure; a mistake on *this* side -- a bad string,
+        # the call made too late -- fails the gui test instead, which reads the
+        # identity back.
+        ctypes.WinDLL("shell32").SetCurrentProcessExplicitAppUserModelID(ctypes.c_wchar_p(app_id))
 
 
 def local_usbmux_endpoint() -> tuple[str, int] | None:
