@@ -188,7 +188,14 @@ jobs:
         # on either stream. Whatever that was, it happened outside the window
         # pytest covers. `-X` covers the whole process, so the next occurrence
         # arrives as a traceback instead of a mystery.
-        run: python -X faulthandler -m pytest -m gui -ra
+        #
+        # `not device` is not redundant with the marker: pytest marker
+        # selection is set membership, so `-m gui` collects anything carrying
+        # `gui`, including a test that also carries `device`. One does --
+        # `test_gui_live.py` marks the whole module `gui` -- and it ran here
+        # with no hardware attached and passed, which is the worst answer a
+        # device test can give.
+        run: python -X faulthandler -m pytest -m "gui and not device" -ra
 
   build:
     name: Build distributions

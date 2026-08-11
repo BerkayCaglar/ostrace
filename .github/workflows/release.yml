@@ -3,7 +3,13 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    # Three numbers, nothing else. `v*` also matched `v-probe`, `vtest` and
+    # every other tag somebody might push to see what happens -- and pushing a
+    # tag here publishes to PyPI with no approval step, which is not a thing to
+    # find out by accident. A prerelease needs this widened on purpose, which
+    # is the point rather than the cost. GitHub's filter dialect: `[0-9]+` is
+    # one or more digits, and the pattern must match the whole ref.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
 
 permissions:
@@ -40,6 +46,30 @@ jobs:
 
       - name: Check metadata
         run: twine check --strict dist/*
+
+      # 0.1.0 was withdrawn over exactly this distinction: the working tree was
+      # clean and the artifact was not. CI audits the fixtures in the tree on
+      # every change, which is the check that already passed that day. This is
+      # the only one that reads the copies about to be published, and `publish`
+      # waits on it through `needs`.
+      #
+      # The audit is run with the built wheel installed, so the artifact's own
+      # decoder reads the artifact's own fixtures. An empty match is a failure
+      # rather than a pass: a gate that finds nothing to check is the shape of
+      # the problem, not the absence of one.
+      - name: Audit the fixtures inside the sdist
+        run: |
+          python -m pip install dist/*.whl
+          mkdir -p sdist-audit
+          tar -xzf dist/*.tar.gz -C sdist-audit
+          shopt -s nullglob
+          fixtures=(sdist-audit/*/tests/fixtures/*.jsonl.gz)
+          if [ ${#fixtures[@]} -eq 0 ]; then
+            echo "::error::No captures found inside the sdist; the audit would have passed by checking nothing."
+            exit 1
+          fi
+          printf 'auditing %s\n' "${fixtures[@]}"
+          python tools/audit_capture.py "${fixtures[@]}"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

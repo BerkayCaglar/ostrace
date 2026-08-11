@@ -239,6 +239,29 @@ such: the `Record` model and the on-disk export formats documented in
   with the rest, and an action that genuinely wants no key — `About`, on every
   platform — says so rather than being absent from the check.
 
+- **The release did not check the artifact it was about to publish.** `ci.yml`
+  audits the fixtures in the working tree on every change; `release.yml` built,
+  ran `twine check` and published. 0.1.0 was withdrawn over exactly that
+  distinction — the working tree was clean and the artifact was not — and the
+  lesson had been written into `CONTRIBUTING.md` as a step a person performs
+  from memory while a tag is already going up. The build job now extracts the
+  sdist it just made, audits the captures inside it with the built wheel's own
+  decoder, and `publish` waits on the result. Finding no captures to audit is
+  a failure rather than a pass.
+
+  The tag trigger narrowed from `v*` to three numbers. `v*` also matched
+  `v-probe` and anything else pushed to see what would happen, and what happens
+  is a release.
+
+- **CI ran a device test and it passed with no device.** `test_gui_live.py`
+  marks its module `gui`, so the GUI job's `pytest -m gui` collected the one
+  test inside it that also carries `device` — marker selection is set
+  membership, not exclusivity. The selector is now `gui and not device`.
+  Separately, running `pytest -m device` with nothing plugged in reported a
+  green run rather than skips, because a test asserting window state reaches
+  the end whether or not a device answered; the tier now checks for a device
+  once and skips with the reason.
+
 - **`DestinationInUseError` was missing from `errors.__all__`.** It is the
   exception raised when a write would destroy something already on disk —
   both an export whose default name lands on its own input and a capture
