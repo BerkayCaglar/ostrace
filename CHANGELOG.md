@@ -92,6 +92,18 @@ such: the `Record` model and the on-disk export formats documented in
   a window to an entry, its name and its icon. Nothing installs such an entry
   yet, so on its own this changes nothing a user sees.
 
+- **Without the `gui` extra, `ostrace-gui` failed in complete silence on
+  Windows.** It printed the sentence naming what to install, to `sys.stderr` —
+  which is `None` in a process with no console, and every launch of
+  `ostrace-gui` on Windows is one, because `gui-scripts` is defined as a console
+  script without a console window. Printing to a `None` stream is not an error;
+  it is a no-op. So the program exited 1 having said nothing at all, which is
+  the worst first impression this project could make and was made to exactly
+  the people who had installed it wrong. The message now goes to a dialog when
+  there is no stream to write it to, and to stderr when there is — a message box
+  in front of somebody looking at a terminal is worse than the line they were
+  about to read.
+
 ## 0.1.2 - 2026-08-11
 
 ### Added

@@ -34,7 +34,33 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["local_usbmux_endpoint", "open_in_file_manager", "set_app_identity"]
+__all__ = [
+    "local_usbmux_endpoint",
+    "open_in_file_manager",
+    "set_app_identity",
+    "show_startup_error",
+]
+
+#: ``MB_OK | MB_ICONERROR``. Named here because the numeric literal at the call
+#: site would be the one thing in this module nobody could check by reading it.
+_MB_ICONERROR = 0x00000010
+
+
+def show_startup_error(message: str) -> None:
+    """Put a message in front of a user who has no console to read one in.
+
+    Only Windows needs this, and only because ``gui-scripts`` produces a
+    launcher in the GUI subsystem: such a process has no console, so
+    ``sys.stderr`` is ``None``, and printing to it raises nothing at all -- the
+    text simply goes nowhere. Everywhere else ``ostrace-gui`` is an ordinary
+    console script and its stderr is real, so there is nothing to fall back to
+    and nothing to do.
+
+    For failures before there is a Qt to draw a dialog with. Anything after that
+    belongs in a ``QMessageBox``, which looks like the rest of the program.
+    """
+    if sys.platform == "win32":
+        ctypes.WinDLL("user32").MessageBoxW(None, message, "ostrace", _MB_ICONERROR)
 
 
 def set_app_identity(app_id: str) -> None:
