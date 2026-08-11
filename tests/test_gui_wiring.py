@@ -15,7 +15,7 @@ import gc
 import pytest
 
 from ostrace.model import Level, Record
-from tests.helpers import ERRORS, MIXED, ScriptedSource
+from tests.helpers import ERRORS, MIXED, ScriptedSource, load
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
@@ -30,18 +30,6 @@ from ostrace.gui.theme import Scheme, contrast_ratio, palette_for, severity_for
 from ostrace.gui.windows.main import MainWindow
 
 pytestmark = pytest.mark.gui
-
-
-def load(window: MainWindow, path: object) -> None:
-    """Open a capture and read all of it, without an event loop."""
-    window.open_capture(path)  # type: ignore[arg-type]
-    loader = window._loader
-    assert loader is not None
-    while loader.loaded < 10**9:
-        before = loader.loaded
-        loader._step()
-        if loader.loaded == before:
-            break
 
 
 @pytest.fixture

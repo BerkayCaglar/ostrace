@@ -16,6 +16,8 @@ from ostrace.sources.base import SourceCloseMixin
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from ostrace.gui.windows.main import MainWindow
+
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -101,6 +103,33 @@ class ScriptedSource(SourceCloseMixin):
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+def load(window: MainWindow, path: object) -> None:
+    """Open a capture and read all of it, with no event loop to read it for us.
+
+    The loader runs from a timer in the program and there is no timer offscreen,
+    so tests step it by hand. Shared rather than written out again at each site:
+    three copies of "drive the loader" drift, and a test that drives it slightly
+    differently from its neighbours is a test whose failure means something
+    slightly different.
+
+    Two of the three callers used to take a single step, needing rows to exist
+    rather than all of them. Reading the whole error fixture instead costs them
+    about 10 ms apiece, measured, which is not worth a parameter on the one
+    function that says how a capture is loaded.
+
+    Typing-only import of ``MainWindow``: this module is imported by the
+    interpreter sweep, which installs the package without Qt.
+    """
+    window.open_capture(path)  # type: ignore[arg-type]
+    loader = window._loader
+    assert loader is not None
+    while loader.loaded < 10**9:
+        before = loader.loaded
+        loader._step()
+        if loader.loaded == before:
+            break
 
 
 def make_gap(index: int = 0) -> Gap:
