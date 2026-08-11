@@ -318,11 +318,18 @@ RELOCATED: tuple[Binding, ...] = (
     Binding(
         "quit",
         "&Quit",
-        # `StandardKey.Quit` is Cmd-Q on macOS and, on Windows, a key called
-        # Exit that no keyboard has -- measured through `QKeySequence.keyBindings`
-        # rather than assumed. The alias is what a Windows user actually
-        # presses, and Qt resolves it to the same Cmd-Q on macOS, so it costs
-        # nothing where it is not needed.
+        # `StandardKey.Quit` resolves to a key called Exit, which no keyboard
+        # has, so on its own it leaves no way out. Measured through
+        # `QKeySequence.keyBindings` on Windows and again on macOS 15 under the
+        # offscreen plugin, where the help sheet renders the pair as
+        # `Exit  ·  Cmd-Q` -- so Exit is not the Windows answer it was first
+        # taken for. Whether a cocoa session resolves it differently is
+        # untested; see `docs/design/gui.md` section 12 for what the offscreen
+        # platform can and cannot settle.
+        #
+        # The alias is what carries the action either way: Qt renders `Ctrl+Q`
+        # as Cmd-Q on a Mac, so it is right on both and costs nothing on
+        # either.
         QKeySequence.StandardKey.Quit,
         aliases=("Ctrl+Q",),
         menu="file",

@@ -113,16 +113,30 @@ def test_the_documented_table_comes_from_the_bindings(qt_app: object) -> None:
 
 
 def test_the_quit_key_is_on_the_sheet(qt_app: object) -> None:
-    """The key a Windows user actually presses to leave.
+    """Both of the keys that leave, whatever the platform calls them.
 
-    `StandardKey.Quit` resolves to a key called Exit on Windows, which no
-    keyboard has, so `Ctrl+Q` is bound alongside it. It reached the window
-    before it reached the help sheet, because the sheet was rendered from
-    `BINDINGS` alone and Quit is not in that list.
+    `StandardKey.Quit` resolves to a key called Exit that no keyboard has, so
+    `Ctrl+Q` is bound alongside it. It reached the window before it reached the
+    help sheet, because the sheet was rendered from `BINDINGS` alone and Quit
+    is not in that list.
+
+    Asserted against what `sequences` renders rather than against a literal:
+    native text is `Ctrl+Q` on Windows and `⌘Q` on a Mac, and a test naming
+    either one is a test that only runs on one of the three operating systems
+    this ships to.
     """
     del qt_app
+    quit_binding = next(binding for binding in RELOCATED if binding.name == "quit")
+    expected = [
+        sequence.toString(QKeySequence.SequenceFormat.NativeText)
+        for sequence in sequences(quit_binding)
+        if not sequence.isEmpty()
+    ]
+    assert len(expected) == 2, "both the standard key and the alias should be documented"
+
     rows = {label: keys for label, keys, _ in key_table()}
-    assert "Ctrl+Q" in rows["Quit"]
+    for key in expected:
+        assert key in rows["Quit"]
 
 
 def test_every_binding_becomes_an_attribute_and_a_menu_item(window: MainWindow) -> None:
