@@ -2,11 +2,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The live source's control flow, without a device.
 
-`pymobiledevice3` is replaced at the two seams the source uses -- opening a
-lockdown session and reading device identity -- so the reconnect loop, the gap
-bookkeeping and the session lifecycle are all exercised in CI. The record
-*mapping* is covered against real captures in `test_sources_replay.py`; this
-file is about what happens around it.
+`pymobiledevice3` is replaced at the three seams the source uses -- opening a
+lockdown session, reading device identity, and building the relay service --
+so the reconnect loop, the gap bookkeeping and the session lifecycle are all
+exercised in CI. The record *mapping* is covered against real captures in
+`test_sources_replay.py`; this file is about what happens around it.
+
+The third seam is recent and it is the point of this file's design. Everything
+here used to replace `_stream_once` wholesale, and that method is where the
+second socket is acquired, recorded and released -- so socket ownership was
+structurally invisible to every test in it. Measured: deleting the
+`_stream_service` binding, and swapping the `async with` operands so the
+lockdown closes before the service, each left all 520 tests green. Scripting
+the *service* instead runs the real block, and both mutations now fail.
 """
 
 from __future__ import annotations
@@ -39,18 +47,58 @@ SKEW = dt.timedelta(seconds=10)
 
 
 class FakeLockdown:
+    """The session, and the record of what was entered and left around it.
+
+    ``events`` is shared with the service opened from this lockdown, because
+    the order the two are released in is the thing worth asserting and neither
+    object can see it alone.
+    """
+
     def __init__(self, index: int) -> None:
         self.index = index
         self.closed = False
+        self.events: list[str] = []
 
     async def close(self) -> None:
         self.closed = True
 
     async def __aenter__(self) -> FakeLockdown:
+        self.events.append("lockdown in")
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        return None
+        self.events.append("lockdown out")
+
+
+class FakeService:
+    """The ``os_trace_relay`` connection: the second socket, scripted.
+
+    Its ``syslog()`` yields what the device would have sent, so the source's
+    own mapper turns it back into the records a test asked for -- pinned by
+    ``test_the_scripted_entries_map_back_to_the_records_they_came_from``.
+    """
+
+    def __init__(self, entries: list[Any], events: list[str]) -> None:
+        self._entries = entries
+        self.events = events
+        self.closed = False
+
+    async def __aenter__(self) -> FakeService:
+        self.events.append("service in")
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.events.append("service out")
+
+    async def close(self) -> None:
+        self.closed = True
+
+    async def syslog(self, *, pid: int, stream_flags: int) -> AsyncGenerator[Any, None]:
+        del pid, stream_flags
+        for item in self._entries:
+            if isinstance(item, BaseException):
+                raise item
+            yield item
 
 
 @pytest.fixture
@@ -96,38 +144,60 @@ def record(index: int, message: str | None = None) -> Record:
     )
 
 
+def as_entry(record: Record) -> Any:
+    """The ``SyslogEntry`` the device would have sent for this record.
+
+    Two field names read backwards and this is the place it matters:
+    ``filename`` is the process executable and ``image_name`` is the binary
+    that emitted the record.
+    """
+    return types.SimpleNamespace(
+        pid=record.pid,
+        filename=record.process_path,
+        image_name=record.image_path,
+        timestamp=record.timestamp,
+        thread_id=record.thread_id,
+        label=None,
+        message=record.message,
+        level=types.SimpleNamespace(name=record.level.name),
+    )
+
+
 def emitting(
     *connections: list[Record | BaseException],
     monkeypatch: pytest.MonkeyPatch,
-) -> list[Any]:
-    """Drive `_stream_once` through a scripted sequence of connections.
+) -> types.SimpleNamespace:
+    """Script the relay service through a sequence of connections.
 
     One list per connection: its records in order, optionally ending with the
     exception that connection raises. A list that simply runs out models a
     stream that ended by itself -- which the source treats as an outage, since
     a live stream does not end on its own.
+
+    The seam is ``_open_service`` rather than ``_stream_once``: replacing the
+    latter skips the block that acquires, records and releases the second
+    socket, which is the block worth testing.
     """
     remaining = list(connections)
-    used: list[Any] = []
+    state = types.SimpleNamespace(lockdowns=[], services=[])
 
-    async def fake_once(
-        self: OsTraceSource,
-        lockdown: Any,
-        tz: dt.tzinfo,
-    ) -> AsyncGenerator[Record, None]:
-        used.append(lockdown)
+    def fake_open_service(self: OsTraceSource, lockdown: Any) -> FakeService:
+        del self
+        state.lockdowns.append(lockdown)
         if not remaining:
             # Fail loudly rather than let a test spin: with a zero delay, an
             # endlessly-reconnecting source is an infinite loop.
             msg = "stream script exhausted"
             raise DeviceNotPairedError(msg)
-        for item in remaining.pop(0):
-            if isinstance(item, BaseException):
-                raise item
-            yield item
+        entries = [
+            item if isinstance(item, BaseException) else as_entry(item) for item in remaining.pop(0)
+        ]
+        service = FakeService(entries, lockdown.events)
+        state.services.append(service)
+        return service
 
-    monkeypatch.setattr(OsTraceSource, "_stream_once", fake_once)
-    return used
+    monkeypatch.setattr(OsTraceSource, "_open_service", fake_open_service)
+    return state
 
 
 async def take(source: OsTraceSource, count: int) -> list[Record | Gap]:
@@ -168,12 +238,12 @@ class TestSessionLifecycle:
         clear the field naming the *streaming* one -- so `aclose()` closed
         nothing and every start/stop cycle leaked a socket.
         """
-        used = emitting([record(i) for i in range(5)], monkeypatch=monkeypatch)
+        scripted = emitting([record(i) for i in range(5)], monkeypatch=monkeypatch)
         source = OsTraceSource(reconnect=ReconnectPolicy.disabled())
 
         async def run() -> None:
             await take(source, 2)
-            assert source._active is used[0]
+            assert source._active is scripted.lockdowns[0]
             await source.aclose()
 
         asyncio.run(run())
@@ -207,6 +277,122 @@ class TestSessionLifecycle:
         assert closed == ["service", "lockdown"]
         assert source._stream_service is None
         assert source._active is None  # type: ignore[unreachable]
+
+    def test_the_scripted_entries_map_back_to_the_records_they_came_from(
+        self,
+        seam: types.SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The honesty check on the script itself.
+
+        A test writes `record(0)`; a device sends a `SyslogEntry`. Now that the
+        seam is the service, everything here travels through the source's real
+        mapper, so the two have to agree exactly -- otherwise every assertion
+        about a message below is an assertion about something the mapper
+        invented.
+        """
+        wanted = [record(0), record(1, "a message with spaces in it")]
+        emitting(list(wanted), monkeypatch=monkeypatch)
+        source = OsTraceSource(reconnect=ReconnectPolicy.disabled())
+
+        assert asyncio.run(take(source, 2)) == wanted
+
+    def test_the_service_is_held_while_streaming_and_let_go_afterwards(
+        self,
+        seam: types.SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """`aclose()` can only close a socket somebody wrote down.
+
+        Deleting the one line that records it left every test green while
+        recreating the original failure exactly: an `iPhone18,2` delivered
+        8,239 further records in the five seconds after a "successful" close.
+        The field was invisible because the tests replaced the method that
+        sets it.
+        """
+        scripted = emitting([record(0), record(1)], monkeypatch=monkeypatch)
+        source = OsTraceSource(reconnect=ReconnectPolicy.disabled())
+
+        async def run() -> tuple[Any, Any]:
+            stream = source.stream()
+            await anext(stream)
+            # Read while the generator is suspended at its yield: the only
+            # moment at which the answer means anything.
+            held = source._stream_service
+            async for _ in stream:
+                pass
+            return held, source._stream_service
+
+        held, afterwards = asyncio.run(run())
+
+        assert held is scripted.services[0]
+        assert afterwards is None, "the field outlived the connection"
+
+    def test_the_stream_block_releases_the_service_before_the_lockdown(
+        self,
+        seam: types.SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The same rule as `aclose()`, one line further down and easier to
+        reverse: `async with a, b` releases b first, so the operand order *is*
+        the ordering.
+
+        Swapping the two left all 520 tests green, because the only test that
+        asserted an order asserted `aclose()`'s -- over fields it set by hand,
+        which is a different mechanism reaching the same two objects.
+
+        Read after the connection has finished on its own, not after closing
+        the generator: closing it leaves both context managers un-exited, as
+        the test below measures.
+        """
+        scripted = emitting([record(0), record(1)], monkeypatch=monkeypatch)
+        source = OsTraceSource(reconnect=ReconnectPolicy.disabled())
+
+        async def run() -> None:
+            async for _ in source.stream():
+                pass
+
+        asyncio.run(run())
+
+        assert scripted.lockdowns[0].events == [
+            "lockdown in",
+            "service in",
+            "service out",
+            "lockdown out",
+        ]
+
+    def test_closing_the_stream_does_not_by_itself_release_either_socket(
+        self,
+        seam: types.SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Why `aclose()` exists at all, measured rather than asserted in prose.
+
+        Closing the outer generator throws `GeneratorExit` at its `yield`, but
+        the per-connection generator underneath is only finalised when the event
+        loop gets round to it -- at `asyncio.run`'s `shutdown_asyncgens`, which
+        is after everything a caller does. So the instant after
+        `stream.aclose()` returns, neither context manager has exited and the
+        service socket is still open and still named.
+
+        That is the whole reason releasing a device closes the service itself
+        instead of trusting the generator machinery. If a future Python
+        finalises promptly this fails, and the right response is to read the
+        rationale in `aclose()` again rather than to delete the assertion.
+        """
+        scripted = emitting([record(i) for i in range(5)], monkeypatch=monkeypatch)
+        source = OsTraceSource(reconnect=ReconnectPolicy.disabled())
+
+        async def run() -> tuple[Any, list[str]]:
+            stream = source.stream()
+            await anext(stream)
+            await stream.aclose()
+            return source._stream_service, list(scripted.lockdowns[0].events)
+
+        still_held, events = asyncio.run(run())
+
+        assert still_held is scripted.services[0]
+        assert events == ["lockdown in", "service in"], "something was released after all"
 
     def test_a_deliberate_stop_is_not_reported_as_an_outage(
         self,
@@ -243,6 +429,30 @@ class TestSessionLifecycle:
         # script is never reached.
         assert [type(item).__name__ for item in items] == ["Record", "Record"]
         assert len(seam.opened) == 1
+
+    def test_releasing_one_session_does_not_deregister_another(self) -> None:
+        """`_close` closes by identity, and the 0.1.1 bug is what happens when
+        it does not: `device_info()` opened a short-lived session and, on
+        releasing it, cleared the field naming the *streaming* one -- after
+        which `aclose()` closed nothing and every start/stop cycle leaked a
+        socket.
+
+        Nothing reaches that sequence today. `stream()` reads identity from the
+        session it already holds, and `device_info()` answers from the cache
+        once a capture is running, so the guard defends a path with no caller.
+        It is asserted anyway: clearing the field wholesale leaves all 556
+        tests green -- measured, under the shadow method -- and the code that
+        decides who opens what is the code package D is about to move.
+        """
+        source = OsTraceSource(reconnect=ReconnectPolicy.disabled())
+        streaming = FakeLockdown(1)
+        short_lived = FakeLockdown(2)
+        source._active = streaming
+
+        asyncio.run(source._close(short_lived))
+
+        assert source._active is streaming, "releasing another session deregistered the stream"
+        assert short_lived.closed is True, "the session it was given stayed open"
 
     def test_a_short_lived_identity_session_is_closed_and_deregistered(
         self,
