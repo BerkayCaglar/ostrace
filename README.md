@@ -205,6 +205,12 @@ standard FSF reading that makes a combined work, so matching the licence is the
 clean answer rather than a reluctant one. Reasoning in
 [docs/adr/0003](https://github.com/BerkayCaglar/ostrace/blob/main/docs/adr/0003-license-gpl-3-0-or-later.md).
 
+The application mark — `src/ostrace/gui/icons/app.svg` and the card built from
+it — is under the same licence as everything else here, so nothing stops you
+redistributing it. The request is only that a fork which changes behaviour draws
+its own, because an icon in a taskbar is how somebody tells one program from
+another and there is no way to check which one they got.
+
 ## Acknowledgements
 
 `ostrace` is a viewer on top of [pymobiledevice3](https://github.com/doronz88/pymobiledevice3)

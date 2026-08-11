@@ -12,6 +12,48 @@ such: the `Record` model and the on-disk export formats documented in
 
 ## [Unreleased]
 
+### Added
+
+- `tools/build_social_card.py`, which draws the GitHub social preview from the
+  mark and `theme.py`'s tokens. That card is the only image of this project most
+  people ever see — GitHub puts it above the repository name on every topic
+  listing, and every link to the repository unfurls as it. It is uploaded in the
+  repository settings rather than read from the tree, so the script exists to
+  keep it reproducible; it refuses to run rather than let Qt substitute a font.
+
+### Changed
+
+- **A new application mark**, and the reason is arithmetic rather than taste.
+  The one it replaces was drawn on a 64-unit grid with 5-unit bars, which is
+  1.25 device pixels at 16 — the size a title bar and a small taskbar ask for.
+  Counting exact pixels at that size, it rendered **no white and no amber at
+  all**, and still no amber at 24: the mark arrived where it is most often seen
+  as a plain blue square, and its one idea, three bars of differing length, was
+  a difference of 1.25 px. Three units on a 24-unit grid is exactly 2.0 device
+  pixels at 16, and both inks now survive every size — measured, and pinned by a
+  test that fails against the old drawing.
+
+  Two obvious alternatives were measured and rejected. Darkening the tile trades
+  internal contrast one-for-one against the tile disappearing on a dark taskbar
+  (`#14203a` is 1.02:1 against Windows 11's). Dropping the tile is not possible:
+  no single ink clears 4.5:1 on both a light and a dark plate, the best being
+  3.28. The tile is what lets the mark use high-contrast colours at all.
+
+- `APP_SIZES` gained 512. macOS asks the application for a Dock icon at that
+  size, and a `pip` install has no bundle to take one from, so Qt was upscaling
+  256.
+
+- The README carries the version, supported Python versions, CI status and
+  licence as badges, and states above the fold the number the case for this
+  project rests on: 4,462 of 5,140 records in a 20-second capture were DEBUG or
+  INFO — the tier a `syslog_relay` tool never receives.
+
+- The macOS screenshot moved down beside the paragraph that discusses macOS,
+  rather than sitting at the top under a shared caption with the Windows one.
+
+- `Documentation` added to `project.urls`, which earns the entry an icon on the
+  PyPI sidebar and a place under Verified details.
+
 ### Fixed
 
 - **Every link in the README pointed at a page that does not exist on PyPI.**
@@ -28,19 +70,6 @@ such: the `Record` model and the on-disk export formats documented in
   and the `<img>` fallback is the only thing that renders there. The claim is
   gone; the mechanism still works on GitHub, where it is real. **Anything added
   to this README from here on must put the light variant in `<img src>`.**
-
-### Changed
-
-- The README carries the version, supported Python versions, CI status and
-  licence as badges, and states above the fold the number the case for this
-  project rests on: 4,462 of 5,140 records in a 20-second capture were DEBUG or
-  INFO — the tier a `syslog_relay` tool never receives.
-
-- The macOS screenshot moved down beside the paragraph that discusses macOS,
-  rather than sitting at the top under a shared caption with the Windows one.
-
-- `Documentation` added to `project.urls`, which earns the entry an icon on the
-  PyPI sidebar and a place under Verified details.
 
 ## 0.1.2 - 2026-08-11
 
