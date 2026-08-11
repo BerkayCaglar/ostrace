@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QApplication
 
 from ostrace import __version__
+from ostrace.compat import set_app_identity
 from ostrace.gui import icons
 from ostrace.gui.theme import Scheme, apply_theme, resolve_scheme
 from ostrace.gui.windows.main import MainWindow
@@ -29,6 +30,21 @@ __all__ = ["build_application", "build_window", "run"]
 APP_NAME = "ostrace"
 ORG_NAME = "ostrace"
 
+#: What the Windows shell groups, pins and relaunches by. Company then product,
+#: and deliberately no version component: the documented rule is that the
+#: version is omitted so that an upgrade can keep the identity of the release it
+#: replaces, which is what makes an existing pinned button keep working.
+APP_ID = "BerkayCaglar.Ostrace"
+
+#: The basename of the desktop entry that describes this application on Linux.
+#: Qt hands it to a Wayland compositor as the surface's ``app_id``, which is the
+#: only handle the compositor has for matching a window to an entry, its name
+#: and its icon. It names a file nothing here installs yet, so on its own this
+#: changes nothing a user sees -- it is set now because the alternative is
+#: setting it at the same time as the installer and discovering then that it has
+#: to come first.
+DESKTOP_FILE = "ostrace"
+
 
 def build_application(argv: Sequence[str] | None = None) -> QApplication:
     """A themed application, not yet running.
@@ -37,6 +53,11 @@ def build_application(argv: Sequence[str] | None = None) -> QApplication:
     per process and constructing a second is a hard failure, which matters here
     because a test session builds one per test file otherwise.
     """
+    # Before the QApplication rather than beside the setters below: the shell
+    # reads the identity when the first window is created, and Qt may create one
+    # of its own during construction.
+    set_app_identity(APP_ID)
+
     app = QApplication.instance()
     if not isinstance(app, QApplication):
         app = QApplication(list(argv) if argv is not None else [])
@@ -45,6 +66,7 @@ def build_application(argv: Sequence[str] | None = None) -> QApplication:
     app.setApplicationDisplayName(APP_NAME)
     app.setOrganizationName(ORG_NAME)
     app.setApplicationVersion(__version__)
+    app.setDesktopFileName(DESKTOP_FILE)
     # On the application rather than on the window: every window, dialog and
     # message box inherits it, and the taskbar entry comes from here too. There
     # was no icon at all, so the title bar, Alt-Tab and the taskbar all showed
