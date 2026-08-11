@@ -224,6 +224,24 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Fixed
 
+- **Opening a capture while a filter stood showed every row and said it was
+  narrowed.** The filter bar kept displaying `Error+`, the new model applied
+  nothing, and the table filled with all of it — the one state where the window
+  is actively lying about what is on screen. Present in 0.1.1.
+
+  The filter now travels to the next capture, applied to the model while it is
+  still empty so the rows arrive already narrowed. Closing a capture still
+  clears it, and that asymmetry is the point rather than an oversight: closing
+  is the one moment there is no next capture, so the window knows for certain
+  the filter is not for whatever comes after. Opening is the opposite — there
+  is a capture in hand, and a filter typed in front of the last one is usually
+  the question being carried to the next.
+
+  The cause was four hand-copied versions of the same nine lines. Every door
+  that empties the table — opening, closing, starting a live capture, building
+  the window — now goes through one method, which ends with the bar and the
+  model agreeing whichever way the filter went.
+
 - **A gap row said `ConnectionTerminatedError` where it should have said what
   happened.** Pulling the cable mid-capture wrote
   `---- gap 14:22:31+00:00 to 14:22:39+00:00 (ConnectionTerminatedError) ----`

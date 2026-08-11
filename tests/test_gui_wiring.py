@@ -24,6 +24,7 @@ from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
 from ostrace.gui.columns import Column
+from ostrace.gui.filters import Filter
 from ostrace.gui.theme import Scheme, contrast_ratio, palette_for, severity_for
 from ostrace.gui.windows.main import MainWindow
 
@@ -46,6 +47,45 @@ def load(window: MainWindow, path: object) -> None:
 def window(qt_app: object) -> MainWindow:
     del qt_app
     return MainWindow()
+
+
+def test_a_standing_filter_reaches_the_next_capture(window: MainWindow) -> None:
+    """The bar and the model have to agree after a swap.
+
+    Opening a capture over another left the bar displaying a filter that the
+    new model was not applying: every row on screen, and the chrome insisting
+    the view was narrowed. Carrying the filter to the next capture is a
+    decision and clearing it would be another one -- displaying it without
+    applying it is neither, it is the window lying about what is on screen.
+    """
+    load(window, ERRORS)
+    window.filter_bar.set_filter(Filter(minimum_level=Level.ERROR))
+    window._apply_filter()
+    assert 0 < window.model.rowCount() < window.model.retained
+
+    load(window, MIXED)
+
+    assert not window.filter_bar.is_empty
+    assert window.model.filter.minimum_level is Level.ERROR
+    assert 0 < window.model.rowCount() < window.model.retained
+
+
+def test_closing_a_capture_takes_the_filter_with_it(window: MainWindow) -> None:
+    """The other half of the same rule, and the reason it is not symmetrical.
+
+    Closing is the one moment there is no next capture to carry the filter to,
+    so this door clears where every other one keeps. Pinned because the two
+    halves now live in one method, and a change that made them agree would look
+    like a tidy-up.
+    """
+    load(window, ERRORS)
+    window.filter_bar.set_filter(Filter(minimum_level=Level.ERROR))
+    window._apply_filter()
+
+    window.close_capture()
+
+    assert window.filter_bar.is_empty
+    assert window.model.filter.is_empty
 
 
 def test_opening_a_capture_fills_the_table(window: MainWindow) -> None:
