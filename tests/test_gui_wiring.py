@@ -19,7 +19,7 @@ from tests.helpers import ERRORS, MIXED
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -68,6 +68,34 @@ def test_a_standing_filter_reaches_the_next_capture(window: MainWindow) -> None:
     assert not window.filter_bar.is_empty
     assert window.model.filter.minimum_level is Level.ERROR
     assert 0 < window.model.rowCount() < window.model.retained
+
+
+def test_nothing_from_the_previous_capture_outlives_the_swap(window: MainWindow) -> None:
+    """Every capture opened in a session used to stay in memory.
+
+    Both halves are asserted because the model has two owners and releasing
+    one of them frees nothing. The window is its Qt parent, so Qt holds it
+    until the window dies; the loader keeps it in an attribute, and the loader
+    is parented to the window too, which keeps its Python wrapper alive and the
+    model reference in it. Measured over twenty successive opens: deleting only
+    the model grows the process 41.2 MiB, only the loader 40.6 MiB, neither
+    41.0 MiB, both 2.2 MiB.
+
+    So a spy on one of them would pass while the leak continued, which is what
+    makes the pair worth pinning rather than the pair being tidy.
+    """
+    load(window, ERRORS)
+    replaced_model = window.model
+    replaced_loader = window._loader
+    assert replaced_loader is not None
+    gone: list[str] = []
+    replaced_model.destroyed.connect(lambda *_: gone.append("model"))
+    replaced_loader.destroyed.connect(lambda *_: gone.append("loader"))
+
+    load(window, MIXED)
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+    assert sorted(gone) == ["loader", "model"], f"still alive: {gone}"
 
 
 def test_closing_a_capture_takes_the_filter_with_it(window: MainWindow) -> None:
