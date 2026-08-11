@@ -15,7 +15,7 @@ import gc
 import pytest
 
 from ostrace.model import Level, Record
-from tests.helpers import ERRORS, MIXED
+from tests.helpers import ERRORS, MIXED, ScriptedSource
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import QApplication
 
 from ostrace.gui.columns import Column
 from ostrace.gui.filters import Filter
+from ostrace.gui.live import CaptureThread
 from ostrace.gui.theme import Scheme, contrast_ratio, palette_for, severity_for
 from ostrace.gui.windows.main import MainWindow
 
@@ -96,6 +97,47 @@ def test_nothing_from_the_previous_capture_outlives_the_swap(window: MainWindow)
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
     assert sorted(gone) == ["loader", "model"], f"still alive: {gone}"
+
+
+def test_a_capture_that_will_not_open_offers_another(
+    window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The banner's job is the way out, not the acknowledgement.
+
+    Whatever is wrong with the file, the next thing wanted is a different one,
+    and the window already knows how to ask for it.
+    """
+    chosen: list[bool] = []
+    monkeypatch.setattr(MainWindow, "choose_capture", lambda self: chosen.append(True))
+
+    window.open_capture(ERRORS.with_name("no-such-capture.jsonl.gz"))
+
+    assert window.banner._action.text() == "Open another…"
+    window.banner.act()
+    assert chosen, "the action did not reach the file chooser"
+
+
+def test_a_parked_capture_offers_the_doctor(
+    window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A device still held is a consequence met later and elsewhere.
+
+    The next capture fails on a busy relay, by which time the banner that
+    warned about it is long gone. Doctor is the thing that answers whether the
+    device is free, so the banner offers it while the subject is still on
+    screen.
+    """
+    opened: list[bool] = []
+    monkeypatch.setattr(MainWindow, "show_doctor", lambda self: opened.append(True))
+    thread = CaptureThread(ScriptedSource([]))
+
+    window._park(thread)
+
+    assert window.banner._action.text() == "Diagnose…"
+    window.banner.act()
+    assert opened, "the action did not reach the doctor window"
 
 
 def test_closing_a_capture_takes_the_filter_with_it(window: MainWindow) -> None:

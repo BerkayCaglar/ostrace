@@ -32,7 +32,7 @@ from dataclasses import dataclass
 
 from PySide6.QtGui import QKeySequence
 
-__all__ = ["BINDINGS", "Binding", "key_table", "sequences", "unbound"]
+__all__ = ["BINDINGS", "RELOCATED", "Binding", "key_table", "sequences", "unbound"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +63,11 @@ class Binding:
     checked: bool = False
     #: One line for the help sheet. Says what it is *for*, not what it does.
     description: str = ""
+    #: Declared to have no key. `unbound` treats a missing key as a defect, so
+    #: the handful of items that genuinely want none have to say so instead of
+    #: being absent from the check -- an item nobody looks at is how one ends up
+    #: unreachable.
+    unkeyed: bool = False
 
 
 BINDINGS: tuple[Binding, ...] = (
@@ -298,14 +303,49 @@ BINDINGS: tuple[Binding, ...] = (
 )
 
 #: Actions Qt relocates on macOS by matching their text, and should. They are
-#: built separately because their roles, not their bindings, are the point.
+#: kept apart from `BINDINGS` because the window has to give them a menu *role*
+#: as well as a key, and the role is the point -- but they are `Binding`s all
+#: the same, so `unbound` and `key_table` see them like everything else. Held
+#: separately and read together was how `Ctrl+Q` came to exist without ever
+#: appearing on the keyboard sheet.
 #:
 #: No Settings. There is nothing to configure in this release -- the theme
 #: follows the system, the row cap and the drain interval are measured
 #: constants -- and a menu item that opens nothing is worse than an absent one,
 #: especially on macOS where Qt moves it into the application menu and calls it
 #: Preferences, which is the item people press without looking.
-RELOCATED = ("quit", "about")
+RELOCATED: tuple[Binding, ...] = (
+    Binding(
+        "quit",
+        "&Quit",
+        # `StandardKey.Quit` resolves to a key called Exit, which no keyboard
+        # has, so on its own it leaves no way out. Measured through
+        # `QKeySequence.keyBindings` on Windows and again on macOS 15 under the
+        # offscreen plugin, where the help sheet renders the pair as
+        # `Exit  ·  Cmd-Q` -- so Exit is not the Windows answer it was first
+        # taken for. Whether a cocoa session resolves it differently is
+        # untested; see `docs/design/gui.md` section 12 for what the offscreen
+        # platform can and cannot settle.
+        #
+        # The alias is what carries the action either way: Qt renders `Ctrl+Q`
+        # as Cmd-Q on a Mac, so it is right on both and costs nothing on
+        # either.
+        QKeySequence.StandardKey.Quit,
+        aliases=("Ctrl+Q",),
+        menu="file",
+        description="Close the window and finish any running capture",
+    ),
+    Binding(
+        "about",
+        "&About ostrace",
+        "",
+        menu="help",
+        description="Version, licence and where to report a bug",
+        # Nothing binds About, on any platform. Declared rather than left to
+        # look like an omission.
+        unkeyed=True,
+    ),
+)
 
 
 def sequences(binding: Binding) -> list[QKeySequence]:
@@ -320,11 +360,15 @@ def sequences(binding: Binding) -> list[QKeySequence]:
 def key_table() -> list[tuple[str, str, str]]:
     """The documented table: label, keys, description.
 
-    Rendered from `BINDINGS`, so a binding that changes changes the help sheet
-    in the same commit or not at all.
+    Rendered from the tables, so a binding that changes changes the help sheet
+    in the same commit or not at all. The relocated actions are included for
+    that reason: `Ctrl+Q` is a key this program answers to, and a sheet that
+    leaves it out is wrong in the direction that matters.
     """
     rows = []
-    for binding in BINDINGS:
+    for binding in (*BINDINGS, *RELOCATED):
+        if binding.unkeyed:
+            continue
         keys = "  ·  ".join(
             sequence.toString(QKeySequence.SequenceFormat.NativeText)
             for sequence in sequences(binding)
@@ -335,13 +379,20 @@ def key_table() -> list[tuple[str, str, str]]:
 
 
 def unbound() -> list[str]:
-    """Bindings with no key at all.
+    """Actions with no key, other than the ones that say they want none.
 
     An action with no default binding is unreachable from the keyboard and
     invisible in the help sheet -- klogg shipped several and had to go back for
-    them. Asserted by `test_gui_shortcuts.py` rather than at import time,
-    because everything in this module needs a `QApplication`: constructing a
+    them. Both tables are walked: an action kept outside `BINDINGS` is exactly
+    the one nobody is checking, which is the situation this exists to prevent.
+
+    Asserted by `test_gui_shortcuts.py` rather than at import time, because
+    everything in this module needs a `QApplication`: constructing a
     `QKeySequence` without one **segfaults the interpreter**, which an
     import-time check would turn into a crash rather than a failure.
     """
-    return [binding.name for binding in BINDINGS if not sequences(binding)[0].toString()]
+    return [
+        binding.name
+        for binding in (*BINDINGS, *RELOCATED)
+        if not binding.unkeyed and not sequences(binding)[0].toString()
+    ]

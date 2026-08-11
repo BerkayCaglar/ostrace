@@ -15,7 +15,7 @@ pytest.importorskip("PySide6", reason="the gui extra is not installed")
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QAction, QKeyEvent, QKeySequence
 
-from ostrace.gui.shortcuts import BINDINGS, key_table, sequences, unbound
+from ostrace.gui.shortcuts import BINDINGS, RELOCATED, key_table, sequences, unbound
 from ostrace.gui.windows.main import MainWindow
 
 pytestmark = pytest.mark.gui
@@ -96,14 +96,47 @@ def test_the_two_keyboard_traditions_are_both_bound(qt_app: object) -> None:
 
 def test_the_documented_table_comes_from_the_bindings(qt_app: object) -> None:
     """klogg's fourth trap is a key table in a manual that drifted from the
-    code. Rendering it from the same list makes drift impossible."""
+    code. Rendering it from the same lists makes drift impossible.
+
+    Both lists: an action Qt relocates on macOS still answers to a key here,
+    and one the sheet omits is a key the program has and does not admit to.
+    Only the entries declaring themselves keyless are absent.
+    """
     del qt_app
+    documented = [binding for binding in (*BINDINGS, *RELOCATED) if not binding.unkeyed]
     table = key_table()
-    assert len(table) == len(BINDINGS)
-    for (label, keys, description), binding in zip(table, BINDINGS, strict=True):
+    assert len(table) == len(documented)
+    for (label, keys, description), binding in zip(table, documented, strict=True):
         assert label == binding.text.replace("&", "")
         assert keys, f"{binding.name} documented with no keys"
         assert description, f"{binding.name} documented with no description"
+
+
+def test_the_quit_key_is_on_the_sheet(qt_app: object) -> None:
+    """Both of the keys that leave, whatever the platform calls them.
+
+    `StandardKey.Quit` resolves to a key called Exit that no keyboard has, so
+    `Ctrl+Q` is bound alongside it. It reached the window before it reached the
+    help sheet, because the sheet was rendered from `BINDINGS` alone and Quit
+    is not in that list.
+
+    Asserted against what `sequences` renders rather than against a literal:
+    native text is `Ctrl+Q` on Windows and `⌘Q` on a Mac, and a test naming
+    either one is a test that only runs on one of the three operating systems
+    this ships to.
+    """
+    del qt_app
+    quit_binding = next(binding for binding in RELOCATED if binding.name == "quit")
+    expected = [
+        sequence.toString(QKeySequence.SequenceFormat.NativeText)
+        for sequence in sequences(quit_binding)
+        if not sequence.isEmpty()
+    ]
+    assert len(expected) == 2, "both the standard key and the alias should be documented"
+
+    rows = {label: keys for label, keys, _ in key_table()}
+    for key in expected:
+        assert key in rows["Quit"]
 
 
 def test_every_binding_becomes_an_attribute_and_a_menu_item(window: MainWindow) -> None:
@@ -133,14 +166,14 @@ def test_pause_is_bound_which_neither_logcat_nor_console_manages(window: MainWin
 
 
 def test_quit_is_reachable_on_windows_too(window: MainWindow) -> None:
-    """`StandardKey.Quit` is `⌘Q` on macOS and a key called `Exit` on Windows.
+    """`StandardKey.Quit` resolves to a key called `Exit`, which nothing has.
 
-    Measured rather than assumed -- `QKeySequence.keyBindings` answers
-    `['Exit']` there -- and no keyboard has an Exit key, so on the platform
-    this is developed on the only way out of the program was the window's
-    close button. `Ctrl+Q` is the alias; Qt resolves it to the same `⌘Q` the
-    standard key already gives on macOS, so it costs nothing where it is not
-    needed.
+    Measured rather than assumed: `QKeySequence.keyBindings` answers `['Exit']`
+    on Windows, and the macOS runner renders the documented pair as
+    `Exit  ·  ⌘Q`, so the standard key is no more use there. Without the alias
+    the only way out of the program is the window's close button. `Ctrl+Q` is
+    what carries it, and Qt renders that as `⌘Q` on a Mac, so it is right on
+    both.
     """
     bound = {sequence.toString() for sequence in window.action_quit.shortcuts()}
 
