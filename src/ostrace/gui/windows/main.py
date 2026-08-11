@@ -254,11 +254,8 @@ class MainWindow(QMainWindow):
         #: Capture threads that outlived their stop wait. See `_park`.
         self._parked: list[CaptureThread] = []
         self._pump: Pump | None = None
-        self.model = RecordModel(scheme, parent=self)
-        self.table.setModel(self.model)
-        self.minimap.set_model(self.model)
+        self._replace_model(keep_filter=True)
         self.minimap.row_requested.connect(self.go_to)
-        self._connect_selection()
 
         self._filter_debounce = QTimer(self)
         self._filter_debounce.setSingleShot(True)
@@ -974,6 +971,42 @@ class MainWindow(QMainWindow):
         if chosen:
             self.open_capture(Path(chosen))
 
+    def _replace_model(self, *, keep_filter: bool) -> None:
+        """Swap in a fresh model and leave the chrome agreeing with it.
+
+        Every door that empties the table arrives here: opening a capture,
+        closing one, starting a live capture, and building the window. They had
+        a copy of this each, and one of the copies was missing a step -- opening
+        a capture while a filter stood left the bar displaying a filter the new
+        model did not apply, so the table showed everything while the chrome
+        said it was narrowed. Three sites is where that becomes inevitable
+        rather than unlucky.
+
+        ``keep_filter`` is the only thing the doors disagree about, and it is a
+        policy rather than an oversight. Closing clears, because there is no
+        next capture and this is the one moment the window knows for certain
+        that the filter is not for whatever comes after. Every other door keeps
+        it: there *is* a capture in hand, and a filter typed in front of the
+        last one is usually the question being carried to the next.
+
+        Applied while the model is still empty, and directly rather than
+        through the debounce -- a swap is not typing. Filtering nothing costs
+        nothing, and the rows then arrive already narrowed instead of arriving
+        and being taken away.
+        """
+        self.model = RecordModel(self.scheme, parent=self)
+        self.table.setModel(self.model)
+        self.minimap.set_model(self.model)
+        self._connect_selection()
+        self.detail.clear()
+
+        if not keep_filter:
+            self.filter_bar.clear()
+            return
+        wanted = self._bar_filter()
+        if wanted is not None:
+            self.model.set_filter(wanted)
+
     def open_capture(self, path: Path) -> None:
         """Load a capture into the table.
 
@@ -993,11 +1026,7 @@ class MainWindow(QMainWindow):
 
         self.stop_capture()
         self.capture = capture
-        self.model = RecordModel(self.scheme, parent=self)
-        self.table.setModel(self.model)
-        self.minimap.set_model(self.model)
-        self._connect_selection()
-        self.detail.clear()
+        self._replace_model(keep_filter=True)
         self.status.set_device(capture.device)
 
         self._loader = CaptureLoader(capture, self.model, parent=self)
@@ -1037,17 +1066,11 @@ class MainWindow(QMainWindow):
             self._loader = None
 
         self.capture = None
-        self.model = RecordModel(self.scheme, parent=self)
-        self.table.setModel(self.model)
-        self.minimap.set_model(self.model)
+        # The filter goes with it -- the one door that clears rather than
+        # carries. See `_replace_model`.
+        self._replace_model(keep_filter=False)
+        # Nothing follows to redraw it, unlike the doors that start a loader.
         self.minimap.rebuild()
-        self._connect_selection()
-        self.detail.clear()
-        # The filter goes with it. A filter that outlived the capture it was
-        # written for is the "where did my logs go" failure with a longer fuse,
-        # and this is the one moment the window knows for certain that it is
-        # not the filter for whatever comes next.
-        self.filter_bar.clear()
         self.banner.hide()
         self._showing_filter_notice = False
         self.status.set_device(None)
@@ -1173,11 +1196,7 @@ class MainWindow(QMainWindow):
         """
         self.stop_capture()
 
-        self.model = RecordModel(self.scheme, parent=self)
-        self.table.setModel(self.model)
-        self.minimap.set_model(self.model)
-        self._connect_selection()
-        self.detail.clear()
+        self._replace_model(keep_filter=True)
         self.capture = None
         # Not known until the device answers, which is a round trip. The title
         # says so rather than guessing, and `_on_identified` fills it in.
@@ -1931,9 +1950,17 @@ class MainWindow(QMainWindow):
     def filter_by_subsystem(self, subsystem: str) -> None:
         self.filter_bar.set_subsystem(subsystem)
 
-    def _apply_filter(self) -> None:
+    def _bar_filter(self) -> Filter | None:
+        """What the bar is currently displaying, or `None` if it is half-typed.
+
+        Separate from `_apply_filter` because a model swap needs the filter
+        without the readouts and the banner that follow one: the new model is
+        empty at that moment, and `_update_banner` would read that as a capture
+        with nothing in it and say so, a sentence the loader contradicts a
+        fraction of a second later.
+        """
         try:
-            wanted = Filter(
+            return Filter(
                 minimum_level=self.filter_bar.minimum_level,
                 process=self.filter_bar.process,
                 subsystem=self.filter_bar.subsystem,
@@ -1945,6 +1972,11 @@ class MainWindow(QMainWindow):
             # applied and the user is told why, rather than watching the view
             # empty itself as they type.
             self.banner.show_message(str(exc), "Dismiss")
+            return None
+
+    def _apply_filter(self) -> None:
+        wanted = self._bar_filter()
+        if wanted is None:
             return
 
         anchor = self._anchor()
