@@ -224,6 +224,27 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Fixed
 
+- **`DestinationInUseError` was missing from `errors.__all__`.** It is the
+  exception raised when a write would destroy something already on disk —
+  both an export whose default name lands on its own input and a capture
+  reusing a destination — so it is the one anybody writing against `ostrace`
+  most needs to be able to catch, and it was invisible to anything trusting the
+  declared surface. The test that now guards this walks the module rather than
+  listing the names a second time, because a list needs the same edit as
+  `__all__` and would be made by whoever already remembered.
+
+- **The quoted pattern-folding figures did not describe the committed
+  fixture.** The documented 1,454 rows for 1,431 templates, the fold from
+  1,677, and the 2,619 distinct messages are all measured as 944, 921, 1,164
+  and 2,593 — across `docs/formats/agent-bundle.md`, `analysis/scan.py`,
+  `analysis/templates.py`, this file and two docstrings. Neither the fixture
+  nor the substitution table has changed since either was committed, so the
+  figures never described this pair; the only test covering them asserts a
+  ratio below 60%, which both the claimed and the real numbers satisfy. An
+  exact assertion now pins the two counts, so the next improvement to
+  normalisation reports itself instead of quietly widening the gap. The
+  documented figures ship inside the sdist.
+
 - **Every capture opened in a session stayed in memory.** Reading through a
   morning's captures grew the process by about 2 MiB per capture on the small
   committed fixtures, and by a whole retained row set on real ones — nothing
@@ -1098,9 +1119,9 @@ returns 473 records spanning six processes.
 Normalisation was extended past the predecessor's rules after measuring what
 survived them. The dominant leak was hex with no `0x` prefix — operation
 identifiers, content references, protection tags, which iOS emits constantly
-and which are pure identity. Recognising them folds the fixture's 1,677
-templates to 1,431. A second candidate, loosening the word boundary so that
-`1.25s` normalises, was measured and rejected: worth 4 templates out of 1,677.
+and which are pure identity. Recognising them folds the fixture's 1,164
+templates to 921. A second candidate, loosening the word boundary so that
+`1.25s` normalises, was measured and rejected: worth 5 templates out of 921.
 
 The generated `CLAUDE.md` is bounded by construction — a bundle of two million
 records must not produce a longer one than a bundle of six thousand — and it

@@ -4,7 +4,7 @@
 
 A capture is too large to read and too repetitive to summarise by sampling. What
 makes it tractable is that a handful of templates account for most of it: on the
-committed fixture, 5,000 records reduce to 1,431 templates, and the top twenty
+committed fixture, 5,000 records reduce to 921 templates, and the top twenty
 cover a third of the log.
 
 Everything here is single-pass and bounded. A scan of two million records must
@@ -31,7 +31,7 @@ __all__ = ["MAX_TEMPLATES", "MinuteStats", "ScanResult", "TemplateKey", "Templat
 
 #: Distinct templates held before the scan stops learning new ones. Reached only
 #: by a capture that is either enormous or pathological -- the fixture produces
-#: 1,431 -- and at roughly 200 bytes a template this bounds the scan at ~10 MB.
+#: 921 -- and at roughly 200 bytes a template this bounds the scan at ~10 MB.
 MAX_TEMPLATES = 50_000
 
 #: Records kept verbatim on either side of the first error. Templating is what

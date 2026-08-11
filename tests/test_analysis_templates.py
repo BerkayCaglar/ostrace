@@ -72,9 +72,9 @@ class TestSubstitutions:
 
         ``1.25s`` has no word boundary between the digits and the unit, so
         nothing matches and ``took 1.25s`` and ``took 3.40s`` stay distinct
-        templates. Loosening the boundary to fix it folds 4 further templates
-        out of 1,677 on the mixed fixture and 23 out of 1,274 on the errors
-        one -- not worth trading away a rule that currently cannot over-match.
+        templates. Loosening the boundary to fix it folds 5 further templates
+        out of 921 on the mixed fixture and 23 out of 831 on the errors one --
+        not worth trading away a rule that currently cannot over-match.
         """
         assert normalise("took 1.25s") == "took 1.25s"
 
@@ -115,10 +115,10 @@ class TestAgainstRealMessages:
     def test_folding_actually_folds(self, messages: list[str]) -> None:
         """The whole justification for the step.
 
-        Measured on this fixture: 2,619 distinct messages fold to 1,431
+        Measured on this fixture: 2,593 distinct messages fold to 921
         templates. The bar is set a little above that so an ordinary
         improvement does not fail the test, but a regression that stops the
-        bare-hex rule -- worth 246 templates on its own -- does.
+        bare-hex rule -- worth 243 templates on its own -- does.
 
         A normalisation that barely folded would mean `patterns.tsv` is just
         the log again, sorted differently.
@@ -128,6 +128,22 @@ class TestAgainstRealMessages:
         assert templates < distinct * 0.60, (
             f"{distinct} distinct messages folded to only {templates}"
         )
+
+    def test_the_quoted_counts_are_the_measured_ones(self, messages: list[str]) -> None:
+        """Exact, because the ratio above cannot see a quoted number go stale.
+
+        These two figures are repeated in `analysis/scan.py`,
+        `analysis/templates.py`, `docs/formats/agent-bundle.md`, `CHANGELOG.md`
+        and the docstrings in this file. A bound that accepts anything under
+        60% lets all of them drift without a failure, which is how they came to
+        disagree with the fixture they name.
+
+        If normalisation improves, this is the test that says so. Re-measure
+        and correct every citation together -- the count is evidence for a
+        decision, not decoration.
+        """
+        assert len(set(messages)) == 2_593
+        assert len({normalise(m) for m in messages}) == 921
 
     def test_the_dominant_identifiers_are_gone(self, messages: list[str]) -> None:
         """Not "no digits survive" -- some genuinely belong to the message.
