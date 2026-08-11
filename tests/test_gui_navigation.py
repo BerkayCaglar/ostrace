@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from ostrace.model import Gap, Level, Record
-from tests.helpers import ERRORS, make_record
+from tests.helpers import ERRORS, load, make_record
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
@@ -259,10 +259,7 @@ def test_clearing_marks_follows_the_current_model(window: MainWindow) -> None:
     window.go_to(3)
     window.toggle_mark()
 
-    window.open_capture(ERRORS)
-    loader = window._loader
-    assert loader is not None
-    loader._step()  # one batch is enough to have rows to mark
+    load(window, ERRORS)
 
     window.go_to(0)
     window.toggle_mark()

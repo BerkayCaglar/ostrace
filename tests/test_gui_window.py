@@ -48,7 +48,7 @@ from ostrace.gui.widgets.log_table import (
 )
 from ostrace.gui.windows.main import MainWindow
 from ostrace.model import Level
-from tests.helpers import ERRORS, make_record
+from tests.helpers import ERRORS, load, make_record
 
 pytestmark = pytest.mark.gui
 
@@ -189,10 +189,7 @@ class TestClosingACapture:
     """
 
     def test_it_empties_everything(self, window: MainWindow) -> None:
-        window.open_capture(ERRORS)
-        loader = window._loader
-        assert loader is not None
-        loader._step()
+        load(window, ERRORS)
         window.filter_bar._process.setText("cloudd")
 
         window.close_capture()

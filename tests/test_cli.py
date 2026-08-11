@@ -7,6 +7,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import io
+import socket
 import sys
 from typing import TYPE_CHECKING
 
@@ -188,6 +189,36 @@ class TestDoctor:
         assert "[FAIL] usbmux" in out
         assert "Apple Mobile Device Service" in out
         assert "[skip] devices" in out
+
+    def test_a_usbmux_that_answers_is_reported_with_the_address_that_answered(
+        self,
+        stub_devices: list[DeviceSummary],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The other half of the probe, and the half nobody had watched run.
+
+        The failing branch above is honest without hardware -- port 1 really
+        refuses, so `socket.create_connection` really executes and really
+        raises. The succeeding branch had no test at all: the healthy-doctor
+        case sets the endpoint to `None`, which is the macOS and Linux path and
+        never opens a socket, so a connection completing was exercised only on
+        a Windows machine with Apple's service installed.
+
+        A real listener on an ephemeral port rather than a stubbed `connect`,
+        because what is under test is a TCP probe. Nothing needs to accept:
+        the kernel completes the handshake from the backlog, which is also why
+        this cannot hang.
+        """
+        with socket.create_server(("127.0.0.1", 0)) as listener:
+            host, port = listener.getsockname()[:2]
+            monkeypatch.setattr(doctor, "local_usbmux_endpoint", lambda: (host, port))
+
+            assert cli.main(["doctor"]) == cli.EXIT_OK
+
+        out = capsys.readouterr().out
+        assert f"Apple Mobile Device Service on {host}:{port}" in out
+        assert "[FAIL]" not in out
 
     def test_a_clock_far_out_of_step_is_a_warning_not_a_failure(
         self,
