@@ -1,16 +1,21 @@
 # ostrace
 
-Cross-platform iOS log viewer, released: 0.1.1 is on PyPI. That covers the
+Cross-platform iOS log viewer, released: 0.1.2 is on PyPI. That covers the
 model, sources and storage (phases 0-1), `analysis/` plus all six exporters
 (phase 2), the command line — `devices`, `capture`, `doctor`, `export`
 (phase 3), the PySide6 viewer in `gui/` (phase 4), and the release machinery
 itself (phase 5).
 
-**`main` is well ahead of what is released.** The last tag is `v0.1.1`;
-everything since is under `## [Unreleased]` in `CHANGELOG.md`, and it is not a
-small amount — the GUI redesign's whole must-have tier landed after it. So a
-bug reproduced against the published package is not necessarily a bug here, and
-the next version is 0.1.2.
+**`main` and the last tag are the same thing again**, as of `v0.1.2`. The GUI
+redesign's must-have tier is finished and released, and so are the fixes that
+came out of the 0.2.0 analysis. The next version is 0.2.0 and it is a
+structural one: the plan lives outside this repository, beside the design
+notes.
+
+When work resumes, `CHANGELOG.md` gains a `## [Unreleased]` section again and
+this paragraph goes back to saying how far ahead `main` has got — the gap is
+worth stating whenever there is one, because a bug reproduced against the
+published package is not necessarily a bug here.
 
 0.1.0 does not exist. It was published and withdrawn the next day over the
 fixtures inside its `sdist`, and the number will not be reused — so there is

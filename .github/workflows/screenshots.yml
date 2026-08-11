@@ -1,11 +1,17 @@
 # Actions are pinned to a full-length commit SHA, not a tag -- see ci.yml for
 # why, and let Dependabot do the bumping.
 #
-# This workflow exists because the maintainer has no Mac. Qt reports an
-# always-integer device pixel ratio on macOS where Windows allows fractional,
-# and picks a system font nobody here can preview. A passing test suite says
-# nothing about either. A picture does, and a macOS runner is free on a public
-# repository.
+# Qt reports an always-integer device pixel ratio on macOS where Windows allows
+# fractional, and picks a system font that differs by platform. A passing test
+# suite says nothing about either; a picture does, and a macOS runner is free on
+# a public repository.
+#
+# What this cannot produce is the *published* macOS screenshot. It renders under
+# the offscreen plugin, which resolves the interface font to Qt's generic
+# `Sans Serif` -- right about layout, wrong about the one thing anybody looks at
+# a macOS screenshot for. Those come from a Mac under `cocoa`; see the release
+# checklist in CONTRIBUTING.md. This is the layout check and the Windows
+# baseline.
 #
 # It cannot show the macOS menu bar -- that belongs to the screen rather than
 # to the window, so render() cannot contain it. Menu relocation is guarded by

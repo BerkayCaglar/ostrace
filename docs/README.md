@@ -24,7 +24,7 @@ does. Read [formats/](formats/) if you are writing something that consumes an
 | 2 | `analysis/` and `exporters/`, six-column agent bundle | **done** |
 | 3b | CLI: `export` | **done** |
 | 4 | PySide6 GUI | **done**, against [its contract](design/gui.md) |
-| 5 | Release: PyPI via Trusted Publishing | **done** — `v0.1.1`, [on PyPI](https://pypi.org/project/ostrace/) |
+| 5 | Release: PyPI via Trusted Publishing | **done** — `v0.1.2`, [on PyPI](https://pypi.org/project/ostrace/) |
 
 0.1.0 is missing from that row on purpose. It was published and withdrawn the
 next day, over the fixtures its `sdist` carried, and the number will not be
@@ -43,7 +43,7 @@ That section now ends with a first hands-on pass on macOS 26.3.1: which of its
 claims were watched happening, which one was wrong, and the 2× device pixel
 ratio the pass still did not exercise.
 
-Since 0.1.1 the work has been the GUI backlog: phase 4 shipped a subset of
+Between 0.1.1 and 0.1.2 the work was the GUI backlog: phase 4 shipped a subset of
 [design/gui.md](design/gui.md), and the redesign that followed
 ([research/gui-redesign/](research/gui-redesign/)) split what was left into
 three tiers. **The must-have tier is now finished** — the unseen count, the
@@ -53,9 +53,16 @@ reconnect and capture-finished banners. The nice-to-have and later tiers stay
 in [research/gui-redesign/05-interaction.md](research/gui-redesign/05-interaction.md)
 §10; the [changelog](../CHANGELOG.md) is where what shipped is written down.
 
-**None of it is released.** The last tag is `v0.1.1` and all of the above is
-under `## [Unreleased]`, so what PyPI serves is a good deal older than this
-tree. The next version is 0.1.2.
+**All of it is released**, as `v0.1.2`, together with the fixes the 0.2.0
+analysis turned up on the way — a filter bar that claimed a narrowing the model
+was not applying, every opened capture staying in memory, a release that never
+audited the artifact it published, and CI running a device test that passed
+without a device.
+
+The next version is 0.2.0, and it is a structural one rather than a feature
+one: the god node, the module boundaries, and the seams that would make socket
+ownership provable in CI. Its plan is written down outside this repository,
+beside the design notes.
 
 The documentation under `formats/` and `design/` describes contracts, which are
 specified before they are implemented so that the shape is a decision rather
