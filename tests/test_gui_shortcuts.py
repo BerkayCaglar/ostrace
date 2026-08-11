@@ -166,14 +166,14 @@ def test_pause_is_bound_which_neither_logcat_nor_console_manages(window: MainWin
 
 
 def test_quit_is_reachable_on_windows_too(window: MainWindow) -> None:
-    """`StandardKey.Quit` is `⌘Q` on macOS and a key called `Exit` on Windows.
+    """`StandardKey.Quit` resolves to a key called `Exit`, which nothing has.
 
-    Measured rather than assumed -- `QKeySequence.keyBindings` answers
-    `['Exit']` there -- and no keyboard has an Exit key, so on the platform
-    this is developed on the only way out of the program was the window's
-    close button. `Ctrl+Q` is the alias; Qt resolves it to the same `⌘Q` the
-    standard key already gives on macOS, so it costs nothing where it is not
-    needed.
+    Measured rather than assumed: `QKeySequence.keyBindings` answers `['Exit']`
+    on Windows, and the macOS runner renders the documented pair as
+    `Exit  ·  ⌘Q`, so the standard key is no more use there. Without the alias
+    the only way out of the program is the window's close button. `Ctrl+Q` is
+    what carries it, and Qt renders that as `⌘Q` on a Mac, so it is right on
+    both.
     """
     bound = {sequence.toString() for sequence in window.action_quit.shortcuts()}
 
