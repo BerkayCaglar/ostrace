@@ -57,11 +57,16 @@ dependencies = [
 [project.optional-dependencies]
 gui = ["PySide6-Essentials>=6.8,<7"]
 
+# PyPI maps these names to icons and lists them under Verified details; a name
+# it does not recognise still appears, without either. All five point at the
+# same repository, which is what earns the verified mark under the existing
+# Trusted Publisher.
 [project.urls]
 Homepage = "https://github.com/BerkayCaglar/ostrace"
 Source = "https://github.com/BerkayCaglar/ostrace"
 Issues = "https://github.com/BerkayCaglar/ostrace/issues"
 Changelog = "https://github.com/BerkayCaglar/ostrace/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/BerkayCaglar/ostrace/tree/main/docs"
 
 [project.scripts]
 ostrace = "ostrace.cli:main"
