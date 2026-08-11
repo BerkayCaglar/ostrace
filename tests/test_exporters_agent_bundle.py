@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -54,6 +55,36 @@ def lines(path: Path) -> list[str]:
     return path.read_text(encoding="utf-8").splitlines()
 
 
+#: The escape table of ``exporters.base.escape``, read the other way.
+_UNESCAPED = {"\\\\": "\\", "\\n": "\n", "\\t": "\t"}
+
+
+def unfold(line: str) -> str:
+    r"""Read an escaped message back, the inverse ADR 0005 promises a test of.
+
+    Test-local on purpose. Nothing in the package reads a bundle back in, and a
+    published ``unfold`` would be another piece of surface to keep working
+    rather than a check on the surface that exists.
+
+    One left-to-right pass rather than three ``replace`` calls, because chained
+    replaces are the bug this is looking for: ``.replace("\\n", "\n")`` applied
+    to ``\\n`` -- an escaped backslash followed by an ``n`` -- turns a literal
+    two-character sequence into a real newline, which is precisely the
+    confusion the escaping order exists to prevent.
+    """
+    out: list[str] = []
+    index = 0
+    while index < len(line):
+        pair = line[index : index + 2]
+        if pair in _UNESCAPED:
+            out.append(_UNESCAPED[pair])
+            index += 2
+            continue
+        out.append(line[index])
+        index += 1
+    return "".join(out)
+
+
 class TestEscaping:
     def test_backslash_is_escaped_before_newline(self) -> None:
         r"""A message containing a literal ``\n`` must stay distinguishable from
@@ -71,6 +102,49 @@ class TestEscaping:
 
     def test_ordinary_text_is_untouched(self) -> None:
         assert escape("nothing to do here") == "nothing to do here"
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "plain",
+            "",
+            "two\nlines",
+            "tab\there",
+            "both\ta\nmixture",
+            "literal backslash-n: \\n not a newline",
+            "backslash at the end \\",
+            "\\\\n",
+            "\\",
+            "unicode: Berkay'ın iPhone'u — ölçüm",  # noqa: RUF001 - the point is non-ASCII
+            "redacted <private> value",
+            "   leading and trailing   ",
+        ],
+    )
+    def test_folding_then_unfolding_gives_the_message_back(self, message: str) -> None:
+        """ADR 0005 lists this round trip as its confirmation criterion and the
+        format document states the property it rests on: a literal
+        two-character ``\\n`` survives folding and stays distinguishable from a
+        real newline. Until now it was argued from the four cases above rather
+        than demonstrated.
+        """
+        assert unfold(escape(message)) == message
+
+    @pytest.mark.parametrize("message", ["a\rb", "a\r\nb"])
+    def test_a_carriage_return_is_the_one_thing_folding_does_not_give_back(
+        self,
+        message: str,
+    ) -> None:
+        r"""``\r``, ``\r\n`` and ``\n`` all fold to ``\n``, by contract: a
+        Windows line ending inside a message must not read as a blank line, and
+        that means three inputs share one output.
+
+        So the round trip above is exact for everything except the form of the
+        line ending, which is deliberately not carried. Stated here rather than
+        left as a gap in the parametrisation, because a case that is missing
+        looks the same as a case nobody thought of.
+        """
+        assert escape(message) == "a\\nb"
+        assert unfold(escape(message)) == "a\nb"
 
 
 class TestRow:
@@ -123,6 +197,35 @@ class TestShape:
     def test_every_promised_file_is_written(self, bundle: ExportResult) -> None:
         assert {p.name for p in bundle.destination.iterdir()} == BUNDLE_FILES
         assert {p.name for p in bundle.files} == BUNDLE_FILES
+
+    def test_a_capture_with_nothing_in_it_still_writes_every_file(self, tmp_path: Path) -> None:
+        """Every file is written on every export, the format document says,
+        including with nothing to put in it -- a file that appears only on bad
+        news cannot be told from a file nobody wrote.
+
+        Zero records is also the case that reaches the arithmetic hardest: the
+        mean line length divides by the record count.
+        """
+        result = AgentBundleExporter().export([], tmp_path / "nothing")
+
+        assert {p.name for p in result.destination.iterdir()} == BUNDLE_FILES
+        assert {p.name for p in result.files} == BUNDLE_FILES
+        assert result.records == 0
+        assert lines(result.destination / "session.log") == []
+
+    def test_records_are_written_in_arrival_order_and_never_sorted(self, tmp_path: Path) -> None:
+        """A device under load emits slightly out of order -- 0.065% of the
+        records in the committed capture. Sorting would hide that, so the format
+        document says it is not done and the bundle's own Traps section tells
+        the reader so. Nothing asserted it.
+        """
+        result = AgentBundleExporter().export(
+            [make_record(2), make_record(0), make_record(1)],
+            tmp_path / "unsorted",
+        )
+
+        messages = [entry.split("\t")[5] for entry in lines(result.destination / "session.log")]
+        assert messages == ["record number 2", "record number 0", "record number 1"]
 
     def test_one_record_is_one_line(self, bundle: ExportResult) -> None:
         assert len(lines(bundle.destination / "session.log")) == bundle.records
@@ -271,6 +374,20 @@ class TestDocumentation:
         assert len(rows) == 2
         assert make_gap(0).reason in rows[1]
         assert len(rows[1].split("\t")) == 4
+
+    def test_a_gap_reason_is_escaped_like_any_other_prose(self, tmp_path: Path) -> None:
+        """`gaps.tsv` is four tab-separated columns and the reason is free text
+        for a person, so a tab in it adds a column and a newline adds a row --
+        the same damage an unescaped message does to `session.log`, in the file
+        a reader consults precisely when the capture is already unreliable.
+        """
+        gap = replace(make_gap(0), reason="lost the cable\tand waited\nfor it")
+        result = AgentBundleExporter().export([make_record(0), gap], tmp_path / "awkward")
+
+        rows = lines(result.destination / "gaps.tsv")
+        assert len(rows) == 2, "the newline in the reason must not have started a row"
+        assert rows[1].count("\t") == 3
+        assert rows[1].endswith("lost the cable\\tand waited\\nfor it")
 
     def test_the_gap_file_is_written_even_with_no_gaps(self, bundle: ExportResult) -> None:
         """A file that appears only on bad news cannot be told from a file

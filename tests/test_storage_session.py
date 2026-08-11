@@ -5,11 +5,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
 
+from ostrace import __version__
 from ostrace.errors import (
     DestinationInUseError,
     StorageError,
@@ -151,6 +153,34 @@ class TestReader:
         assert reader.meta.flags == {"historical": True}
         assert len(list(reader.records())) == 5
         assert len(list(SessionReader(path).gaps())) == 2
+
+    def test_the_rest_of_the_sidecar_survives_the_round_trip(
+        self,
+        tmp_path: Path,
+        device: DeviceInfo,
+    ) -> None:
+        """The documented fields the round-trip test above does not name.
+
+        Each answers a question asked of a capture months later, when the device
+        is not to hand: which iOS build produced this, which ostrace wrote it,
+        why the timestamps are +03:00, and whether the phone was on the cable or
+        on the network. All five were carried by code alone.
+
+        The device is on the network rather than the cable for one reason:
+        ``from_json`` falls back to ``usb`` when the key is absent, so a
+        cable-attached device reads back correctly whether the writer stored the
+        field or forgot it entirely -- measured, the assertion passed with
+        ``connection`` deleted from ``to_json``.
+        """
+        path = write_session(tmp_path / "c", replace(device, connection="network"))
+        meta = SessionReader(path).meta
+
+        assert meta is not None
+        assert meta.ostrace_version == __version__
+        assert meta.device.name == "Test iPhone"
+        assert meta.device.build_version == "23F84"
+        assert meta.device.timezone_name == "Europe/Istanbul"
+        assert meta.device.connection == "network"
 
     def test_the_source_is_recorded_because_it_changes_interpretation(
         self,
