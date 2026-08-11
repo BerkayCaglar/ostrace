@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 
+from ostrace import errors
 from ostrace.errors import _TRANSLATIONS as TRANSLATIONS
 from ostrace.errors import (
     DeviceError,
@@ -25,6 +26,24 @@ from ostrace.errors import (
     translate,
 )
 from ostrace.errors import _Translation as Translation
+
+
+def test_every_error_this_module_defines_is_exported() -> None:
+    """``__all__`` is the answer to "what can I catch", so it has to be whole.
+
+    Asserted by walking the module rather than by listing the names again: a
+    list would need the same edit as ``__all__`` and would therefore be made
+    by whoever already remembered. What is worth catching is the class that is
+    added and forgotten -- `DestinationInUseError` was, and it guards the two
+    ways a write silently destroys something already on disk, which is the
+    least forgivable one to leave out.
+    """
+    defined = {
+        name
+        for name, value in vars(errors).items()
+        if isinstance(value, type) and issubclass(value, errors.OstraceError)
+    }
+    assert defined <= set(errors.__all__), sorted(defined - set(errors.__all__))
 
 
 def fake(name: str, base: type[Exception] = Exception) -> type[Exception]:

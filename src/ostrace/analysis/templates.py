@@ -38,7 +38,7 @@ _SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     # Hex with no ``0x`` to announce it: operation identifiers, content
     # references, protection tags. iOS logs these constantly and they are pure
     # identity, so leaving them gives every object its own template -- measured
-    # on the mixed fixture, this one rule folds 1,677 templates down to 1,431.
+    # on the mixed fixture, this one rule folds 1,164 templates down to 921.
     #
     # Both lookaheads are the guard: requiring at least one digit *and* at least
     # one hex letter excludes plain decimals, which ``<N>`` already handles, and

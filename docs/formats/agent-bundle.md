@@ -111,7 +111,7 @@ same normalised message emitted by four processes is four rows, because the
 question this file answers is *which* component is repeating itself — a count
 that merged them would say a template is frequent without saying where. The
 row count is therefore at or above the template count: on this project's own
-fixture, 1,454 rows for 1,431 templates.
+fixture, 944 rows for 921 templates.
 
 Single digits are deliberately left alone: `endpoint 5` and `endpoint 7` are
 usually different things, while `port 49152` and `port 49153` are the same
@@ -119,8 +119,8 @@ thing twice. `<HEX>` also covers hex with no `0x` to announce it — operation
 identifiers, content references, protection tags — but only runs of six or more
 characters that mix letters and digits, so an English word is not mistaken for
 an identifier. iOS emits those constantly and they are pure identity; measured
-on this project's own fixture, recognising them folds 1,677 templates down to
-1,431.
+on this project's own fixture, recognising them folds 1,164 templates down to
+921.
 
 A capture with an implausible number of distinct templates stops learning new
 ones at a cap. When that happens the generated `CLAUDE.md` says so and gives the
