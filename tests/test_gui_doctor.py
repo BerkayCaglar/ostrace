@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ostrace.devices.doctor import Report, Status
-from ostrace.sources.base import RECONNECTING, STREAMING
+from ostrace.sources.base import CaptureState
 from tests.helpers import make_record
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
@@ -249,19 +249,37 @@ class TestTheBannersThatEndADeadEnd:
         del qt_app
         window = MainWindow()
 
-        window._on_capture_state(RECONNECTING)
+        window._on_capture_state(CaptureState.RECONNECTING)
 
         assert window.banner.text == RECONNECT_MESSAGE
         assert "Disconnect" in window.banner._action.text(), (
             "the only decision left is whether to stop waiting"
         )
 
+    def test_it_survives_the_trip_across_the_signal(self, qt_app: object) -> None:
+        """The state crosses a thread as a Qt `Signal(str)`, and Qt converts.
+
+        Measured: a `CaptureState` emitted through one arrives on the far side
+        as a plain `str` -- `'reconnecting'`, type `str`, on both a direct and
+        a queued connection. That is why the enum derives from `str`; an
+        ordinary `Enum` would arrive as its own repr and match nothing here.
+
+        Every other test in this class calls the handler directly and would
+        pass either way.
+        """
+        del qt_app
+        window = MainWindow()
+
+        window.capture_state.emit(CaptureState.RECONNECTING)
+
+        assert window.banner.text == RECONNECT_MESSAGE
+
     def test_coming_back_clears_it(self, qt_app: object) -> None:
         del qt_app
         window = MainWindow()
-        window._on_capture_state(RECONNECTING)
+        window._on_capture_state(CaptureState.RECONNECTING)
 
-        window._on_capture_state(STREAMING)
+        window._on_capture_state(CaptureState.STREAMING)
 
         assert window.banner.text == ""
 
@@ -271,10 +289,10 @@ class TestTheBannersThatEndADeadEnd:
         screen saying why."""
         del qt_app
         window = MainWindow()
-        window._on_capture_state(RECONNECTING)
+        window._on_capture_state(CaptureState.RECONNECTING)
         window.banner.show_message("The view is paused.", "Resume")
 
-        window._on_capture_state(STREAMING)
+        window._on_capture_state(CaptureState.STREAMING)
 
         assert window.banner.text == "The view is paused."
 

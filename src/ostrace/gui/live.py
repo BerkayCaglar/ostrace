@@ -36,7 +36,7 @@ from ostrace.errors import OstraceError
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from ostrace.gui.markers import Row
+    from ostrace.model import Gap, Record
     from ostrace.sources.base import LogSource
 
 __all__ = ["CaptureThread"]
@@ -65,7 +65,11 @@ class CaptureThread(QThread):
         #: Written by this thread, drained by the GUI thread. Unbounded here on
         #: purpose: the bound belongs to whoever is reading, which knows
         #: whether the reader is paused. See `gui.pump`.
-        self.queue: deque[Row] = deque()
+        #: `Record | Gap` rather than `Row`: `Eviction` is a marker the model
+        #: makes for itself when it trims, and nothing on the device side can
+        #: produce one. Widening the type here would invite a consumer to
+        #: handle a case that cannot arrive.
+        self.queue: deque[Record | Gap] = deque()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._task: asyncio.Task[Any] | None = None
         #: Set by `stop`, read by `_capture`. Identifying a device can take a

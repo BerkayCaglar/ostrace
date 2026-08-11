@@ -5,10 +5,19 @@
 A source answers two questions: what device is this, and what records does it
 produce. Nothing else. Keeping the surface this small is what makes a recorded
 session substitutable for a live device in every test.
+
+Anything one source can do and another cannot stays off the protocol:
+**extras are constructor arguments and properties, never protocol members.**
+A consumer takes a ``LogSource`` and cannot know which one it holds, so a
+method only one side has is a method it must not call -- and one it can see is
+one it eventually will. :class:`CaptureState` below is the worked example:
+only the live source reports it, so it arrives through a callable handed in at
+construction.
 """
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ostrace.model import Record
@@ -20,22 +29,33 @@ if TYPE_CHECKING:
 
     from ostrace.model import DeviceInfo, Gap
 
-__all__ = ["RECONNECTING", "STREAMING", "LogSource", "SourceCloseMixin"]
+__all__ = ["CaptureState", "LogSource", "SourceCloseMixin"]
 
-#: The two words a source may report about its connection, for a source that
-#: reconnects and a caller that wants to say so while it is happening.
-#:
-#: Here rather than in `sources.os_trace`, which is the only source that says
-#: either, because the *listener* is a window: importing them from there would
-#: pull pymobiledevice3 -- forty packages -- into the path that merely opens a
-#: saved capture, and would make the window unimportable under ``-O``, which
-#: that module refuses on purpose.
-#:
-#: Not on the `LogSource` protocol. Reporting them is a property of one
-#: implementation, and a consumer that took the protocol and reached for a
-#: method only one side has is the thing this module exists to prevent.
-RECONNECTING = "reconnecting"
-STREAMING = "streaming"
+
+class CaptureState(StrEnum):
+    """What a source may say about its connection while the capture runs.
+
+    Here rather than in ``sources.os_trace``, which is the only source that
+    says either, because the *listener* is a window and this is the module a
+    consumer holding a ``LogSource`` already imports.
+
+    The reason this placement used to give was that importing from
+    ``os_trace`` would pull pymobiledevice3 -- forty packages -- and make the
+    window unimportable under ``-O``. Both are false, and measured: importing
+    ``sources.os_trace`` pulls **no** pymobiledevice3 modules, because the
+    library is imported inside ``_stream_once``, and the ``-O`` guard refuses
+    at *construction*, not at import.
+
+    A ``StrEnum`` rather than two strings so the set is closed and a type
+    checker can see it -- the next state, a logcat source's "waiting for
+    device", is a member here instead of another loose literal. ``str`` at the
+    same time because the value crosses a Qt ``Signal(str)``, which delivers a
+    plain ``str`` on the far side; comparing that against a member still works,
+    which is the whole reason for this base class rather than ``Enum``.
+    """
+
+    RECONNECTING = "reconnecting"
+    STREAMING = "streaming"
 
 
 @runtime_checkable

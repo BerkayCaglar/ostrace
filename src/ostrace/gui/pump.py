@@ -34,6 +34,7 @@ from ostrace.model import Record
 if TYPE_CHECKING:
     from ostrace.gui.markers import Row
     from ostrace.gui.models import RecordModel
+    from ostrace.model import Gap
 
 __all__ = ["PAUSE_LIMIT", "RATE_WINDOW_MS", "TICK_MS", "Pump"]
 
@@ -73,7 +74,10 @@ class Pump(QObject):
 
     def __init__(
         self,
-        queue: deque[Row],
+        #: What a capture puts in it, which is narrower than what the model
+        #: speaks: an `Eviction` is a marker the model makes for itself when it
+        #: trims, and no device can send one.
+        queue: deque[Record | Gap],
         model: RecordModel,
         *,
         interval_ms: int = TICK_MS,
