@@ -130,7 +130,7 @@ environmental rather than a bug, and it checks the causes in the order they
 actually occur:
 
 ```
-[ ok ] ostrace      0.1.1 on Python 3.13.14 (win32)
+[ ok ] ostrace      0.1.2 on Python 3.13.14 (win32)
 [ ok ] usbmux       Apple Mobile Device Service on 127.0.0.1:27015
 [FAIL] devices      none connected
                Connect the device over USB and unlock it. A charge-only cable
