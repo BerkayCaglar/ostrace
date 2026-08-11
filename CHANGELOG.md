@@ -10,7 +10,7 @@ Two things are treated as public API from the start and will be versioned as
 such: the `Record` model and the on-disk export formats documented in
 [docs/formats/](docs/formats/).
 
-## [Unreleased]
+## 0.1.2 - 2026-08-11
 
 ### Added
 
@@ -1696,5 +1696,3 @@ have. Most of it is invisible until it is missing:
   and the workflows, immutable releases, and a ruleset that blocks force-pushing
   or deleting `main` -- with no bypass, since an admin exemption set to "always"
   is the same as not having the rule.
-
-[Unreleased]: https://github.com/BerkayCaglar/ostrace/commits/main
