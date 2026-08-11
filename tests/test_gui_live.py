@@ -52,17 +52,6 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.gui
 
 
-@pytest.fixture(autouse=True)
-def _own_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep captures started by these tests out of the real data directory.
-
-    Starting a capture writes a session file, and `paths` decides where by
-    default -- which in a test run is the developer's own directory. One
-    environment variable redirects every path the package writes to.
-    """
-    monkeypatch.setenv("OSTRACE_HOME", str(tmp_path))
-
-
 @pytest.fixture
 def model(qt_app: object) -> RecordModel:
     del qt_app

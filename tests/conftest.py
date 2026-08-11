@@ -92,6 +92,31 @@ def _isolate_settings(tmp_path_factory: pytest.TempPathFactory) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_data_dir(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep everything the package writes out of the real data directory.
+
+    `paths` resolves to the person's own directory by default, so a test that
+    starts a capture writes a session file into the directory their real
+    captures live in -- one they did not ask for and will not know to delete.
+    A single environment variable redirects every path the package decides.
+
+    Suite-wide and autouse rather than sitting in the one module that starts
+    captures today. The next test to write something is not required to
+    remember this, and when it forgets there is no failure to notice: the file
+    lands somewhere plausible and the suite passes.
+
+    Tests about `paths` itself take control back for themselves -- a
+    `monkeypatch.setenv` in the test body replaces this value, and
+    `delenv` restores the real resolution for the one test that needs to see
+    it.
+    """
+    monkeypatch.setenv("OSTRACE_HOME", str(tmp_path_factory.mktemp("home")))
+
+
 @pytest.fixture
 def device() -> DeviceInfo:
     return DeviceInfo(

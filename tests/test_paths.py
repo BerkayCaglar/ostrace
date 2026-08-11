@@ -114,9 +114,29 @@ class TestSessionPath:
 
 
 class TestDirectories:
-    def test_every_directory_is_absolute(self) -> None:
+    def test_every_directory_is_absolute(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The real resolution, not the suite's redirect.
+
+        `conftest` points `OSTRACE_HOME` at a temporary directory for every
+        test, and that directory is absolute -- so leaving it set would make
+        this pass without ever asking `platformdirs` anything.
+        """
+        monkeypatch.delenv("OSTRACE_HOME", raising=False)
         for resolver in (paths.data_dir, paths.config_dir, paths.cache_dir, paths.log_dir):
             assert resolver().is_absolute()
+
+    def test_the_suite_never_writes_to_the_real_data_directory(
+        self,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> None:
+        """The guard for `conftest`'s redirect, which is otherwise silent.
+
+        Nothing fails when the isolation is missing: a test that starts a
+        capture just writes into the directory the person running it keeps
+        their own captures in. So the isolation gets a test of its own, and
+        this one goes red the moment the fixture stops covering the suite.
+        """
+        assert paths.data_dir().is_relative_to(tmp_path_factory.getbasetemp())
 
     def test_the_home_override_redirects_everything(
         self,
