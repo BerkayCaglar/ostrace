@@ -224,6 +224,18 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Fixed
 
+- **Every capture opened in a session stayed in memory.** Reading through a
+  morning's captures grew the process by about 2 MiB per capture on the small
+  committed fixtures, and by a whole retained row set on real ones — nothing
+  was ever released, so the twentieth capture was carrying the other nineteen.
+
+  A model has two owners: the window, which is its Qt parent, and the loader
+  that was reading into it, which keeps it in an attribute and is parented to
+  the window as well. Releasing either alone frees nothing, because the other
+  still points at the rows. Measured over twenty successive opens: neither
+  released grows 41.0 MiB, the model alone 41.2 MiB, the loader alone 40.6 MiB,
+  both 2.2 MiB.
+
 - **Opening a capture while a filter stood showed every row and said it was
   narrowed.** The filter bar kept displaying `Error+`, the new model applied
   nothing, and the table filled with all of it — the one state where the window
