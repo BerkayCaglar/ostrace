@@ -20,6 +20,7 @@ import pytest
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
 from PySide6.QtCore import QRect, QSettings, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QToolBar, QToolButton, QWidgetAction
 
 from ostrace.devices.discovery import DeviceSummary
@@ -155,6 +156,25 @@ def test_the_application_mark_does_not_follow_the_theme(qt_app: object) -> None:
     second = icons.app_icon().pixmap(small, small).toImage()
 
     assert first == second
+
+
+def test_both_of_the_marks_inks_survive_the_smallest_size(qt_app: object) -> None:
+    """A stroke thinner than a device pixel cannot land on one, and antialiasing
+    then delivers a blend of the tile instead of the ink.
+
+    Counting exact pixels at 16, 24 and 32: the 64-unit grid with 5-unit bars
+    this replaced rendered 0 white and 0 amber at 16 and still 0 amber at 24 --
+    the mark arrived at the size it is judged at as a plain blue square. Three
+    units of 24 is 2.0 device pixels at 16, and gives 6 and 22.
+    """
+    del qt_app
+    small = icons.APP_SIZES[0]
+    image = icons.app_icon().pixmap(small, small).toImage()
+
+    inks = {QColor(image.pixel(x, y)).name() for x in range(small) for y in range(small)}
+
+    assert "#ffffff" in inks
+    assert "#ffb020" in inks
 
 
 class TestTheJumpTarget:

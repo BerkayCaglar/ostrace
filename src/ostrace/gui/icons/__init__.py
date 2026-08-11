@@ -4,10 +4,19 @@
 
 The set in ``icons/`` is original, drawn to the convention every current icon
 library shares -- a 24-unit grid, a 2-unit stroke, round caps and joins -- so
-that it sits comfortably beside the platform's own chrome. Eight files, 1.8 kB
+that it sits comfortably beside the platform's own chrome. Nine files, 2.2 kB
 in total, which is why they are shipped as files rather than pulled from a
 dependency: an icon library would be a runtime dependency and a licence
-obligation for less than two kilobytes of geometry.
+obligation for two kilobytes of geometry.
+
+``app.svg`` is the exception to the 2-unit stroke and carries 3, which is the
+only stroke width that survives the size the mark is judged at: 3 of 24 is
+exactly 2.0 device pixels at 16 px, where 2 of 24 is 1.33 and cannot cover a
+whole pixel. The predecessor was drawn on a 64-unit grid with 5-unit bars --
+1.25 px at that size -- and measured, it rendered with no white pixel anywhere
+in it and its amber at 1.93:1 against its own field, under the 3:1 the
+scrollbars are held to. At 3 units the same two inks measure 5.82 and 3.18 at
+every size.
 
 Two things rule out the alternatives:
 
@@ -113,11 +122,13 @@ def icon(
 
 
 #: The sizes a desktop asks the application mark for: a title bar wants 16, the
-#: Windows taskbar 24 or 32 depending on scaling, Alt-Tab 48, and the shell's
-#: large-icon view up to 256. Supplied rather than left to Qt, which would
-#: rescale one bitmap and produce the soft edges that read as an unfinished
-#: program at exactly the sizes people see most.
-APP_SIZES = (16, 24, 32, 48, 64, 128, 256)
+#: Windows taskbar 24 or 32 depending on scaling, Alt-Tab 48, the shell's
+#: large-icon view up to 256, and the macOS Dock 512 -- which it asks this
+#: application for directly, because a `pip` install has no bundle to take an
+#: icon from. Supplied rather than left to Qt, which would rescale one bitmap
+#: and produce the soft edges that read as an unfinished program at exactly the
+#: sizes people see most.
+APP_SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
 
 
 @functools.lru_cache(maxsize=len(APP_SIZES))
