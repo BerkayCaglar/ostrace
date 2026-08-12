@@ -37,16 +37,56 @@ A 20-second capture over `os_trace_relay` on an otherwise idle device:
 | ERROR | 74 | 1.4% |
 | **Total** | **5,140** | |
 
-The `syslog_relay` path, measured separately, produced roughly 900–1,200 lines
-per second of almost entirely NOTICE-level output.
+The `syslog_relay` path was run separately here and reported as roughly
+900–1,200 lines per second of almost entirely NOTICE-level output. **That figure
+does not reconcile with the table above and is superseded by Finding 1b.** The
+table's whole capture is 5,140 records in 20 seconds — 257 a second, of which
+604 are NOTICE — so a legacy path emitting 900–1,200 NOTICE lines a second would
+have to be inventing them. A line is not a record, the two runs were not the
+same window, and the sentence above put them side by side as though they were.
 
-The two numbers describe the same device over the same period. The conclusion is
-that the legacy path is not a slower or lossier version of the modern one — it is
-a different tier of the log. The 87% of records at DEBUG and INFO never appear on
-it at all, and those are exactly the levels an application developer emits when
+The conclusion it was drawn for survives, and Finding 1b measures it properly:
+the legacy path is not a slower or lossier version of the modern one, it is a
+different tier of the log. The records at DEBUG and INFO never appear on it at
+all, and those are exactly the levels an application developer emits when
 instrumenting their own code.
 
 This alone justified the rewrite. Everything else is a bonus.
+
+## Finding 1b: both relays, one window — 2026-08-13
+
+The two services were read **at the same time, from one process**, so that the
+comparison is between services rather than between two moods of one device. That
+distinction is not pedantry: measured on 2026-08-12, the same phone delivered
+5,140 records in one 20-second window and 36,763 in another.
+
+`os_trace_relay` replays a backlog on connect (`HISTORICAL`), so the first five
+seconds are dropped from both sides rather than folded into a total that
+flatters the modern path.
+
+| 60 s window, first 5 s dropped | |
+| --- | ---: |
+| `os_trace_relay` | 233,956 records |
+| — DEBUG | 206,135 (88.1%) |
+| — INFO | 16,342 (7.0%) |
+| — NOTICE | 11,216 (4.8%) |
+| — ERROR | 263 (0.1%) |
+| `syslog_relay` | 11,642 entries |
+| NOTICE and above, on `os_trace_relay` | 11,479 |
+
+**`syslog_relay` returns the NOTICE tier and above, and nothing below it.**
+11,642 against 11,479 is 1.4% apart, and two shorter runs the same day landed at
+0.09% and at zero — 15,396 against 15,382, and 2,462 against 2,462 exactly.
+
+**The ratio is not the claim.** It was 20.1× in this run, 10.4× and 9.1× in the
+two 30-second runs, moving with how much DEBUG the device happened to be
+emitting. Quoting the best of those would be picking a number. What does not
+move between runs is which tiers arrive.
+
+Measured through `pymobiledevice3.services.syslog.SyslogService` rather than by
+running `idevicesyslog`: that tool is a client of `com.apple.syslog_relay`, and
+so is this, so what is being compared is the service the claim is about. The
+chart in the README is drawn from this run by `tools/build_source_chart.py`.
 
 ## Finding 2: 96.8% of records carry a subsystem and category
 

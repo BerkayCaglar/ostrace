@@ -10,9 +10,10 @@ Stream, inspect and export iOS device logs — on Windows, macOS and Linux.
 `ostrace` reads Apple's unified log over `com.apple.os_trace_relay`, the same
 service Console.app uses. That means structured records: subsystem, category,
 thread id and the emitting library, at DEBUG level and above — not just the
-NOTICE-tier text that the legacy `syslog_relay` path returns. On a 20-second
-capture from an `iPhone18,2`, 4,462 of the 5,140 records were DEBUG or INFO —
-the tier `idevicesyslog` never receives at all.
+NOTICE-tier text that the legacy `syslog_relay` path returns. Reading both
+services from one `iPhone18,2` over the same minute, `os_trace_relay` delivered
+233,956 records and `syslog_relay` 11,642: **222,477 of them — 95% — reach one
+service and not the other.**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-dark.png">
@@ -23,20 +24,29 @@ the tier `idevicesyslog` never receives at all.
 
 ## Why
 
-Measured on an `iPhone18,2` running iOS 26.5.2, a 20-second capture:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/log-sources-dark.png">
+  <img alt="Two bars on the same scale. os_trace_relay: 233,956 records in one minute, 88% of them DEBUG, 7% INFO, 4.8% NOTICE, 0.1% ERROR. syslog_relay: 11,642 entries over the same minute, the NOTICE tier and above and nothing below it, 5% of the log." src="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/log-sources-light.png">
+</picture>
 
-| Level | Records | Share |
-| --- | ---: | ---: |
-| DEBUG | 3,198 | 62.2% |
-| INFO | 1,264 | 24.6% |
-| NOTICE | 604 | 11.8% |
-| ERROR | 74 | 1.4% |
+Both relays were read **at the same time, from one process, over the same
+minute** — the same device delivers 5,140 records in one 20-second window and
+36,763 in another, so measuring them one after the other compares the device's
+mood rather than the two services.
 
-Tools built on `syslog_relay` — including `idevicesyslog` — deliver
-essentially only that NOTICE tier. The DEBUG and INFO records, the ones that
-matter when you are debugging your own app, never arrive at all. Separately,
-96.8% of records carry a `subsystem` and `category` that the text-based
-pipeline discards.
+What `syslog_relay` returns is the NOTICE tier and above, and nothing below it.
+Across three runs it matched that boundary to within 1.5%, and once exactly.
+Tools built on it — `idevicesyslog` among them — therefore never receive the
+DEBUG and INFO records, which are the ones that matter when you are debugging
+your own app. Roughly 90% of the log is on the other side of that line.
+
+The ratio itself is not the claim: it moved between 9.1× and 20.1× across those
+runs, with how much DEBUG the device happened to be emitting. What did not move
+is which tiers arrive.
+
+Separately, 96.8% of records in the reference capture carry a `subsystem` and
+`category` that the text-based pipeline discards — measured between 80% and 97%
+across the captures in `tests/fixtures/` and since.
 
 `os_trace_relay` is still an ordinary lockdown service on iOS 26: no RemoteXPC
 tunnel, no administrator privileges.
