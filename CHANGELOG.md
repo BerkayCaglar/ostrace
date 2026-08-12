@@ -62,6 +62,25 @@ such: the `Record` model and the on-disk export formats documented in
 - `Documentation` added to `project.urls`, which earns the entry an icon on the
   PyPI sidebar and a place under Verified details.
 
+- **The README documents the supported library API** — the seven import paths,
+  what each is for, and the promise that none of them loads Qt or the device
+  library. Nothing moved to make that true; it was true and undocumented, which
+  is a different thing from supported. The list is now pinned by a test that
+  fails if a name is renamed on either side of it.
+
+- **The README documents what the commands promise a script**: the exit codes,
+  the `1` that `devices` and `doctor` return when they find nothing, and the two
+  `--quiet` flags, which mean deliberately different things. Again no behaviour
+  changed. `export --quiet` in particular keeps its notes about what the export
+  left out, because a flag about stdout is not permission to hide bad news.
+
+- **`pymobiledevice3` is 90 distributions, not "roughly 40".** Measured two
+  ways that agree — the recursive closure of the installed metadata, and a
+  resolve from scratch — on Windows and Python 3.13, against the `>=10.3,<11`
+  pin. Six documents and comments carried the old estimate. The weight is still
+  confined: every import of it sits inside the function that needs it, so it
+  loads when a service is opened rather than when a module is read.
+
 ### Fixed
 
 - **A capture that would not release the device grew memory without bound.**

@@ -445,7 +445,7 @@ a property of one implementation, and a consumer that took the protocol and
 reached for a method only one side has is what that protocol exists to prevent.
 The two words live in `sources/base.py` rather than in `sources/os_trace.py`,
 because the listener is a *window* and importing them from there would pull
-pymobiledevice3 — forty packages — into the path that merely opens a saved
+pymobiledevice3 — 90 distributions — into the path that merely opens a saved
 capture, and would make the window unimportable under `-O`. And a listener that
 raises is **swallowed**: the records are the product and the notification is a
 courtesy, so a device released because a banner threw would lose everything the
@@ -624,8 +624,10 @@ scrolling ago.
 The search is a scan rather than a bisection. A device log arrives in roughly
 chronological order and is not guaranteed sorted — the relay interleaves
 subsystems — and a binary search over a nearly-sorted sequence answers
-confidently and wrongly. At 200,000 rows the scan is about ten milliseconds, on
-a keypress a person made.
+confidently and wrongly. At 200,000 rows a full scan measures 86 ms, the worst
+case where nothing matches; landing halfway is 38 ms. Best of three, offscreen,
+against the shipping model with a view attached. It is spent on a keypress a
+person made, and it buys an answer that is right rather than one that is fast.
 
 **`Ctrl+Q` quits, beside the standard key.** `StandardKey.Quit` is `⌘Q` on
 macOS and, on Windows, a key called `Exit` — measured, not assumed:

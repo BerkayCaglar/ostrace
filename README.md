@@ -61,9 +61,10 @@ install.
 | Device | Connected over USB and paired (tap **Trust** on the device). |
 
 A note on install size: `ostrace` depends on `pymobiledevice3`, which pulls in
-roughly 40 packages of its own, and the GUI extra brings PySide6. The full
-install is in the hundreds of megabytes. This is documented rather than hidden;
-see [docs/adr/0002](https://github.com/BerkayCaglar/ostrace/blob/main/docs/adr/0002-use-pymobiledevice3-over-libimobiledevice-cli.md).
+90 distributions of its own — measured, not estimated — and the GUI extra brings
+PySide6. The full install is in the hundreds of megabytes. This is documented
+rather than hidden; see
+[docs/adr/0002](https://github.com/BerkayCaglar/ostrace/blob/main/docs/adr/0002-use-pymobiledevice3-over-libimobiledevice-cli.md).
 
 ## The viewer
 
@@ -135,6 +136,31 @@ actually occur:
                gives exactly this symptom.
 ```
 
+### What a script can rely on
+
+| Exit code | |
+| --- | --- |
+| `0` | It worked. |
+| `1` | It did not — no device, an unreadable capture, a path the filesystem refused. The message names the cause and the hint names the remedy. |
+| `2` | The command line itself was wrong, and nothing ran. |
+| `130` | Ctrl-C, which is what a shell reports for it. A capture still finalises its session file and releases the device on the way out. |
+
+`devices` and `doctor` exit **`1` when they find nothing**. "No devices
+connected" is both the answer and a failure, and a script waiting for a phone to
+appear should not have to read English to notice that it has not.
+
+`--quiet` means a different thing on each command that has one, because they are
+answering different questions:
+
+- `ostrace capture --quiet` drops the progress counter, which was on stderr. The
+  record count and the path still go to stdout — those are the result, not
+  progress.
+- `ostrace export --quiet` prints only the destination. The notes saying what
+  the export left out stay on stderr regardless: they are the bad news, and a
+  flag about stdout is not permission to hide it.
+
+Both commands leave the path they wrote as the last line of stdout.
+
 ## Exporting
 
 `ostrace export` needs no device, and the viewer's export dialog offers the
@@ -161,6 +187,38 @@ out** — the gaps in the capture, the patterns that did not fit, the anchors it
 could not reach. An export that quietly stops reads as complete, and a reader
 then draws conclusions from an absence that is an artefact of the export rather
 than a fact about the device.
+
+## Using it as a library
+
+Everything the command line does is importable, and reading a capture costs
+nothing that talking to a device would cost. No import listed below loads Qt or
+`pymobiledevice3` — 90 distributions, measured — including the one that speaks
+to a phone: the device library is reached from inside the call that opens the
+relay, so it arrives when you connect rather than when you import. That is also
+why there is deliberately no flat re-export at the top of the package. One line
+there would put the whole device stack behind every offline use.
+
+```python
+from ostrace.storage import open_capture
+
+capture = open_capture("2026-08-12T13-04-19")
+for item in capture:  # records and gaps, in the order they arrived
+    ...
+```
+
+| Import | What it is for |
+| --- | --- |
+| `from ostrace.model import Record, Gap, Level, DeviceInfo, Platform` | The vocabulary. Everything downstream of a source speaks it and nothing else. |
+| `from ostrace.storage import open_capture, Capture` | Read a session directory or a bare capture file without having to know which one you were handed. |
+| `from ostrace.sources import ReplaySource, LogSource` | A recorded session as a stream. `LogSource` is the protocol a live device satisfies too, which is what makes the two substitutable. |
+| `from ostrace.capture import capture, CaptureResult` | Run a capture: `async`, takes any `LogSource`, writes a session file. |
+| `from ostrace.exporters import EXPORTERS` / `from ostrace.exporters.base import register` | The six formats by name, and how to add a seventh. |
+| `from ostrace.errors import OstraceError` | The base of everything raised deliberately. Every subclass carries a `hint`, and says whether retrying could work. |
+| `from ostrace.sources.os_trace import OsTraceSource` | A live device, over USB. The one that eventually needs `pymobiledevice3`, and the only one that needs a phone. |
+
+Below 1.0.0 these names are not frozen, but they are the supported surface: if
+one moves, the [CHANGELOG](https://github.com/BerkayCaglar/ostrace/blob/main/CHANGELOG.md)
+says so. Anything not listed here is internal, `ostrace.gui` included.
 
 ## What this is not
 

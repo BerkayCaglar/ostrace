@@ -77,7 +77,7 @@ class DoctorThread(QThread):
         self._udid = udid
 
     def run(self) -> None:
-        from ostrace.devices import doctor  # noqa: PLC0415 - forty packages, only for this
+        from ostrace.devices import doctor  # noqa: PLC0415 - 90 distributions, only for this
 
         try:
             self.reported.emit(asyncio.run(doctor.run(self._udid)))

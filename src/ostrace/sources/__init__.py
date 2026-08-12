@@ -10,7 +10,7 @@ a replacement for ``pymobiledevice3`` to one directory if it is ever needed.
 
 Note what is *not* re-exported here: :class:`~ostrace.sources.os_trace.OsTraceSource`
 has to be imported from its own module. Importing it pulls in
-``pymobiledevice3``, which pulls in roughly forty packages of its own including
+``pymobiledevice3``, which pulls in 90 distributions of its own including
 FastAPI, uvicorn and IPython. Making that a side effect of ``import
 ostrace.sources`` would put a second or more onto the start-up of commands that
 never touch a device, and would make an offline test suite depend on the one
