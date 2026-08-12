@@ -207,6 +207,92 @@ class TestTheCensus:
         assert audit_capture.census([record]) != {}
 
 
+class TestABinaryDumpUnderASecretName:
+    """The key is on the list and the *value* is what the rule could not see.
+
+    Apple prints binary as a CFData description, with spaces and braces, where
+    the key/value rule wants one contiguous run. `locationd` writes a 32-byte
+    `ClientStorageToken` that way and it passed the gate for two releases.
+    """
+
+    def test_a_cfdata_dump_under_a_secret_name_is_a_finding(self) -> None:
+        record = make_record(
+            message="StorageToken = {length = 16, bytes = 0x1f3a7c02 9e4b18d5 6a0f2371 c8de9045 }"
+        )
+        rules = [f.rule for f in audit_capture.audit([record])]
+        assert rules == ["secret-valued field 'StorageToken'"]
+
+    def test_the_same_dump_under_a_harmless_name_is_not(self) -> None:
+        """`payload`, `mask`, `blob`, `lpcdEcpFrame`: opaque and everywhere.
+
+        Firing on every binary dump reports an NFC field-poll frame already
+        published in `ios26-errors.jsonl.gz`, which is how a gate becomes a
+        thing people learn to wave through.
+        """
+        record = make_record(
+            message="payload: {length = 16, bytes = 0x1f3a7c02 9e4b18d5 6a0f2371 c8de9045 }"
+        )
+        assert audit_capture.audit([record]) == []
+
+    def test_an_empty_dump_is_not(self) -> None:
+        """Nothing to leak, and the same entropy floor the other rules use."""
+        record = make_record(message="authData = {length = 8, bytes = 0x0000000000000000 }")
+        assert audit_capture.audit([record]) == []
+
+
+class TestSignalsAboutThePerson:
+    """Not an identifier, and not something to publish about somebody either.
+
+    No rule saw any of this until a review read the capture by hand. A face
+    measurement leaks no name; it is still a measurement of a real face, and
+    the fixtures are published permanently.
+    """
+
+    def test_a_face_measurement_is_a_finding(self) -> None:
+        record = make_record(message="PearlCamFrameReceived - isFaceDetected=1, hasGlasses=1")
+        rules = sorted(f.rule for f in audit_capture.audit([record]))
+        assert rules == ["body signal 'hasGlasses'", "body signal 'isFaceDetected'"]
+
+    def test_the_other_spelling_is_caught_too(self) -> None:
+        """`hasGlasses` and `faceDetectionScore` are the same subject.
+
+        A hand-built filter written while preparing a fixture caught the first
+        and let the second through, which is the `sig`/`ref` failure again.
+        """
+        record = make_record(message="faceDetectStateChanged FACE FOUND faceDetectionScore: 96")
+        assert [f.rule for f in audit_capture.audit([record])] == [
+            "body signal 'faceDetectionScore'"
+        ]
+
+    def test_a_body_value_apple_already_masked_is_not(self) -> None:
+        """Every such value in the committed fixtures is `<private>`.
+
+        Which is why this rule can be added at all without a redaction pass:
+        the device masks the values and leaves the field names standing.
+        """
+        record = make_record(message="Steps/activity sync, stepCount, <private>, stride, <private>")
+        assert audit_capture.audit([record]) == []
+
+    def test_a_dwell_interval_is_a_finding(self) -> None:
+        """No coordinates, and it still describes somebody's week: this pair
+        says the device stood in one place for 5.6 days."""
+        record = make_record(message="IndoorOutdoor,timeSinceStart,486891.342897,totalDistance,0.0")
+        rules = sorted(f.rule for f in audit_capture.audit([record]))
+        assert rules == ["whereabouts 'timeSinceStart'", "whereabouts 'totalDistance'"]
+
+    def test_the_same_word_as_a_list_label_is_not(self) -> None:
+        """`Input, Elevation, Hardware gradeTypeFilter` names a field rather
+        than reporting one, and every value on those lines is `<private>`.
+
+        Without the numeric constraint this shape produced four findings per
+        fixture, which is the volume at which the real one stops being read.
+        """
+        record = make_record(
+            message="Input, Elevation, Hardware gradeTypeFilter, gradeType, <private>"
+        )
+        assert audit_capture.audit([record]) == []
+
+
 class TestRepeatedUuids:
     """A UUID seen once is noise. A UUID seen hundreds of times is an identifier."""
 

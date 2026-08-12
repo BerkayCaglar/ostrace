@@ -155,6 +155,67 @@ SECRET_WORDS = (
 #: Field names that must match exactly, or as the tail of a hyphenated name.
 SECRET_WORDS_ANCHORED = ("sig", "ref")
 
+#: Field names that report something about the *person* holding the device
+#: rather than about the device. Nothing here is an identifier and no rule
+#: above can see any of it, which is exactly why it needs its own: a face
+#: measurement is not a leak of a name, it is a measurement of somebody's face.
+#:
+#: Every spelling of each subject, not the first one found. A hand-built filter
+#: written during this session caught ``hasGlasses`` and let
+#: ``faceDetectStateChanged`` and ``processWUPoseEligibility`` through -- the
+#: same failure the ``sig``/``ref`` pair above records, made twice.
+BODY_WORDS = (
+    "faceDetected",
+    "isFaceDetected",
+    "hasFace",
+    "faceRectW",
+    "faceRectH",
+    "faceDetectionScore",
+    "hasGlasses",
+    "hasBeard",
+    "hasMask",
+    "hasOcclusion",
+    "hasEyeOcclusion",
+    "eyeOcclusion",
+    "hasAttention",
+    "attentionState",
+    "isUserEngaged",
+    "userEngaged",
+    "onBody",
+    "isOnBody",
+    "wristDetect",
+    "stepCount",
+    "deltaSteps",
+    "stepDistance",
+    "stride",
+    "rawPace",
+    "pace",
+    "heartRate",
+    "sleepState",
+    "gaitPace",
+    "activityType",
+    "motionActivityType",
+)
+
+#: Field names that say where the device has been, or for how long it has not
+#: moved. A dwell interval carries no coordinates and still describes somebody's
+#: week: ``timeSinceStart,486891`` beside ``totalDistance,0.000000`` says the
+#: device stood in one place for 5.6 days.
+DWELL_WORDS = (
+    "VisitTimeStarted",
+    "VisitMonitoring",
+    "LocationTimeStopped",
+    "ReceivingLocationInformationTimeStopped",
+    "timeSinceStart",
+    "totalDistance",
+    "hasLatLon",
+    "latitude",
+    "longitude",
+    "elevation",
+    "relAltitude",
+    "significantLocation",
+)
+
 _SECRET_KEY = re.compile(
     r"(?P<key>"
     r"[A-Za-z0-9_-]*(?:" + "|".join(SECRET_WORDS) + r")[A-Za-z0-9_-]*"
@@ -175,6 +236,34 @@ _ANY_UUID = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
 #: A DSID is 10-12 digits: too short for MIN_SECRET_LENGTH and too low-entropy
 #: for MIN_ENTROPY, so the key/value rule can never see one. It needs its own.
 _DSID_KEYED = re.compile(r"\b(?:alt)?dsid\b\s*[:=]\s*(?P<dsid>\d{6,})", re.IGNORECASE)
+
+#: The same problem as the DSID, from the other direction: the key is on
+#: `SECRET_WORDS` and the *value* is what `_SECRET_KEY` cannot see. Apple prints
+#: binary as a CFData description -- `{length = 32, bytes = 0xc99a9fdf d889738e
+#: ... 1e61ff68 }` -- with spaces and braces, where the rule above wants one
+#: contiguous run. Found on `locationd`'s `ClientStorageToken` and on `configd`
+#: writing `signature : {length = 20, bytes = 0x…}`; both passed the gate.
+_SECRET_DATA = re.compile(
+    r"(?P<key>[A-Za-z0-9_-]*(?:" + "|".join(SECRET_WORDS) + r")[A-Za-z0-9_-]*)"
+    r"\s*[:=]\s*\{\s*length\s*=\s*\d+,\s*bytes\s*=\s*(?P<value>[^}]{8,})\}",
+    re.IGNORECASE,
+)
+
+#: A body value is `1`, `0`, `-22`, `96`: far below both floors the key/value
+#: rule applies, so it too needs its own.
+_BODY_KEY = re.compile(
+    r"\b(?P<key>" + "|".join(BODY_WORDS) + r")\b\s*[,:=]\s*(?P<value>[^,\s\]}]+)",
+    re.IGNORECASE,
+)
+
+#: The value must be a number. `Input, Elevation, Hardware gradeTypeFilter`
+#: writes the word as a label in a list and every value on those lines is
+#: `<private>`; without the constraint the rule reports four of those per
+#: fixture and the real one hides among them.
+_DWELL_KEY = re.compile(
+    r"\b(?P<key>" + "|".join(DWELL_WORDS) + r")\b\s*[,:=]\s*\"?(?P<value>-?\d[\d.]*)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -304,7 +393,36 @@ def _check_bundles(text: str) -> Iterator[tuple[str, str, int]]:
         yield "third-party-bundle-id", token, match.start()
 
 
-CHECKS = (_check_network, _check_identifiers, _check_secrets, _check_bundles)
+def _check_secret_data(text: str) -> Iterator[tuple[str, str, int]]:
+    for match in _SECRET_DATA.finditer(text):
+        value = match.group("value")
+        if entropy(value) < MIN_ENTROPY:
+            continue
+        yield f"secret-valued field {match.group('key')!r}", value.strip(), match.start("value")
+
+
+def _check_body(text: str) -> Iterator[tuple[str, str, int]]:
+    for match in _BODY_KEY.finditer(text):
+        value = match.group("value")
+        if value.lower().strip("\"'") in PLACEHOLDERS:
+            continue
+        yield f"body signal {match.group('key')!r}", value, match.start("value")
+
+
+def _check_dwell(text: str) -> Iterator[tuple[str, str, int]]:
+    for match in _DWELL_KEY.finditer(text):
+        yield f"whereabouts {match.group('key')!r}", match.group("value"), match.start("value")
+
+
+CHECKS = (
+    _check_network,
+    _check_identifiers,
+    _check_secrets,
+    _check_secret_data,
+    _check_body,
+    _check_dwell,
+    _check_bundles,
+)
 
 
 def audit(records: Iterable[Record]) -> list[Finding]:

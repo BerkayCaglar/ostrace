@@ -30,8 +30,11 @@ missed.** It selected on the process a record came *from*, so it never inspected
 the contents of records from `cloudd`, `backupd`, `wifid`, `bluetoothd`,
 `SpringBoard` and the rest — which is exactly where the device's own identifiers
 travel. A system daemon logging your Wi-Fi BSSID is still logging your Wi-Fi
-BSSID. 1,123 of the 8,000 records now carry a redaction — count them yourself;
-that is a property of the files in front of you, not a claim about history:
+BSSID. **1,064 of the 8,000 records carry at least one redaction, 1,139
+redactions in total** — count them yourself; that is a property of the files in
+front of you, not a claim about history. Both figures, because a record can
+carry several, and one number alone leaves a reader who counts the other
+convinced the document is wrong:
 
 | Redacted | Why |
 | --- | --- |
@@ -43,8 +46,17 @@ that is a property of the files in front of you, not a claim about history:
 | ETags, `protectionInfoTag`, CloudKit record digests, SHA-512 digests, MMCS chunk signatures | Derived from the owner's own backup content. |
 | Third-party bundle identifiers reaching system daemons | An inventory of what is installed. |
 | The backup snapshot UUID | Not linkable to a person from outside, but it recurs 947 times and a redactor had already replaced the digest beside it. Half-scrubbing one string is how the next thing hides. |
+| A dwell interval and a location-fix flag | `timeSinceStart,486891.342897` beside `totalDistance,0.000000` says the device stood in one place for 5.6 days. No coordinates, and still a statement about somebody's week. Two records in `ios26-mixed`, found by a third audit. |
 
-Three of those rows were added by a **second, independent audit** run after the
+The last row was added by a **third audit**, run against a candidate fixture and
+then turned back on the two published ones. It found three categories the rules
+had no vocabulary for at all, and each is now a rule of its own: a binary dump
+under a name that says it is a secret (`ClientStorageToken = {length = 32, bytes
+= 0x… }`, which the key/value rule cannot see because Apple's formatting is not
+one contiguous run), measurements of the owner's face, and the dwell interval in
+the row above. The first two were absent from these fixtures; the third was not.
+
+Three earlier rows were added by a **second, independent audit** run after the
 first had finished and its tool was passing clean. It found MMCS chunk
 signatures written as `chunk ==> <hex>` and container handles written as
 `mmcs put container 1:\t<handle>` — the same classes as values already removed,
@@ -94,3 +106,12 @@ python tools/audit_capture.py path/to/capture --census
    travels next to a BSSID and a BSSID is a MAC address. A capture contains
    whatever the device happened to be doing at the time, and the next one will
    contain something none of this predicts.
+
+**Capture with the device idle, locked and face down.** What the device was
+doing is what ends up in the file, so the cheapest privacy control is the state
+it was in. A candidate fixture built around a real `Gap` had to be abandoned
+over this: pulling the cable wakes the phone, and the wake brings Face ID with
+it. Measured on that capture — 3,173 records carrying wake, biometric or visit
+state, beginning one second *before* the disconnection and running for
+45 seconds after it. Every window containing the gap contained the unlock, so no
+re-cut of the same capture could avoid it.

@@ -83,6 +83,28 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Fixed
 
+- **Two records in `ios26-mixed.jsonl.gz` said how long the capture device had
+  stood still.** `timeSinceStart,486891.342897` beside `totalDistance,0.000000`
+  is 5.6 days in one place; the record before it carries `hasLatLon,1` and a
+  relative elevation. No coordinates, and still a statement about somebody's
+  week, published in every sdist since 0.1.1. Redacted in place through this
+  project's own `SpoolReader` and `SpoolWriter` — record counts, levels and
+  subsystem distributions unchanged, verified byte-identical on a no-op pass
+  before any substitution.
+
+  Found by an independent review of a *candidate* third fixture, then turned
+  back on the two that had already shipped. The gate had no rule for the
+  category, so it was not a check that failed; it was a question nobody had
+  asked it. Three rules now cover what that review found: a binary dump under a
+  name that says it is a secret, measurements of the owner's face, and this.
+
+- **The redaction count in `tests/fixtures/README.md` was wrong, in a sentence
+  that invites the reader to check it.** It said 1,123 of 8,000 records; the
+  files say 1,064 records and 1,139 redactions, and at `v0.1.1` and `v0.1.2`
+  they said 1,062 and 1,135. It has never matched by any counting method. Both
+  figures are now stated, because a record can carry several and one number
+  alone leaves anyone who counts the other believing the document is wrong.
+
 - **A capture that would not release the device grew memory without bound.**
   Disconnect waits for the capture thread, bounded, so that a stuck device
   cannot freeze the window — and when that wait timed out the view's pump was
@@ -803,8 +825,9 @@ one of these was found in a state it did not.
   credential was among it — a capture contains none — but all of it identifies
   a person, a device or a place.
 
-  1,123 of the 8,000 records carry a redaction — a figure anyone holding the
-  fixtures can count, rather than a historical tally of how many were edited,
+  1,062 of the 8,000 records carry a redaction, 1,135 in total — a figure
+  anyone holding the fixtures can count, rather than a historical tally of how
+  many were edited,
   which is not recoverable now that the originals are gone. Record counts,
   levels and subsystem distributions are unchanged, because a dozen assertions
   rest on them; each value became `<redacted>`, or a same-shaped synthetic
