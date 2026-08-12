@@ -11,7 +11,7 @@ So it is read in batches from a zero-delay `QTimer`, which hands control back
 to the event loop between them. No thread and no lock -- the reader and the
 model both live on the GUI thread and never touch each other concurrently.
 That is the right shape for a file, which is fast and finite; a *device* is
-neither, and phase 4's live path uses a producer thread and a queue instead.
+neither, and the live path uses a producer thread and a queue instead.
 
 The batch size is a trade between the two things that go wrong: too small and
 the timer overhead dominates the read, too large and one batch is long enough

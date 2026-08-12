@@ -177,10 +177,10 @@ _ROLES: dict[QPalette.ColorRole, str] = {
     QPalette.ColorRole.Shadow: "border-strong",
 }
 
-#: A row the user marked. Deliberately nowhere near `Highlight`: the first
-#: version borrowed an accent colour and produced a marked row identical to a
-#: selected one, so the user could not tell what they had marked from what they
-#: had clicked. Amber against the blue selection is unmistakable at a glance,
+#: A row the user marked. Deliberately nowhere near `Highlight`: an accent
+#: colour here produces a marked row identical to a selected one, so the user
+#: cannot tell what they marked from what they clicked. Amber against the blue
+#: selection is unmistakable at a glance,
 #: and every severity foreground stays above WCAG AA on it -- asserted in
 #: `test_gui_theme.py`, because a mark that makes an Error unreadable is worse
 #: than no mark.
@@ -356,9 +356,8 @@ def resolve_scheme(hints: QStyleHints) -> Scheme:
 #:   notch either way**, 1.71 ms without it and 1.26 ms with it.
 #:
 #:   Measure that with ``processEvents``, never ``repaint()``: forcing a repaint
-#:   is precisely what defeats the blit, so the first version of the benchmark
-#:   reported 100% of the viewport in both arms and would have called the trap
-#:   safe.
+#:   is precisely what defeats the blit, so a benchmark written that way
+#:   reports 100% of the viewport in both arms and calls the trap safe.
 #: * A ``::item`` rule carrying ``background``, ``border``, ``border-radius`` or
 #:   ``color`` silently deletes the model's own ``BackgroundRole`` and
 #:   ``ForegroundRole``: the severity colours and the mark tint would disappear
@@ -404,7 +403,7 @@ QHeaderView::section:hover { background: $hover; }
    surface" is the whole job; for a scrollbar it is the bug. In the dark scheme
    that token is #0f1116 and the track it sits on is #101216 -- a contrast of
    1.01:1, painted correctly and invisible, which is what "the scrollbar
-   disappears in dark mode" turned out to mean. Both handles now clear 3:1
+   disappears in dark mode" turned out to mean. Both handles clear 3:1
    against their own track, WCAG 2.1's non-text threshold, asserted in
    `test_gui_theme.py`. The light one was never invisible but was under it too,
    at 1.64:1. */
@@ -483,10 +482,11 @@ def apply_theme(app: QApplication, scheme: Scheme) -> None:
 
     ``QToolTip`` keeps a palette of its own that the application's does not
     reach, so the ``ToolTipBase`` and ``ToolTipText`` roles set two functions up
-    arrived nowhere: tooltips stayed on the platform's own colours in both
-    schemes -- measured as Windows' ``#ffffe1`` under the dark theme as well as
-    the light one. Qt 6 removed the class-specific ``setPalette`` overload that
-    used to cover this, and ``QToolTip.setPalette`` is what replaced it.
+    arrive nowhere by themselves: without the call below, tooltips stay on the
+    platform's own colours in both schemes -- measured as Windows' ``#ffffe1``
+    under the dark theme as well as the light one. Qt 6 removed the
+    class-specific ``setPalette`` overload that covered this, and
+    ``QToolTip.setPalette`` is what replaced it.
     """
     if already_applied(app, scheme):
         return

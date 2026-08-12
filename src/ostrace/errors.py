@@ -289,8 +289,8 @@ def translate(exc: BaseException) -> OstraceError:
 
     An upstream message is passed through when there is one, and replaced by
     the entry's own sentence when there is not. Falling back to the class name
-    was how ``ConnectionTerminatedError`` came to be printed at the reader in
-    the middle of a log file, in the gap row of all six export formats.
+    instead puts ``ConnectionTerminatedError`` in front of the reader in the
+    middle of a log file, in the gap row of all six export formats.
     """
     if isinstance(exc, OstraceError):
         return exc

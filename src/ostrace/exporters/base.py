@@ -55,8 +55,9 @@ class ExportResult:
     """What an export produced.
 
     Carries the scan so a caller can report on the capture without walking it a
-    second time -- the CLI prints a summary, and the GUI will want the same
-    numbers for its progress dialog.
+    second time -- the command line prints a summary from it, and the viewer's
+    export dialog shows the same count and the same notes about what was left
+    out.
     """
 
     #: The directory or file to show the user. For a bundle this is the

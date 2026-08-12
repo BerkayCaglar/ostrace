@@ -60,15 +60,6 @@ class StatusBar(QStatusBar):
         self._volume = QLabel("0 records", self)
         self._gaps = QLabel("", self)
 
-        #: Whether the view is still showing the newest records, and the way
-        #: back when it is not.
-        #:
-        #: `docs/design/gui.md` §4 asked for this indicator and phase 4 did not
-        #: build it, which left the state derived correctly and shown nowhere:
-        #: clicking a row stops the tail on purpose, and the only ways back
-        #: were a key nobody had been told about and a menu item two levels
-        #: down. Logcat, Wireshark, DebugView and klogg all carry the same
-        #: control, and all four put the state on it rather than the verb.
         #: How many records have arrived below the bottom of the viewport.
         #:
         #: Its own label rather than more text on the button, for two reasons.
@@ -79,6 +70,15 @@ class StatusBar(QStatusBar):
         #: not a control changing shape.
         self._behind = QLabel("", self)
 
+        #: Whether the view is still showing the newest records, and the way
+        #: back when it is not.
+        #:
+        #: The state is derived either way; without a control carrying it, it
+        #: is derived correctly and shown nowhere. Clicking a row stops the
+        #: tail on purpose, and the only other ways back are a key nobody has
+        #: been told about and a menu item two levels down. Logcat, Wireshark,
+        #: DebugView and klogg all carry the same control, and all four put the
+        #: state on it rather than the verb. `docs/design/gui.md` §4.
         self.follow = QToolButton(self)
         self.follow.setCheckable(True)
         self.follow.setAutoRaise(True)

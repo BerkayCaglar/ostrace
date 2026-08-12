@@ -18,9 +18,10 @@ recovering a capture whose process was killed.
 **The reader tolerates a missing trailer.** A file that was never closed has no
 gzip CRC at the end. The reader decompresses incrementally and treats truncation
 as the end of the data rather than as an error -- and, specifically, still
-yields the last complete line before giving up. An earlier implementation
-dropped the final record of every unclosed file because the exception was caught
-before the final ``yield``; there is a regression test for exactly that.
+yields the last complete line before giving up. Catching that truncation before
+the final ``yield`` instead drops the last record of every unclosed file, which
+is a whole record lost from every capture whose process was killed; there is a
+regression test for exactly it.
 
 A damaged line is always skipped and counted in :attr:`SpoolReader.malformed`,
 never raised. This is a diagnostic tool: reading as far as possible and saying
@@ -150,11 +151,11 @@ class SpoolReader:
     def truncated(self) -> bool:
         """True when the spool has no gzip trailer -- still open, or killed.
 
-        Answered on demand rather than only as a side effect of iterating. It
-        used to be a plain attribute set at the end of a full pass, which meant
-        that asking "is this capture still being written?" *before* reading it
-        -- the natural order -- always got ``False``, and a consumer that
-        stopped iterating early got the same wrong answer.
+        Answered on demand rather than only as a side effect of iterating. As
+        a plain attribute filled in at the end of a full pass, asking "is this
+        capture still being written?" *before* reading it -- the natural order
+        -- always answers ``False``, and a consumer that stops iterating early
+        gets the same wrong answer.
 
         The probe decompresses but does not parse, so it is far cheaper than a
         full pass, and any pass that does complete fills the value in for free.
