@@ -83,7 +83,7 @@ from PySide6.QtWidgets import (
     QTableView,
 )
 
-from ostrace.gui.columns import COLUMNS, Column
+from ostrace.gui.columns import Column, fit_budgets, wanted_widths
 from ostrace.gui.fonts import monospace
 from ostrace.gui.theme import Scheme, palette_for, selection_row, token
 
@@ -114,26 +114,6 @@ _PLACEHOLDER_GAP = 8
 #: record. Fixed rather than derived, because the header carries the smaller of
 #: the two type sizes and would otherwise shrink below the row it labels.
 _HEADER_HEIGHT = 26
-
-#: Characters the Message column is never squeezed below.
-#:
-#: The budgets in `columns` are what each column wants; this is what the table
-#: is *for*. Measured on the shipped set at a 1,280-pixel window: five fixed
-#: columns of 91 characters come to 1,183 pixels of a 1,254-pixel viewport, so
-#: the message got 71 -- about five characters -- and the columns overflowed
-#: the window besides, which is a horizontal scrollbar on a table with no rows
-#: in it. Every budget is a want and this is a floor, so the floor wins.
-MESSAGE_MINIMUM = 30
-
-#: Columns whose content has a known length, and which therefore do not give
-#: any of it up. A timestamp missing its last digits is a timestamp nobody can
-#: use, and `Level` has to fit ``User Action`` and its glyph. Everything else
-#: is an identifier that elides into something still recognisable.
-_UNTRIMMABLE = (Column.TIME, Column.LEVEL)
-
-#: And a floor under the ones that do give room up, so that trimming never
-#: reduces a column to punctuation.
-_MINIMUM_CHARACTERS = 8
 
 
 class FastHeader(QHeaderView):
@@ -496,47 +476,7 @@ class LogTable(QTableView):
         """
         unit = self.fontMetrics().horizontalAdvance("0")
         inset = self.style().pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, None, self) + 1
-        margins = 2 * inset
-        budgets = {
-            spec.column: spec.characters * unit + margins
-            for spec in COLUMNS
-            if spec.characters is not None
-        }
-        for column, width in self._fitted(budgets, unit).items():
+        budgets = wanted_widths(unit, margins=2 * inset)
+        fitted = fit_budgets(budgets, unit, self.viewport().width())
+        for column, width in fitted.items():
             self.setColumnWidth(int(column), width)
-
-    def _fitted(self, budgets: dict[Column, int], unit: int) -> dict[Column, int]:
-        """The budgets, trimmed until the message has room to be read.
-
-        ``stretchLastSection`` only *grows* the last section into space that is
-        left over. When the columns before it have already used the window
-        there is nothing left, so it keeps its default 100 pixels and the table
-        scrolls sideways -- with no rows in it, which is how this was noticed.
-        Growing is the easy half; deciding what to give up is this.
-
-        Nothing happens until the view has a width, and nothing happens if the
-        budgets already fit. When they do not, the shortfall comes out of the
-        identifier columns in proportion to what they asked for, never out of
-        the two whose content has a known length, and never below
-        `_MINIMUM_CHARACTERS`. If even that is not enough the budgets stand and
-        the scrollbar appears, which at that width is the honest answer.
-        """
-        available = self.viewport().width()
-        room = available - MESSAGE_MINIMUM * unit
-        if available <= 0 or sum(budgets.values()) <= room:
-            return budgets
-
-        untrimmable = sum(budgets[column] for column in _UNTRIMMABLE if column in budgets)
-        flexible = {
-            column: width for column, width in budgets.items() if column not in _UNTRIMMABLE
-        }
-        spare = room - untrimmable
-        floor = _MINIMUM_CHARACTERS * unit
-        if not flexible or spare < floor * len(flexible):
-            return budgets
-
-        scale = spare / sum(flexible.values())
-        return {
-            column: (width if column in _UNTRIMMABLE else max(floor, int(width * scale)))
-            for column, width in budgets.items()
-        }

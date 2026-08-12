@@ -35,12 +35,11 @@ from PySide6.QtWidgets import (
     QTableView,
 )
 
-from ostrace.gui.columns import COLUMNS, Column
+from ostrace.gui.columns import COLUMNS, MESSAGE_MINIMUM, Column
 from ostrace.gui.models import RecordModel
 from ostrace.gui.shortcuts import BINDINGS, RELOCATED
 from ostrace.gui.theme import Scheme, palette_for, selection_row, severity_for, token
 from ostrace.gui.widgets.log_table import (
-    MESSAGE_MINIMUM,
     FastHeader,
     LogTable,
     MiddleElidingDelegate,
