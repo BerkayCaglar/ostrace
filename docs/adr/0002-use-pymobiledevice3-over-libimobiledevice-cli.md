@@ -85,10 +85,21 @@ verified on iOS 26.5.2.
 - Good: the MSYS2 dependency and every hardcoded `C:\msys64\...` path disappear,
   which removes the single largest obstacle to running on macOS.
 - Good: pip-installable, so there is nothing for a user to build.
-- **Bad: dependency weight.** `pymobiledevice3` pulls roughly 40 packages —
-  FastAPI, uvicorn, IPython, xonsh, Pillow and `av` (FFmpeg bindings) — in order
-  to stream logs. There is no lightweight extras group upstream. This is
-  documented in the README rather than hidden.
+- **Bad: dependency weight.** `pymobiledevice3` pulls **90 distributions** —
+  FastAPI, uvicorn, IPython, xonsh, Pillow and `av` (FFmpeg bindings) among them
+  — in order to stream logs. There is no lightweight extras group upstream. This
+  is documented in the README rather than hidden.
+
+  Ninety is measured, not estimated, and by two methods that agree: the
+  recursive closure of the installed metadata's requirements with markers
+  evaluated for this environment, and `pip install --dry-run --ignore-installed`
+  resolving the same package from scratch. Both say 90 on Windows and Python
+  3.13, against the `>=10.3,<11` pin. Neither counts extras nobody installs.
+
+  The weight is real and it is confined: every import of the library sits inside
+  the function that needs it, so nothing loads until a service is actually
+  opened. `import ostrace` and every documented offline import stay free of it,
+  which is asserted in `tests/test_architecture.py` rather than intended.
 - **Bad: API churn.** The 10.x line removed the synchronous API that most
   examples online still show; the project releases frequently. Mitigated by
   pinning `>=10.3,<11` and confining every import to `ostrace/sources/`.

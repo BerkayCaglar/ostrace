@@ -69,6 +69,55 @@ the point of the `sources/` boundary described in
 `sources/replay.py` reads a recorded capture and the rest of the pipeline cannot
 tell it apart from a live device.
 
+### How the tests are written
+
+Conventions, not style. Each of these is load-bearing for a suite that has to
+run headless on three operating systems, and most of them were arrived at the
+second time.
+
+**Markers compose, so an exclusion has to be explicit.** `-m gui` selects
+everything marked `gui` *including* what is also marked `device` — which is how
+a device test came to run in CI and pass with no phone attached, vacuously, for
+weeks. CI says `-m "gui and not device"` and the second half is not redundant.
+
+**The `qt_app` fixture is session-scoped and built by `build_application`.**
+Tests run against the application a user gets, palette and icons and all, never
+a bare `QApplication`.
+
+**Every modal has a build/show split, and tests only ever touch the building
+half.** `_menu_for`, `export_dialog` against `run_export`, `go_to_time` against
+the half that asks — a test that reaches an `exec()` offscreen does not fail, it
+hangs, and CI reports it as a timeout twenty minutes later. This convention has
+to survive renaming.
+
+**Loading a capture is stepped by hand.** The loader runs from a timer and
+there is no timer offscreen, so `tests.helpers.load()` drives `loader._step()`
+to completion. One copy, shared: three hand-inlined versions drift, and a test
+that loads slightly differently from its neighbours is a test whose failure
+means something slightly different.
+
+**Isolation is autouse and suite-wide**, for both `QSettings` and `OSTRACE_HOME`
+(`conftest.py`). Neither is per-file: the first test elsewhere that starts a
+capture would otherwise write a session into the developer's real data
+directory, and the settings incident that motivated the first one is recorded in
+its docstring.
+
+**Collect before emitting an application-wide signal.** `colorSchemeChanged`
+reaches every window the session has built and not yet collected, each of which
+recolours a model and rebuilds an icon set. Left to CPython's own timing that
+measured 151 seconds for one test; `gc.collect()` first is not tidiness.
+
+**CLI output goes through `tests.helpers.plain()`.** Python 3.14's argparse
+colourises help, and CI sets `FORCE_COLOR`, so `usage: ostrace` arrives with
+escape sequences between the two words.
+
+**There is no coverage gate, deliberately.** The sweep runs `--cov` as drift
+information and nothing fails on a number. The argument is this project's own
+history: the four mutations that found real bugs all lived in code coverage
+already called covered — it said 91%. The currency here is the named-mutation
+regression test, whose docstring cites the exact mutation it kills, and a
+percentage buys none of that.
+
 ## Things worth knowing before you write code
 
 **Never validate a parser against hand-written sample lines.** A previous
@@ -152,6 +201,25 @@ round", "this was broken until last week". `git log` and `git blame` hold that
 and hold it better. A file is read by somebody deciding what to do next, and
 every line spent on what already happened competes with the lines that tell
 them.
+
+## Citing code from a document
+
+A maintained document cites a symbol, a module, or another document's section —
+`pump.TICK_MS`, `gui.md` §11 — and never a source line number. Line numbers are
+right for about a day, and a document full of them stops being read as a
+contract and starts being read as an approximation of one.
+
+This is already how the corpus is written, which is why it is stated rather than
+enforced: `docs/design/gui.md`, every file under `docs/adr/`, `CLAUDE.md` and
+`docs/README.md` contain no `file.py:line` citations between them. The only
+documents that do are the four under `docs/research/gui-redesign/`, whose own
+README declares them a dated snapshot of a codebase that has since moved.
+
+That is the exception, and its shape is the rule for the next one: a document
+that has to cite exact lines to preserve evidence as of a date — a measurement,
+an incident, an analysis — says so at the top. Its citations are then part of
+the dated evidence rather than a claim about the code as it stands, and nobody
+has to guess which they were reading.
 
 ## Licence headers
 

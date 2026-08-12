@@ -975,10 +975,10 @@ class MainWindow(QMainWindow):
         """The live source, imported here rather than at module scope.
 
         The reason given for that used to be that `ostrace.sources.os_trace`
-        refuses to be imported under ``-O`` and pulls in pymobiledevice3, about
-        forty packages. Both are false. Measured: importing it pulls **no**
+        refuses to be imported under ``-O`` and pulls in pymobiledevice3, ninety
+        distributions. Both are false. Measured: importing it pulls **no**
         pymobiledevice3 modules -- the library is imported inside
-        `_stream_once` -- and the ``-O`` guard refuses at construction, not at
+        `_open_service` -- and the ``-O`` guard refuses at construction, not at
         import. With this window already imported, deferring saves one module
         and 1.2 ms.
 

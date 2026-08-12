@@ -301,8 +301,14 @@ class RecordModel(QAbstractTableModel):
         chronological order and is not guaranteed to be sorted -- records from
         several subsystems are interleaved by the relay -- and a binary search
         over a nearly-sorted sequence answers confidently and wrongly. "The
-        first row at or after" is well defined either way, and at 200,000 rows
-        the scan is about ten milliseconds on a keypress a person made.
+        first row at or after" is well defined either way.
+
+        The scan costs 86 ms at 200,000 retained rows in the worst case, where
+        nothing matches and the whole list is walked; landing halfway is 38 ms.
+        Best of three against the shipping model with a view attached,
+        offscreen. That is affordable because it happens on a keypress somebody
+        made, and it is not the reason for the choice: a bisection here would be
+        faster and wrong.
 
         Markers count. A gap is exactly the thing somebody jumping to a time is
         often looking for, and skipping it would make the one row that explains

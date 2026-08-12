@@ -146,6 +146,25 @@ operating systems with no hardware.
   for the next record in order to notice time has passed is a hang.
 - Nothing outside `sources/` and `devices/` imports pymobiledevice3. `errors.py`
   translates its exceptions by class *name* so the dependency stays confined.
+  Inside those two, the import sits in the function that needs it, so nothing
+  loads until a service is actually opened — `import ostrace` and every
+  documented offline import stay free of 90 distributions, asserted rather than
+  intended.
+- **The pump outlives the capture thread, never the reverse.** A stop wait is
+  bounded so a stuck device cannot freeze the window, and on a timeout the
+  thread is parked with its pump *running and paused*, until the thread really
+  ends and the pump takes a final drain. Stopping the pump there instead grows
+  the deque without bound at up to 1,600 records a second, silently, because a
+  stopped pump reports nothing; letting go of the thread is worse, since Qt's
+  destructor calls `qFatal` and the viewer vanishes with exit `0xC0000409` and
+  no message. `gui/capture_controller.py` owns all of it and says nothing a user
+  reads. [ADR 0007](docs/adr/0007-capture-lifecycle-the-pump-outlives-the-thread.md).
+- **`RecordModel`'s rows, filter, marks and Qt bracketing stay inside the Qt
+  model; only pure arithmetic comes out** — `plan_trim` and `fit_budgets`, which
+  are then testable with no Qt at all. A Qt-free buffer underneath would have to
+  tell the model what it had just done, which is the same coupling with an extra
+  hop, a chance to disagree, and an indirection on the ingest path.
+  [ADR 0009](docs/adr/0009-keep-the-model-core-inside-the-qt-model.md).
 
 ## Tests
 

@@ -40,11 +40,11 @@ class CaptureState(StrEnum):
     consumer holding a ``LogSource`` already imports.
 
     The reason this placement used to give was that importing from
-    ``os_trace`` would pull pymobiledevice3 -- forty packages -- and make the
-    window unimportable under ``-O``. Both are false, and measured: importing
-    ``sources.os_trace`` pulls **no** pymobiledevice3 modules, because the
-    library is imported inside ``_stream_once``, and the ``-O`` guard refuses
-    at *construction*, not at import.
+    ``os_trace`` would pull pymobiledevice3 -- ninety distributions -- and make
+    the window unimportable under ``-O``. Both are false, and measured:
+    importing ``sources.os_trace`` pulls **no** pymobiledevice3 modules, because
+    the library is imported inside ``_open_service``, and the ``-O`` guard
+    refuses at *construction*, not at import.
 
     A ``StrEnum`` rather than two strings so the set is closed and a type
     checker can see it -- the next state, a logcat source's "waiting for

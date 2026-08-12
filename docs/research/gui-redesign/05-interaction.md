@@ -1068,6 +1068,11 @@ New:
     a disabled button while writing.
 22. New keys: `Ctrl+Shift+F`, `Ctrl+J`, `Ctrl+Shift+D`, `Ctrl+I`, `Esc`.
 
+> **This tier is closed.** All twenty-two items shipped: 0.1.1 took the ones
+> that could be done at once and 0.1.2 finished the rest, and the
+> [changelog](../../../CHANGELOG.md) records which release took which. What is
+> live in this document is the two tiers below.
+
 ### Nice-to-have if cheap
 
 Column chooser · negate toggles on Process and Subsystem · in-field regex toggle ·
