@@ -18,7 +18,7 @@ import re
 from contextlib import ExitStack
 from typing import TYPE_CHECKING, TextIO
 
-from ostrace.analysis.scan import ABSENT, ScanResult
+from ostrace.analysis.scan import ABSENT, ScanResult, counted
 from ostrace.exporters.base import ExportResult, escape, register
 from ostrace.model import Record
 
@@ -100,12 +100,12 @@ class AgentBundleExporter:
             # unsafe direction: the whole note exists to stop a silent
             # truncation.
             written = 0
-            for item in items:
+            for item in counted(items, scan):
                 if not isinstance(item, Record):
-                    scan.add_gap(item)
                     continue
-                line += 1
-                scan.add(item, line)
+                # The line this record just took in `session.log`, which is
+                # what `scan.add` has already counted it as.
+                line = scan.records
                 rendered = row(item)
                 log.write(rendered + "\n")
                 written += len(rendered) + 1

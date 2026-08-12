@@ -23,9 +23,18 @@ if TYPE_CHECKING:
 
 __all__ = ["export_notes"]
 
+#: What `ostrace capture` writes into the sidecar. Named rather than repeated
+#: as a literal: it is the one value that is not a caveat.
+OS_TRACE_RELAY = "os_trace_relay"
+
 
 def export_notes(
-    result: ExportResult, *, truncated: bool, malformed: int = 0, running: bool = False
+    result: ExportResult,
+    *,
+    truncated: bool,
+    malformed: int = 0,
+    running: bool = False,
+    source: str | None = None,
 ) -> list[str]:
     """Everything about this export a reader would otherwise assume away.
 
@@ -36,6 +45,14 @@ def export_notes(
     An export taken this way is a snapshot, and the reader has to be told that
     the end of it is *when they pressed the button* rather than when the device
     stopped -- otherwise the last record reads as the last thing that happened.
+
+    ``source`` is which service produced the capture, from its sidecar. It
+    matters for exactly one reason and `docs/formats/session-file.md` states
+    it: a session taken over the legacy ``syslog_relay`` carries only the
+    notice tier and no subsystem on any record, so a reader who does not know
+    that concludes the device emitted nothing at DEBUG. ostrace itself writes
+    only ``os_trace_relay``, but the field exists because another tool's file
+    can be opened here.
     """
     notes: list[str] = []
     if running:
@@ -57,6 +74,13 @@ def export_notes(
         notes.append(
             f"{malformed:,} line(s) in the capture could not be decoded and are "
             f"missing from this export."
+        )
+    if source is not None and source != OS_TRACE_RELAY:
+        notes.append(
+            f"this capture was taken over {source!r} rather than {OS_TRACE_RELAY!r}. "
+            f"That service carries only the Notice tier and no subsystem or category "
+            f"on any record, so what is missing here is missing from the capture, not "
+            f"from the device."
         )
     scan = result.scan
     if scan is None:
