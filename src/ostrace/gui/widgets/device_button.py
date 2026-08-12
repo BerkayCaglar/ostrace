@@ -147,7 +147,8 @@ class DeviceButton(QToolButton):
         self._actions: dict[str, QAction] = {}
         self._names: dict[str, str] = {}
         self.udid: str | None = None
-        #: Set while a capture holds a device, so the scan can leave it alone.
+        #: Which device a capture is holding, so a scan leaves it alone. Read
+        #: directly; written through `set_busy`.
         self.busy_udid: str | None = None
 
         self.setMenu(self._menu)
@@ -176,6 +177,17 @@ class DeviceButton(QToolButton):
     def set_scheme(self, scheme: Scheme) -> None:
         self._scheme = scheme
         self.setIcon(icons.icon("smartphone", scheme, ratio=self.devicePixelRatioF()))
+
+    def set_busy(self, udid: str | None) -> None:
+        """Say which device a capture is holding, or ``None`` for none.
+
+        A method rather than an assignment at each call site because it is one
+        idea -- leave this one alone -- reached from two places that arrive at
+        the answer differently: the window knows a capture has *started*, and
+        the capture itself says later which device it actually got, which are
+        not always the same one.
+        """
+        self.busy_udid = udid
 
     def rescan(self) -> None:
         """Ask usbmux again. Safe to call while a scan is already running."""

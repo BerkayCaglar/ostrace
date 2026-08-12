@@ -29,12 +29,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ostrace.gui.filters import Filter
 from ostrace.model import Level
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from ostrace.gui.filters import Filter
 
 __all__ = ["NO_RECENT", "FilterBar"]
 
@@ -134,19 +133,40 @@ class FilterBar(QWidget):
     def regex(self) -> bool:
         return self._regex.isChecked()
 
+    def current(self) -> Filter:
+        """What the bar is displaying, as one value.
+
+        Raises ``ValueError`` for a half-typed regular expression, which the
+        caller answers by leaving the previous filter applied and saying why --
+        half a pattern is not an empty log.
+
+        A method rather than five properties read in a row: the caller was
+        naming every field, so adding one meant editing the bar and then
+        remembering to edit whoever assembles it.
+        """
+        return Filter(
+            minimum_level=self.minimum_level,
+            process=self.process,
+            subsystem=self.subsystem,
+            search=self.search,
+            regex=self.regex,
+        )
+
     @property
     def is_empty(self) -> bool:
         """Whether this bar would exclude anything at all.
 
         The window needs this to tell "the device is quiet" apart from "your
         filter hides everything", which are the same picture otherwise.
+
+        Asked of the filter rather than of the fields, so the two cannot
+        disagree about what empty means. A half-typed pattern is not empty: it
+        is a narrowing the user is in the middle of writing.
         """
-        return (
-            self.minimum_level is Level.DEBUG
-            and not self.process
-            and not self.subsystem
-            and not self.search
-        )
+        try:
+            return self.current().is_empty
+        except ValueError:
+            return False
 
     def focus_search(self) -> None:
         """Put the cursor in the search box and select what is there.

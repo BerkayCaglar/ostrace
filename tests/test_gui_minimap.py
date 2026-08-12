@@ -24,7 +24,7 @@ from PySide6.QtGui import QImage, QMouseEvent
 
 from ostrace.gui.filters import Filter
 from ostrace.gui.models import BUCKET_ROWS, Band, RecordModel
-from ostrace.gui.theme import Scheme, severity_for
+from ostrace.gui.theme import Scheme, palette_for, severity_for
 from ostrace.gui.widgets.minimap import Minimap
 
 pytestmark = pytest.mark.gui
@@ -282,6 +282,29 @@ def test_the_gap_count_matches_after_every_batch(model: RecordModel) -> None:
     assert model.gaps == 3
     model.set_filter(Filter(minimum_level=Level.FAULT))
     assert model.gaps == 3, "a filter hides rows; it does not discard the capture"
+
+
+def test_a_theme_switch_reaches_the_background(qt_app: object) -> None:
+    """The background colour is prebuilt with the stripe colours rather than
+    looked up in `paintEvent`, because `palette_for` measured 60.6 us a call
+    and this repaints on every scroll, every arriving batch and every resize.
+
+    Prebuilding is only correct if the switch invalidates it, and nothing else
+    here would notice: every other rendering test builds the strip in the
+    scheme it then asserts. Leaving the refresh out of `set_scheme` left all
+    371 GUI tests green and the strip painting a light background inside a dark
+    window.
+    """
+    del qt_app
+    strip = Minimap(Scheme.LIGHT)
+    strip.resize(10, 40)
+
+    strip.set_scheme(Scheme.DARK)
+
+    image = QImage(strip.size(), QImage.Format.Format_ARGB32)
+    strip.render(image)
+    wanted = palette_for(Scheme.DARK).base().color().name()
+    assert image.pixelColor(5, 20).name() == wanted, "the strip kept the light background"
 
 
 def test_the_strip_actually_draws_its_bands(qt_app: object) -> None:
