@@ -25,6 +25,7 @@ from tests.helpers import make_record
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
+from ostrace.gui.widgets.banner import Notice
 from ostrace.gui.windows.doctor import MARKS, DoctorThread, DoctorWindow
 from ostrace.gui.windows.main import RECONNECT_MESSAGE, MainWindow
 
@@ -282,6 +283,65 @@ class TestTheBannersThatEndADeadEnd:
         window._on_capture_state(CaptureState.STREAMING)
 
         assert window.banner.text == ""
+
+    def test_resuming_takes_down_the_pause_notice_and_nothing_else(self, qt_app: object) -> None:
+        """The mirror of the test below, and it was broken in that direction.
+
+        `_on_capture_state` was careful to clear only its own message;
+        `set_paused(False)` cleared the strip outright. So a reader who paused,
+        watched the device drop while paused, and then resumed was left with a
+        device that was still gone and nothing on screen saying so -- and
+        nothing would say so again, because the banner only speaks when the
+        state *changes*.
+        """
+        del qt_app
+        window = MainWindow()
+        window.set_paused(True)
+        window._on_capture_state(CaptureState.RECONNECTING)
+
+        window.set_paused(False)
+
+        assert window.banner.text == RECONNECT_MESSAGE, "the outage is still true"
+        assert window.banner.current_key is Notice.RECONNECTING
+
+    def test_widening_the_filter_takes_down_the_filter_notice_and_nothing_else(
+        self, qt_app: object
+    ) -> None:
+        """The window used to keep a flag saying it had raised the filter
+        notice, and the flag recorded what had been *raised* rather than what
+        was *there*. Anything shown afterwards inherited its dismissal.
+        """
+        del qt_app
+        window = MainWindow()
+        window.model.append([make_record(0)])
+        window.filter_bar._process.setText("no-such-process")
+        window._apply_filter()
+        assert window.banner.current_key is Notice.FILTER_HIDES_EVERYTHING
+
+        window.banner.show_message("The capture has finished.", "Export…")
+        window.filter_bar._process.setText("")
+        window._apply_filter()
+
+        assert window.banner.text == "The capture has finished."
+
+    def test_a_banner_nobody_has_used_is_showing_no_notice(self, qt_app: object) -> None:
+        del qt_app
+        assert MainWindow().banner.current_key is None
+
+    def test_taking_the_way_out_ends_the_notice(self, qt_app: object) -> None:
+        """`current_key` answers about the strip, not about the last call --
+        which is the whole of the mechanism. A notice replaced, dismissed, or
+        taken down with the capture stops being the current one without anybody
+        having to remember to say so.
+        """
+        del qt_app
+        window = MainWindow()
+        window._on_capture_state(CaptureState.RECONNECTING)
+        assert window.banner.current_key is Notice.RECONNECTING
+
+        window.banner.act()
+
+        assert window.banner.current_key is None
 
     def test_coming_back_clears_nothing_else(self, qt_app: object) -> None:
         """A pause raised during the outage is a different state that is still
