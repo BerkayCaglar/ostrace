@@ -185,8 +185,19 @@ class TestADeviceThatWillNotLetGo:
         # Replace the real thread rather than the wait: what is under test is
         # what this object does when a wait times out, and a real thread that
         # genuinely does not end is the only honest way to time one out.
-        assert controller._thread is not None
-        controller._thread.wait(1_000)
+        real = controller._thread
+        assert real is not None
+        # Asserted, and generous, for the reason this whole class is about.
+        # `CaptureThread` is constructed with no parent, so Python owns it
+        # alone and the line below drops the last reference -- onto a `QThread`
+        # that has not finished, if this wait gave up. Qt's destructor calls
+        # `qFatal` on one of those, which does not fail a test: it takes the
+        # process. Measured by setting this wait to zero, which turns twelve
+        # passing tests into exit `0xC0000409` after eight dots, with nothing
+        # printed. The wait returns the moment the thread ends, so the ceiling
+        # costs nothing when it is not needed, and every other thread wait in
+        # this suite is already `assert wait(30_000)`.
+        assert real.wait(30_000), "the scripted capture never ended"
         # Not a `CaptureThread`: what is under test is what this object does
         # when a wait times out, and the real one cannot be made to.
         controller._thread = thread  # type: ignore[assignment]
