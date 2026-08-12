@@ -14,6 +14,14 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Added
 
+- **An export from a capture taken over the legacy `syslog_relay` now says so.**
+  That service carries only the Notice tier and no subsystem or category on any
+  record, so what is missing from such an export is missing from the *capture*
+  rather than from the device. `docs/formats/session-file.md` has promised this
+  since the format was written; the field was carried faithfully from disk and
+  read by nothing. The command line and the viewer print the same sentence.
+  `ostrace` itself never writes such a capture — another tool can.
+
 - `tools/build_social_card.py`, which draws the GitHub social preview from the
   mark and `theme.py`'s tokens. That card is the only image of this project most
   people ever see — GitHub puts it above the repository name on every topic
