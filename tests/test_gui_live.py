@@ -41,7 +41,6 @@ from ostrace.gui.markers import Eviction
 from ostrace.gui.models import RecordModel
 from ostrace.gui.pump import RATE_WINDOW_MS, Pump
 from ostrace.gui.theme import Scheme
-from ostrace.gui.windows import main
 from ostrace.gui.windows.main import MainWindow
 
 if TYPE_CHECKING:
@@ -66,7 +65,7 @@ def once_recording(window: MainWindow, timeout: float = 30.0) -> CaptureThread:
     asserting what a *recorded* capture leaves behind has to wait for that, and
     the session path appearing is the moment it is true.
     """
-    thread = window._capture_thread
+    thread = window.capture_controller._thread
     assert thread is not None
     deadline = time.monotonic() + timeout
     while thread.path is None and time.monotonic() < deadline:
@@ -241,13 +240,13 @@ def test_a_recorded_session_stands_in_for_a_device(qt_app: object) -> None:
     source = ReplaySource(ERRORS)
 
     window.start_capture(source)
-    thread = window._capture_thread
+    thread = window.capture_controller._thread
     assert thread is not None
     assert thread.wait(30_000), "the capture thread did not finish"
 
     # Drain by hand: no event loop is running, so the pump's timer never fires.
-    assert window._pump is not None
-    window._pump.drain()
+    assert window.capture_controller._pump is not None
+    window.capture_controller._pump.drain()
 
     assert window.model.rowCount() == 3000
     assert any(
@@ -268,7 +267,7 @@ def test_capturing_writes_a_session_file(qt_app: object, tmp_path: Path) -> None
     destination = tmp_path / "live.ostrace"
     window.start_capture(ReplaySource(ERRORS), destination=destination)
 
-    thread = window._capture_thread
+    thread = window.capture_controller._thread
     assert thread is not None
     assert thread.wait(30_000)
     window.stop_capture()
@@ -337,7 +336,7 @@ class TestWhatTheWindowIsCalled:
     def test_the_device_name_replaces_it_once_known(self, qt_app: object) -> None:
         del qt_app
         window = MainWindow()
-        window._capture_thread = object()  # type: ignore[assignment]
+        window.capture_controller._thread = object()  # type: ignore[assignment]
         try:
             window._on_identified(
                 DeviceInfo(
@@ -350,7 +349,7 @@ class TestWhatTheWindowIsCalled:
             )
             assert window.title_text() == "Capturing from Berkay's iPhone — ostrace"
         finally:
-            window._capture_thread = None
+            window.capture_controller._thread = None
 
     def test_an_opened_capture_is_named_without_its_suffix(self, qt_app: object) -> None:
         """``ios26-errors.jsonl.gz`` is a file name. ``ios26-errors`` is what
@@ -387,7 +386,7 @@ def test_a_running_capture_exports_as_a_snapshot(qt_app: object, tmp_path: Path)
 
     assert dialog is not None, "a running capture offered nothing to export"
     assert dialog.running, "the dialog did not know it was writing a snapshot"
-    assert window._capture_thread is not None, "exporting stopped the capture"
+    assert window.capture_controller._thread is not None, "exporting stopped the capture"
     dialog.deleteLater()
 
     window.stop_capture()
@@ -438,13 +437,13 @@ def test_disconnecting_before_the_capture_gets_going_still_releases_it(
         SlowToIdentify([make_record(i) for i in range(500)], delay=0.01),
         destination=tmp_path / "live.ostrace",
     )
-    thread = window._capture_thread
+    thread = window.capture_controller._thread
     assert thread is not None
 
     window.stop_capture()
 
     assert thread.isFinished(), "the capture ignored a stop it had not started yet"
-    assert window._parked == []
+    assert window.capture_controller._parked == []
 
 
 def test_a_capture_that_ends_by_itself_is_picked_up_too(qt_app: object, tmp_path: Path) -> None:
@@ -455,7 +454,7 @@ def test_a_capture_that_ends_by_itself_is_picked_up_too(qt_app: object, tmp_path
     destination = tmp_path / "live.ostrace"
     window.start_capture(ReplaySource(ERRORS), destination=destination)
 
-    thread = window._capture_thread
+    thread = window.capture_controller._thread
     assert thread is not None
     assert thread.wait(30_000)
     QApplication.processEvents()  # deliver `completed`, which is queued
@@ -474,7 +473,7 @@ def test_stopping_a_capture_that_already_ended_is_not_an_error(qt_app: object) -
     del qt_app
     window = MainWindow()
     window.start_capture(ReplaySource(ERRORS))
-    thread = window._capture_thread
+    thread = window.capture_controller._thread
     assert thread is not None
     assert thread.wait(30_000)
 
@@ -522,11 +521,11 @@ def test_disconnect_really_releases_the_device(qt_app: object) -> None:
     window = MainWindow()
     for attempt in range(2):
         window.start_capture(OsTraceSource())
-        thread = window._capture_thread
+        thread = window.capture_controller._thread
         assert thread is not None, f"attempt {attempt + 1} did not start"
         assert thread.isRunning() or thread.wait(5_000)
         window.stop_capture()
-        assert window._capture_thread is None
+        assert window.capture_controller._thread is None
 
     assert window.action_capture.isEnabled()
 
@@ -538,11 +537,11 @@ def test_closing_the_window_releases_the_device(qt_app: object) -> None:
     del qt_app
     window = MainWindow()
     window.start_capture(ReplaySource(ERRORS))
-    assert window._capture_thread is not None
+    assert window.capture_controller._thread is not None
 
     window.close()
 
-    assert window._capture_thread is None
+    assert window.capture_controller._thread is None
 
 
 def test_a_capture_that_will_not_stop_is_kept_rather_than_dropped(
@@ -562,16 +561,18 @@ def test_a_capture_that_will_not_stop_is_kept_rather_than_dropped(
     zero wait on one just started is deterministically a timeout.
     """
     del qt_app
-    monkeypatch.setattr(main, "_STOP_TIMEOUT_MS", 0)
+    # The constant moved to the controller with the wait it bounds.
+    monkeypatch.setattr("ostrace.gui.capture_controller.STOP_TIMEOUT_MS", 0)
     window = MainWindow()
     window.start_capture(ScriptedSource([make_record(0)], delay=1.0))
 
-    thread = window._capture_thread
+    thread = window.capture_controller._thread
     assert thread is not None
     window.stop_capture()
 
-    assert window._capture_thread is None
-    assert thread in window._parked, "a running capture thread was dropped"
+    assert window.capture_controller._thread is None
+    parked = [held for held, _pump in window.capture_controller._parked]
+    assert thread in parked, "a running capture thread was dropped"
     assert "not released the device" in window.banner.text
 
     assert thread.wait(30_000), "the parked capture never finished"
