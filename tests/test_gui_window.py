@@ -168,6 +168,31 @@ def test_no_action_shows_an_icon_in_a_menu(window: MainWindow) -> None:
     assert not wearing, f"{wearing} draw an icon where a checkmark goes"
 
 
+def test_the_two_relocated_actions_are_wired_to_something(
+    qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Quit and About are built apart from the other twenty because macOS moves
+    them by menu role, and being built apart is how their wiring came to be the
+    one pair nothing asserted. Measured: removing both connections leaves all
+    369 GUI tests green, and the window then has a Quit that does nothing.
+
+    Both targets are replaced rather than called. `show_about` opens a modal
+    `QMessageBox`, and a modal in a test run waits for a person; `close` would
+    take the window's layout-saving path with it. What is under test is the
+    connection, which is what the move could lose.
+    """
+    del qt_app
+    called: list[str] = []
+    monkeypatch.setattr(MainWindow, "close", lambda self: called.append("quit"))
+    monkeypatch.setattr(MainWindow, "show_about", lambda self: called.append("about"))
+    window = MainWindow()
+
+    window.action_quit.trigger()
+    window.action_about.trigger()
+
+    assert called == ["quit", "about"]
+
+
 def test_the_view_menu_is_divided_into_runs(window: MainWindow) -> None:
     """Eleven items in one undivided column is a list nobody reads to the end
     of, and the grouping is declared in the bindings table so that a reordered
