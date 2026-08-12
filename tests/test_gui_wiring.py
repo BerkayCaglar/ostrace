@@ -449,13 +449,13 @@ class TestChoosingATheme:
         application palette is global and `colorSchemeChanged` reaches every
         window still alive in the process, so in a suite that has built a
         hundred of them the signal proves whatever the last one to answer
-        happened to think. One window's rule is what is under test.
+        happened to think. One policy's rule is what is under test.
         """
         app = QApplication.instance()
         assert isinstance(app, QApplication)
 
         window.toggle_dark_mode(dark=True)
-        window._on_color_scheme_changed(Qt.ColorScheme.Light)
+        window.theme_policy._on_system_scheme_changed(Qt.ColorScheme.Light)
 
         chosen = palette_for(Scheme.DARK).base().color()
         assert app.palette().base().color() == chosen, "the application followed the system anyway"
@@ -471,7 +471,7 @@ class TestChoosingATheme:
         app = QApplication.instance()
         assert isinstance(app, QApplication)
 
-        window._on_color_scheme_changed(Qt.ColorScheme.Dark)
+        window.theme_policy._on_system_scheme_changed(Qt.ColorScheme.Dark)
 
         expected = palette_for(Scheme.DARK).base().color()
         assert app.palette().base().color() == expected
@@ -501,6 +501,25 @@ class TestChoosingATheme:
         reopened = MainWindow()
         assert reopened.scheme is Scheme.DARK
         assert reopened.action_dark_mode.isChecked()
+
+    def test_a_remembered_choice_still_outranks_the_system(self, window: MainWindow) -> None:
+        """Restoring is not a weaker kind of choosing. It is the same choice,
+        made in an earlier session and still standing.
+
+        Without that, the preference survives the restart and is then thrown
+        away by the first system switch after it -- so the window opens in the
+        theme the user asked for and abandons it the moment their machine
+        changes, which reads as the setting not working at all.
+
+        Measured: leaving the flag out of `restore` left all 387 GUI tests
+        green.
+        """
+        window.toggle_dark_mode(dark=True)
+        reopened = MainWindow()
+
+        reopened.theme_policy._on_system_scheme_changed(Qt.ColorScheme.Light)
+
+        assert reopened.scheme is Scheme.DARK, "the system overruled a standing choice"
 
 
 class TestTheMinimapKnowsWhereTheReaderIs:
