@@ -37,7 +37,6 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -58,6 +57,7 @@ from ostrace import __version__
 from ostrace.errors import OstraceError
 from ostrace.exporters.base import escape
 from ostrace.gui import icons
+from ostrace.gui.actions import build_actions, build_menus, menu_items
 from ostrace.gui.columns import COLUMNS
 from ostrace.gui.filters import Filter, remember
 from ostrace.gui.live import CaptureThread
@@ -66,7 +66,7 @@ from ostrace.gui.markers import when
 from ostrace.gui.models import Find, RecordModel
 from ostrace.gui.pump import Pump
 from ostrace.gui.settings import Layout, WindowSettings
-from ostrace.gui.shortcuts import BINDINGS, RELOCATED, key_table, sequences
+from ostrace.gui.shortcuts import key_table
 from ostrace.gui.theme import Scheme, apply_theme, scheme_for
 from ostrace.gui.timeinput import EXAMPLES, parse_jump
 from ostrace.gui.widgets.banner import Banner, Notice
@@ -87,6 +87,8 @@ from ostrace.storage.capture import Capture, open_capture
 if TYPE_CHECKING:
     from datetime import datetime
 
+    # Only ever annotations here now that the action factory owns construction.
+    from PySide6.QtGui import QAction, QCloseEvent, QShowEvent
     from PySide6.QtWidgets import QWidget as QWidgetType
 
     from ostrace.sources.base import LogSource
@@ -157,24 +159,10 @@ _DEFAULT_SIZE = QSize(1280, 800)
 _MIN_USABLE = 200
 
 
-def _submenu(action: QAction) -> QMenu | None:
-    """The submenu an action opens, or ``None`` if it is a plain item."""
-    menu = action.menu()
-    return menu if isinstance(menu, QMenu) else None
-
-
 #: What the banner says while the device is gone and the source is retrying.
-#: A constant because the window has to recognise its own message to know
-#: whether the banner it is about to hide is still this one.
+#: A constant because it is the one sentence a test asserts by name -- the
+#: window itself no longer recognises it by wording, only by `Notice`.
 RECONNECT_MESSAGE = "The device stopped answering. Reconnecting — records arriving now are lost."
-
-#: The macOS menu role for each relocated action. Here rather than in
-#: `shortcuts`, which is Qt-light on purpose and describes keys rather than
-#: where a platform decides to put things.
-_ROLES = {
-    "quit": QAction.MenuRole.QuitRole,
-    "about": QAction.MenuRole.AboutRole,
-}
 
 
 class MainWindow(QMainWindow):
@@ -586,6 +574,12 @@ class MainWindow(QMainWindow):
         self.action_export.triggered.connect(self.export_capture)
         self.action_doctor.triggered.connect(self.show_doctor)
         self.action_keys.triggered.connect(self.show_keys)
+        # The two macOS relocates, wired here with the rest rather than beside
+        # their construction. Where a platform puts an item is the factory's
+        # business; what the item does is this window's, and that is the whole
+        # split.
+        self.action_quit.triggered.connect(self.close)
+        self.action_about.triggered.connect(self.show_about)
         self.capture_state.connect(self._on_capture_state)
 
     def clear_marks(self) -> None:
@@ -777,136 +771,25 @@ class MainWindow(QMainWindow):
     # -- actions ---------------------------------------------------------
 
     def _build_actions(self) -> None:
-        """Build every action from `gui.shortcuts.BINDINGS`.
+        """Build every action, and give each one its typed attribute.
 
-        The bindings table is also the help sheet, so a key that changes here
-        changes the documentation in the same commit or not at all. klogg's
-        fourth trap is a key table in a manual that drifted from the code.
-
-        ``_action`` refuses to create one without a menu role, which is the
-        point: a rule enforced by the only constructor survives someone adding
-        a menu item in a hurry.
+        The attributes are declared above and assigned here, which is the mypy
+        contract standing in for a Mac: a menu item renamed in the bindings
+        table stops resolving, on every platform, rather than silently landing
+        in the wrong macOS menu where only a Mac would see it.
         """
-        self.actions_by_name: dict[str, QAction] = {}
-        for binding in BINDINGS:
-            keys = sequences(binding)
-            action = self._action(binding.text, keys[0], checkable=binding.checkable)
-            # Before anything is connected, so a default state is a default
-            # rather than an action taken on a window still being built.
-            action.setChecked(binding.checked)
-            if len(keys) > 1:
-                # Aliases are real bindings, not documentation. A menu shows
-                # one; `setShortcuts` registers all of them.
-                action.setShortcuts(keys)
-            action.setToolTip(binding.description)
-            setattr(self, f"action_{binding.name}", action)
-            self.actions_by_name[binding.name] = action
-
-        # Qt relocates these on macOS by matching their text, and should: that
-        # is the native behaviour a Mac user expects. The role is the reason
-        # they are built here rather than in the loop above; the keys still come
-        # from `RELOCATED`, so `unbound` and the help sheet can see them.
-        for binding in RELOCATED:
-            action = self._action(binding.text, role=_ROLES[binding.name])
-            keys = [sequence for sequence in sequences(binding) if not sequence.isEmpty()]
-            if keys:
-                action.setShortcuts(keys)
-            action.setToolTip(binding.description)
-            setattr(self, f"action_{binding.name}", action)
-            self.actions_by_name[binding.name] = action
-
-        self.action_quit.triggered.connect(self.close)
-        self.action_about.triggered.connect(self.show_about)
-
-    def _action(
-        self,
-        text: str,
-        shortcut: QKeySequence | QKeySequence.StandardKey | None = None,
-        *,
-        role: QAction.MenuRole = QAction.MenuRole.NoRole,
-        checkable: bool = False,
-    ) -> QAction:
-        """Build one action. ``role`` defaults to *not moving*, never to the heuristic."""
-        action = QAction(text, self)
-        action.setMenuRole(role)
-        action.setCheckable(checkable)
-        # The toolbar and the menus share these objects, and an icon put on one
-        # for the toolbar's sake is drawn by the other in the column a
-        # checkmark occupies. The two jump buttons carry chevrons, so `Next
-        # Error` and `Previous Error` appeared in the View menu with what reads
-        # as a tick and an indicator beside them, next to a `Dark Mode` whose
-        # tick is real. Icons belong on the toolbar, where they are the label.
-        action.setIconVisibleInMenu(False)
-        if shortcut is not None:
-            # StandardKey maps Ctrl to Cmd on macOS *and* knows where the two
-            # platforms genuinely differ, which a literal string cannot.
-            action.setShortcut(QKeySequence(shortcut))
-        self.addAction(action)
-        return action
+        self.actions_by_name = build_actions(self)
+        for name, action in self.actions_by_name.items():
+            setattr(self, f"action_{name}", action)
 
     def _build_menus(self) -> None:
-        bar = self.menuBar()
-
-        # Each menu is constructed with this window as its parent and added by
-        # object, never by `bar.addMenu("title")`. That convenience overload
-        # returns a menu Python owns, so the local reference is the only thing
-        # keeping it alive and the menu dies at the end of this method. The
-        # failure surfaces nowhere near here: the menu bar keeps an action
-        # whose `menu()` hands back a fresh wrapper around freed memory, which
-        # reports itself valid right up until it is used.
-        self.menus = {
-            name: QMenu(title, self)
-            for name, title in (
-                ("capture", "&Capture"),
-                ("edit", "&Edit"),
-                ("view", "&View"),
-                ("help", "&Help"),
-            )
-        }
-        for menu in self.menus.values():
-            bar.addMenu(menu)
-
-        # A separator wherever the group changes. Declared in the bindings table
-        # rather than inserted here by name, so a reordered or added item lands
-        # in the right run without anybody remembering to move a divider: the
-        # View menu is eleven items and was one undivided column of them.
-        seen: dict[str, str] = {}
-        for binding in BINDINGS:
-            menu = self.menus[binding.menu]
-            if binding.menu in seen and seen[binding.menu] != binding.group:
-                menu.addSeparator()
-            seen[binding.menu] = binding.group
-            menu.addAction(self.actions_by_name[binding.name])
-
-        self.menus["capture"].addSeparator()
-        self.menus["capture"].addAction(self.action_quit)
-        self.menus["help"].addSeparator()
-        self.menus["help"].addAction(self.action_about)
+        self.menus = build_menus(self.menuBar(), self.actions_by_name, self)
 
     def menu_items(self) -> list[QAction]:
-        """Every clickable item in the menu bar, for the menu-role test.
-
-        Walked from the menu bar rather than filtered out of
-        ``findChildren(QAction)``: that returns widget actions too -- each
-        ``QLineEdit`` with a clear button contributes one -- and none of those
-        can be relocated by a menu heuristic because none of them is in a menu.
-        Asking the menu bar what is in it is both narrower and truer.
-        """
-        items: list[QAction] = []
-        # `QAction.menu()` is typed as returning QObject, so every result is
-        # narrowed rather than assumed -- and `isinstance` is also the check
-        # that separates a submenu from a plain item.
-        pending = [menu for action in self.menuBar().actions() if (menu := _submenu(action))]
-        while pending:
-            for action in pending.pop().actions():
-                if action.isSeparator():
-                    continue
-                submenu = _submenu(action)
-                if submenu is not None:
-                    pending.append(submenu)
-                else:
-                    items.append(action)
-        return items
+        """Every clickable item in the menu bar, for the menu-role test."""
+        # The module function of the same name; this method is what the tests
+        # and the window itself ask.
+        return menu_items(self.menuBar())
 
     # -- opening a capture -----------------------------------------------
 
