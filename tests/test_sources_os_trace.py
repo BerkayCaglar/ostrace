@@ -36,7 +36,7 @@ from ostrace.errors import (
 )
 from ostrace.model import DeviceInfo, Gap, Level, Platform, Record
 from ostrace.sources import os_trace
-from ostrace.sources.base import RECONNECTING, STREAMING
+from ostrace.sources.base import CaptureState
 from ostrace.sources.os_trace import OsTraceSource, ReconnectPolicy
 
 if TYPE_CHECKING:
@@ -738,7 +738,11 @@ class TestSayingSoWhileItHappens:
 
         asyncio.run(take(source, 3))
 
-        assert states == [STREAMING, RECONNECTING, STREAMING]
+        assert states == [
+            CaptureState.STREAMING,
+            CaptureState.RECONNECTING,
+            CaptureState.STREAMING,
+        ]
 
     def test_a_capture_with_no_outage_says_streaming_once(
         self, seam: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch
@@ -750,7 +754,7 @@ class TestSayingSoWhileItHappens:
 
         asyncio.run(take(source, 2))
 
-        assert states == [STREAMING]
+        assert states == [CaptureState.STREAMING]
 
     def test_a_listener_that_raises_does_not_cost_the_capture(
         self, seam: types.SimpleNamespace, monkeypatch: pytest.MonkeyPatch

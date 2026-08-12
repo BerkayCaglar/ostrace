@@ -82,7 +82,7 @@ from ostrace.gui.widgets.status_bar import StatusBar
 from ostrace.gui.windows.doctor import open_doctor
 from ostrace.model import DeviceInfo, Record
 from ostrace.paths import export_stem, sessions_dir
-from ostrace.sources.base import RECONNECTING, STREAMING
+from ostrace.sources.base import CaptureState
 from ostrace.storage.capture import Capture, open_capture
 
 if TYPE_CHECKING:
@@ -1207,11 +1207,19 @@ class MainWindow(QMainWindow):
         self.start_capture(source)
 
     def _build_source(self) -> LogSource:
-        """The live source. Imported here, not at module scope.
+        """The live source, imported here rather than at module scope.
 
-        `ostrace.sources.os_trace` refuses to be imported under ``-O``, and it
-        pulls in pymobiledevice3 -- about forty packages. Neither belongs in the
-        path that merely opens a saved capture.
+        The reason given for that used to be that `ostrace.sources.os_trace`
+        refuses to be imported under ``-O`` and pulls in pymobiledevice3, about
+        forty packages. Both are false. Measured: importing it pulls **no**
+        pymobiledevice3 modules -- the library is imported inside
+        `_stream_once` -- and the ``-O`` guard refuses at construction, not at
+        import. With this window already imported, deferring saves one module
+        and 1.2 ms.
+
+        It stays deferred here because hoisting it changes what `ostrace.gui`
+        depends on at import time, which is a decision for the packages moving
+        this code rather than for the commit correcting the sentence.
         """
         from ostrace.sources.os_trace import OsTraceSource  # noqa: PLC0415
 
@@ -1426,9 +1434,9 @@ class MainWindow(QMainWindow):
         Disconnect rather than a way out: the source is already retrying, and
         the only decision left to the user is whether to stop waiting.
         """
-        if state == RECONNECTING:
+        if state == CaptureState.RECONNECTING:
             self.banner.show_message(RECONNECT_MESSAGE, "Disconnect", on_action=self.stop_capture)
-        elif state == STREAMING and self.banner.text == RECONNECT_MESSAGE:
+        elif state == CaptureState.STREAMING and self.banner.text == RECONNECT_MESSAGE:
             # Only its own message. A pause banner raised during the outage is
             # a different state that is still true, and clearing it here would
             # leave the view frozen with nothing on screen saying why.

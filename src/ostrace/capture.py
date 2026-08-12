@@ -76,6 +76,17 @@ async def capture(  # noqa: PLR0913 -- six knobs and a source, all keyword-only
     thread is running this coroutine, so an implementation that hands work to
     another thread should do the cheapest possible thing here.
 
+    One known limit, in the sidecar rather than in the records. ``started_at``
+    and ``ended_at`` are both stamped from the ``DeviceInfo`` read at the
+    *first* connect, while the source refreshes its identity on every
+    reconnect -- deliberately, because a device that travelled or crossed a
+    daylight-saving boundary has a new UTC offset and its records must carry
+    it. So a capture that both reconnects and changes offset writes the new
+    one on its records and the old one on ``ended_at``. The obvious fix is not
+    taken: awaiting the source inside this function's ``finally`` raises
+    ``CancelledError`` at the await when the capture was cancelled, which is
+    exactly the path the ``finally`` exists to survive.
+
     ``on_open`` is called once, with the session path, as soon as there is one.
     Only the result carries it otherwise -- and a cancelled capture has no
     result, which left a caller that stopped one with no way to find the file
