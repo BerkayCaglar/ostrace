@@ -17,9 +17,14 @@ this repository, beside the design notes. **All eight of its packages have
 landed** — P (public presence and application identity), A (contract safety
 nets), B (the source seam), C (GUI mechanics), D (the capture, follow and theme
 controllers), E (the view layer), F (the storage facade) and G (the public
-surface and the paper trail). Nothing structural is outstanding. What 0.2.0 has
-not had is a run on hardware: the viewer was exercised on a real device after C
-and not since, so D, E and F have only ever met a fixture.
+surface and the paper trail). Nothing structural is outstanding.
+
+**All of it has now been on hardware**, on 2026-08-12: the eleven device tests,
+a capture and an export end to end, and the viewer driven by hand through a live
+capture and a gap. What that session did not cover is a multi-hour capture, the
+three wire-level questions in the plan's §6 — a cancel landing inside the
+lockdown handshake, double-close tolerance, a genuinely hanging identify — and
+anything needing a Mac or a Linux desktop.
 
 The window went from 2,155 lines to 1,817 across C, D and E, and five
 controllers came out of it — `gui/settings.py`, `gui/actions.py`,
