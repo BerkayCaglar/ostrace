@@ -229,12 +229,12 @@ class TestClosingACapture:
         """Disconnect releases the device and finalises the session. Doing that
         silently because somebody asked for an empty window would throw away a
         recording in progress."""
-        window._capture_thread = object()  # type: ignore[assignment]
+        window.capture_controller._thread = object()  # type: ignore[assignment]
         try:
             window.close_capture()
             assert "still running" in window.banner.text
         finally:
-            window._capture_thread = None
+            window.capture_controller._thread = None
 
 
 # -- the macOS menu heuristic ------------------------------------------------

@@ -15,7 +15,7 @@ import gc
 import pytest
 
 from ostrace.model import Level, Record
-from tests.helpers import ERRORS, MIXED, ScriptedSource, load
+from tests.helpers import ERRORS, MIXED, load
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
@@ -23,9 +23,9 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
+from ostrace.gui.capture_controller import Lifecycle
 from ostrace.gui.columns import Column
 from ostrace.gui.filters import Filter
-from ostrace.gui.live import CaptureThread
 from ostrace.gui.theme import Scheme, contrast_ratio, palette_for, severity_for
 from ostrace.gui.windows.main import MainWindow
 
@@ -119,9 +119,11 @@ def test_a_parked_capture_offers_the_doctor(
     """
     opened: list[bool] = []
     monkeypatch.setattr(MainWindow, "show_doctor", lambda self: opened.append(True))
-    thread = CaptureThread(ScriptedSource([]))
 
-    window._park(thread)
+    # The sentence belongs to the window and is raised from the lifecycle it is
+    # told about, so that is what this drives -- the controller's own parking
+    # is tested where the mechanics are.
+    window._on_lifecycle(Lifecycle.PARKED)
 
     assert window.banner._action.text() == "Diagnose…"
     window.banner.act()
@@ -532,5 +534,7 @@ class TestTheMinimapKnowsWhereTheReaderIs:
         window.table.show()
         QApplication.processEvents()
 
-        assert window._pump is None, "a capture was running, so this proves nothing"
+        assert window.capture_controller._pump is None, (
+            "a capture was running, so this proves nothing"
+        )
         assert window.minimap._viewport != (0, -1)

@@ -10,6 +10,7 @@ Why the code looks the way it does. Format is [MADR 4.0.0](https://adr.github.io
 | [0004](0004-pyside6-with-custom-filtered-model.md) | PySide6 with a hand-written filtered table model | accepted |
 | [0005](0005-agent-bundle-export-format.md) | Export an "agent bundle" of flat text files, not a single document | accepted |
 | [0006](0006-defer-wifi-capture.md) | Defer network (Wi-Fi) capture to a later release | accepted |
+| [0007](0007-capture-lifecycle-the-pump-outlives-the-thread.md) | Capture lifecycle: no shared session class, and the pump outlives the thread | accepted |
 
 ## Adding one
 

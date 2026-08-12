@@ -363,7 +363,7 @@ class TestTheBannersThatEndADeadEnd:
         window = MainWindow()
         window.model.append([make_record(index) for index in range(40)])
 
-        window._on_capture_finished(None)
+        window._on_capture_finished()
 
         assert "40" in window.banner.text
         assert "Export" in window.banner._action.text()

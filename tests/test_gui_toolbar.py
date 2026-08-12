@@ -390,12 +390,12 @@ def test_the_held_device_is_the_one_that_answered_not_the_one_that_was_picked(
     window.device_button._on_found([DeviceSummary("A-UDID", "usb")])
     assert window.device_button.udid is None, "the selector is supposed to be empty here"
 
-    window._capture_thread = object()  # type: ignore[assignment]
+    window.capture_controller._thread = object()  # type: ignore[assignment]
     try:
         window._on_identified(DEVICE)
         assert window.device_button.busy_udid == DEVICE.udid
     finally:
-        window._capture_thread = None
+        window.capture_controller._thread = None
 
 
 def test_stopping_a_selector_that_never_scanned_is_not_an_error(qt_app: object) -> None:
@@ -420,7 +420,7 @@ def test_a_cold_start_says_what_the_program_is_for(window: MainWindow) -> None:
 
 def test_a_running_capture_says_the_connection_is_fine(window: MainWindow) -> None:
     """A quiet device and a failed connection look identical from here."""
-    window._capture_thread = object()  # type: ignore[assignment]
+    window.capture_controller._thread = object()  # type: ignore[assignment]
     window._update_placeholder()
 
     assert window.table._heading == "Waiting for the device"

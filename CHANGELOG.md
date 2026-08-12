@@ -56,6 +56,15 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Fixed
 
+- **A capture that would not release the device grew memory without bound.**
+  Disconnect waits for the capture thread, bounded, so that a stuck device
+  cannot freeze the window — and when that wait timed out the view's pump was
+  stopped while the thread went on producing records into a queue nobody was
+  draining, at up to 1,600 a second. The pump is now kept alive and paused
+  until the thread genuinely ends, which bounds the queue and reports what it
+  drops the same way a paused view already does: those records are in the
+  session file, not lost.
+
 - **Resuming a paused view took down whatever notice was on screen**, including
   one that was still true. A reader who paused, watched the device drop while
   paused, and then resumed was left with a device that was still gone and

@@ -58,13 +58,12 @@ from ostrace.errors import OstraceError
 from ostrace.exporters.base import escape
 from ostrace.gui import icons
 from ostrace.gui.actions import build_actions, build_menus, menu_items
+from ostrace.gui.capture_controller import CaptureController, Lifecycle
 from ostrace.gui.columns import COLUMNS
 from ostrace.gui.filters import Filter, remember
-from ostrace.gui.live import CaptureThread
 from ostrace.gui.loader import CaptureLoader
 from ostrace.gui.markers import when
 from ostrace.gui.models import Find, RecordModel
-from ostrace.gui.pump import Pump
 from ostrace.gui.settings import Layout, WindowSettings
 from ostrace.gui.shortcuts import key_table
 from ostrace.gui.theme import Scheme, apply_theme, scheme_for
@@ -119,10 +118,6 @@ _SEPARATOR = " — "
 #: Windows' is fractional.
 _TABLE_STRETCH = 3
 _DETAIL_STRETCH = 1
-
-#: How long to wait for the capture thread to release the device. Its teardown
-#: is a socket close rather than a network round trip, so this is generous.
-_STOP_TIMEOUT_MS = 5_000
 
 #: How near the bottom still counts as "at the bottom" for auto-follow. A few
 #: pixels of slack, because a scrollbar rarely lands exactly on its maximum.
@@ -244,11 +239,10 @@ class MainWindow(QMainWindow):
         self._loader: CaptureLoader | None = None
         #: When the tail last scrolled. See `_follow`.
         self._scrolled = QElapsedTimer()
-        self._capture_thread: CaptureThread | None = None
-        #: Capture threads that outlived their stop wait. See `_park`.
-        self._parked: list[CaptureThread] = []
-        self._pump: Pump | None = None
+        # `_replace_model` builds the first model, so the controller is made
+        # after it and pointed at each replacement as it happens.
         self._replace_model(keep_filter=True)
+        self.capture_controller = CaptureController(self.model, parent=self)
         self.minimap.row_requested.connect(self.go_to)
 
         self._filter_debounce = QTimer(self)
@@ -578,6 +572,13 @@ class MainWindow(QMainWindow):
         # their construction. Where a platform puts an item is the factory's
         # business; what the item does is this window's, and that is the whole
         # split.
+        self.capture_controller.state_changed.connect(self._on_lifecycle)
+        self.capture_controller.identified.connect(self._on_identified)
+        self.capture_controller.session_at.connect(self._adopt_session)
+        self.capture_controller.failed.connect(self._on_capture_failed)
+        self.capture_controller.finished.connect(self._on_capture_finished)
+        self.capture_controller.rate_changed.connect(self._on_rate)
+        self.capture_controller.overflowed.connect(self._on_pause_overflow)
         self.action_quit.triggered.connect(self.close)
         self.action_about.triggered.connect(self.show_about)
         self.capture_state.connect(self._on_capture_state)
@@ -650,7 +651,8 @@ class MainWindow(QMainWindow):
         with nothing printed -- and closing the window during a scan is exactly
         how that reference gets dropped.
         """
-        self.stop_capture()
+        self.capture_controller.shutdown()
+        self.minimap.stop()
         self.device_button.stop()
         self._save_layout()
         super().closeEvent(event)
@@ -927,7 +929,7 @@ class MainWindow(QMainWindow):
         because somebody asked for an empty window would throw away a recording
         in progress.
         """
-        if self._capture_thread is not None:
+        if self.capture_controller.is_running:
             self.banner.show_message(
                 "A capture is still running. Disconnect to finish it, and the "
                 "window can be emptied after that.",
@@ -971,7 +973,7 @@ class MainWindow(QMainWindow):
         convention on every desktop and the order that survives a taskbar
         button too narrow to show all of it.
         """
-        if self._capture_thread is not None:
+        if self.capture_controller.is_running:
             subject = (
                 _CAPTURING_FROM.format(device=self._device_name)
                 if self._device_name
@@ -1077,26 +1079,15 @@ class MainWindow(QMainWindow):
         the moment the window closed. ``destination`` overrides where that file
         goes; by default `paths` decides, as it does for the CLI.
         """
-        self.stop_capture()
-
         self._replace_model(keep_filter=True)
         self.capture = None
         # Not known until the device answers, which is a round trip. The title
         # says so rather than guessing, and `_on_identified` fills it in.
         self._device_name = None
 
-        self._capture_thread = CaptureThread(source, destination=destination)
-        self._pump = Pump(self._capture_thread.queue, self.model, parent=self)
-        self._pump.rate_changed.connect(self._on_rate)
-        self._pump.overflowed.connect(self._on_pause_overflow)
-        self._capture_thread.identified.connect(self._on_identified)
-        self._capture_thread.failed.connect(self._on_capture_failed)
-        self._capture_thread.completed.connect(self._on_capture_finished)
-
-        self._capture_thread.start()
-        self._pump.start()
+        self.capture_controller.set_model(self.model)
+        self.capture_controller.start(source, destination=destination)
         self.minimap.start()
-        self._set_capturing(capturing=True)
 
     def stop_capture(self) -> None:
         """Release the device.
@@ -1106,26 +1097,10 @@ class MainWindow(QMainWindow):
         a control that reads as the opposite of "pause" invites the user to
         press it expecting to be able to press it back.
         """
-        if self._capture_thread is None:
-            return
-        thread = self._capture_thread
-        thread.stop()
-        # Bounded: the capture's own teardown is a socket close, not a network
-        # round trip. Waiting at all is what stops a second capture starting
-        # while the first still holds the device.
-        if thread.wait(_STOP_TIMEOUT_MS):
-            # Only once it has really ended: until then the session file is
-            # still being written and the sidecar is not finalised.
-            self._adopt_session(thread.path)
-        else:
-            self._park(thread)
-        if self._pump is not None:
-            self._pump.stop()
+        self.capture_controller.stop()
         self.minimap.stop()
-        self._capture_thread = None
-        self._set_capturing(capturing=False)
 
-    def _adopt_session(self, path: Path | None) -> None:
+    def _adopt_session(self, path: object) -> None:
         """Make the capture that was just recorded the one Export offers.
 
         A live capture writes every record through the same
@@ -1138,8 +1113,11 @@ class MainWindow(QMainWindow):
 
         The file rather than the model, deliberately: the view holds a bounded
         number of rows and the file holds all of them.
+
+        Opening it stays here rather than in the controller, because the
+        failure is a sentence and sentences are this window's.
         """
-        if path is None:
+        if not isinstance(path, Path):
             return  # cancelled before it opened one: there is genuinely nothing
         try:
             self.capture = open_capture(path)
@@ -1153,42 +1131,9 @@ class MainWindow(QMainWindow):
         # it; until now the GUI never said at all.
         self._retitle()
 
-    def _park(self, thread: CaptureThread) -> None:
-        """Keep a capture thread that outlived the wait above.
-
-        The wait is bounded so that a device which will not let go cannot
-        freeze the window -- which means it can time out, and clearing the
-        reference would then drop the last one to a *running* ``QThread``. That
-        is not a leak. Qt's destructor calls ``qFatal`` on a running thread, so
-        the window would not report a stuck capture, it would take the process
-        down with it. A parked thread costs one small object instead.
-
-        The user is told, because the consequence is theirs: the device is
-        still held, so the next capture finds the relay busy.
-        """
-        self._parked.append(thread)
-        # Queued, because `self` lives on the GUI thread and the signal is
-        # emitted on the capture's: the object is destroyed by this thread once
-        # the other has genuinely ended, and never from inside its own `run`.
-        thread.finished.connect(self._reap)
-        # With an action, because the consequence is one the user will meet
-        # later and elsewhere: the next capture failing on a busy relay. Doctor
-        # is what tells them whether the device is free again.
-        self.banner.show_message(
-            "The capture has not released the device yet. It is still shutting "
-            "down, and a new capture may fail until it has.",
-            "Diagnose…",
-            on_action=self.show_doctor,
-        )
-
-    def _reap(self) -> None:
-        """Let go of every parked thread that has actually finished."""
-        self._parked = [thread for thread in self._parked if thread.isRunning()]
-
     def set_paused(self, paused: bool) -> None:
         """Freeze the view. The device is not consulted."""
-        if self._pump is not None:
-            self._pump.set_paused(paused)
+        self.capture_controller.set_paused(paused)
         if paused:
             self.banner.show_message(
                 "The view is paused. The capture is still running and still "
@@ -1203,6 +1148,28 @@ class MainWindow(QMainWindow):
             # resumed was left with a device that was still gone and nothing
             # on screen saying so.
             self.banner.hide()
+
+    def _on_lifecycle(self, state: object) -> None:
+        """Everything the window shows about a capture, from one value.
+
+        The controller says where the capture is; this decides what that looks
+        like. `PARKED` is the one state with a sentence of its own -- the
+        device is still held, and the consequence is the user's: the next
+        capture may find the relay busy.
+        """
+        if not isinstance(state, Lifecycle):  # pragma: no cover - the signal carries one
+            return
+        if state is Lifecycle.PARKED:
+            # With an action, because the consequence is one the user will meet
+            # later and elsewhere. Doctor is what tells them whether the device
+            # is free again.
+            self.banner.show_message(
+                "The capture has not released the device yet. It is still shutting "
+                "down, and a new capture may fail until it has.",
+                "Diagnose…",
+                on_action=self.show_doctor,
+            )
+        self._set_capturing(capturing=self.capture_controller.is_running)
 
     def _set_capturing(self, *, capturing: bool) -> None:
         self.action_capture.setEnabled(not capturing)
@@ -1236,7 +1203,7 @@ class MainWindow(QMainWindow):
     def _on_identified(self, device: object) -> None:
         if isinstance(device, DeviceInfo):
             self.status.set_device(device)
-            if self._capture_thread is not None:
+            if self.capture_controller.is_running:
                 # Which device is actually held, rather than which one was
                 # picked. They are the same when the user chose one and they
                 # are not when nobody did -- and the one a scan must leave
@@ -1273,6 +1240,7 @@ class MainWindow(QMainWindow):
         Disconnect rather than a way out: the source is already retrying, and
         the only decision left to the user is whether to stop waiting.
         """
+        self.capture_controller.link_state(CaptureState(state))
         if state == CaptureState.RECONNECTING:
             self.banner.show_message(
                 RECONNECT_MESSAGE,
@@ -1295,8 +1263,8 @@ class MainWindow(QMainWindow):
         self._doctor = open_doctor(self.device_button.udid, self)
 
     def _on_capture_failed(self, message: str) -> None:
-        """The capture died. Wind the machinery down as if Disconnect had been
-        pressed, because from here on nothing is going to press it.
+        """The capture died. The controller has already wound the machinery
+        down; what is left is telling the user.
 
         `Diagnose…` rather than `Retry`, which is what this offered until the
         Doctor window existed. A capture that ran and then died is a different
@@ -1305,25 +1273,22 @@ class MainWindow(QMainWindow):
         to find out *why* -- which is almost never in this program. It is a
         service that stopped, a device that locked, or a cable half out.
         """
-        self.stop_capture()
+        self.minimap.stop()
         self.banner.show_message(
             f"Capture stopped: {message}",
             "Diagnose…",
             on_action=self.show_doctor,
         )
 
-    def _on_capture_finished(self, result: object) -> None:
+    def _on_capture_finished(self) -> None:
         """The capture ended by itself -- the device was unplugged, or a limit
         was reached.
 
-        The same wind-down as Disconnect, and for the same reasons: the pump
-        and the overview timer are still running against a stream that has
-        stopped, and the session on disk is finished and worth picking up. The
-        thread has already ended by the time this queued signal arrives, so the
-        wait inside `stop_capture` returns at once.
+        The controller has already wound down and reported where the session
+        went. What is left for the window is the overview timer, which is still
+        running against a stream that has stopped, and the sentence.
         """
-        del result  # `stop_capture` reads the path off the thread, which is the same one
-        self.stop_capture()
+        self.minimap.stop()
         # The end of a capture is the moment an export is worth offering, and
         # until now it was a moment nothing marked at all: the records stopped
         # arriving and the window said so in no way a person notices. The
@@ -1547,7 +1512,10 @@ class MainWindow(QMainWindow):
         if self.capture is not None:
             return ExportDialog(self.capture, self)
 
-        path = self._capture_thread.path if self._capture_thread is not None else None
+        # A plain attribute read on the controller, not a signal: this runs
+        # while the capture is live and a queued signal would need the event
+        # loop to have turned first.
+        path = self.capture_controller.path
         if path is None:
             self.banner.show_message(
                 "There is nothing to export yet. Open a capture, or record one from a device.",
@@ -1938,7 +1906,7 @@ class MainWindow(QMainWindow):
         """
         if self.model.retained > 0:
             self.table.set_placeholder("")
-        elif self._capture_thread is not None:
+        elif self.capture_controller.is_running:
             self.table.set_placeholder(
                 "Waiting for the device",
                 "Connected and listening. Records appear as the device emits them.",

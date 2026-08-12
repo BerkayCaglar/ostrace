@@ -187,7 +187,9 @@ class TestADeviceThatWillNotLetGo:
         # genuinely does not end is the only honest way to time one out.
         assert controller._thread is not None
         controller._thread.wait(1_000)
-        controller._thread = thread
+        # Not a `CaptureThread`: what is under test is what this object does
+        # when a wait times out, and the real one cannot be made to.
+        controller._thread = thread  # type: ignore[assignment]
         thread.start()
         return thread
 
