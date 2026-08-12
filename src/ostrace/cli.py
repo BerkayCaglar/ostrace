@@ -301,7 +301,13 @@ def _export(args: argparse.Namespace) -> int:
     # capture, a hole in it, a damaged line -- and "print only the destination"
     # is a statement about stdout, which these were never on. Suppressing them
     # would make the quiet form the one that hides the bad news.
-    for warning in export_notes(result, truncated=truncated, malformed=capture.malformed):
+    meta = capture.meta
+    for warning in export_notes(
+        result,
+        truncated=truncated,
+        malformed=capture.malformed,
+        source=meta.source if meta is not None else None,
+    ):
         print(f"note: {warning}", file=sys.stderr)
     print(result.destination)
     return EXIT_OK

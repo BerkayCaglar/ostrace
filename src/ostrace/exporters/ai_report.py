@@ -22,16 +22,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ostrace.analysis.scan import ABSENT, MAX_TEMPLATES, ScanResult
+from ostrace.analysis.scan import ABSENT, MAX_TEMPLATES, ScanResult, counted
 from ostrace.exporters.base import ExportResult, escape, register
 from ostrace.exporters.plaintext import line as plain_line
-from ostrace.model import Record
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from pathlib import Path
 
-    from ostrace.model import DeviceInfo, Gap
+    from ostrace.model import DeviceInfo, Gap, Record
 
 __all__ = ["DEFAULT_BUDGET_TOKENS", "AiReportExporter"]
 
@@ -74,13 +73,10 @@ class AiReportExporter:
         destination.parent.mkdir(parents=True, exist_ok=True)
 
         scan = ScanResult()
-        number = 0
-        for item in items:
-            if isinstance(item, Record):
-                number += 1
-                scan.add(item, number)
-            else:
-                scan.add_gap(item)
+        # Nothing is written per item here -- the report is rendered from the
+        # scan afterwards -- so this walk exists only to fill it.
+        for _item in counted(items, scan):
+            pass
 
         text = render(scan, device, budget_tokens=self.budget_tokens)
         destination.write_text(text, encoding="utf-8", newline="\n")

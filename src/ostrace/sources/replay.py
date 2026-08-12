@@ -17,11 +17,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ostrace.errors import StorageError
 from ostrace.model import DeviceInfo
 from ostrace.sources.base import SourceCloseMixin
-from ostrace.storage.session import SessionMeta, SessionReader
-from ostrace.storage.spool import SpoolReader
+from ostrace.storage.capture import Capture
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -49,31 +47,26 @@ class ReplaySource(SourceCloseMixin):
         self.path = Path(path)
 
         # A session directory and a bare spool differ in exactly one way: one
-        # has metadata. Resolving that once here means the accessors below have
-        # a single thing to test, rather than each inventing its own fallback.
-        if self.path.is_dir():
-            session = SessionReader(self.path)
-            self._reader = session.spool
-            self._meta: SessionMeta | None = session.meta
-        elif self.path.is_file():
-            self._reader = SpoolReader(self.path)
-            self._meta = None
-        else:
-            msg = f"no session or spool at {self.path}"
-            raise StorageError(msg)
+        # has metadata. Which of the two this is was decided here *and* in
+        # `storage.capture`, in near-identical lines, which is the duplication
+        # that class's own docstring says it exists to prevent -- so this asks
+        # it instead of deciding again.
+        self._capture = Capture(self.path)
 
     async def device_info(self) -> DeviceInfo:
         """The device the session came from, or a placeholder for a bare spool."""
-        return self._meta.device if self._meta is not None else _UNKNOWN_DEVICE
+        meta = self._capture.meta
+        return meta.device if meta is not None else _UNKNOWN_DEVICE
 
     @property
     def started_at(self) -> datetime:
         """When the original capture began, or the epoch if unrecorded."""
-        return self._meta.started_at if self._meta is not None else _EPOCH
+        meta = self._capture.meta
+        return meta.started_at if meta is not None else _EPOCH
 
     async def stream(self) -> AsyncGenerator[Record | Gap, None]:
         """Yield everything in the session -- records and gaps -- in order."""
-        for item in self._reader.items():
+        for item in self._capture.items():
             yield item
 
     @property
@@ -83,7 +76,7 @@ class ReplaySource(SourceCloseMixin):
         Meaningful only for a recorded session; a live source has no equivalent,
         which is why it is here rather than on the protocol.
         """
-        return self._reader.truncated
+        return self._capture.truncated
 
     async def aclose(self) -> None:
         """Nothing to release: the reader opens the file per iteration."""

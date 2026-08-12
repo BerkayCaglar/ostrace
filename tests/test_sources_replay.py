@@ -49,8 +49,13 @@ class TestReplayMechanics:
         assert all(isinstance(record, Record) for record in mixed)
 
     def test_a_missing_path_is_an_error_not_an_empty_stream(self, tmp_path: Path) -> None:
-        with pytest.raises(StorageError, match="no session or spool"):
+        """The sentence is `storage.capture`'s now, and so is the hint that goes
+        with it -- which this path never had. One class decides what a capture
+        is, so it also says what is wrong when there is not one."""
+        with pytest.raises(StorageError, match="no capture at") as raised:
             ReplaySource(tmp_path / "nope.jsonl.gz")
+
+        assert raised.value.hint, "a missing file is the one error a hint can fix"
 
     def test_a_session_directory_replays_with_its_device_metadata(
         self,

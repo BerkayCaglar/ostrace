@@ -10,6 +10,7 @@ command against real data on all three operating systems in CI.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import shutil
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,7 @@ import pytest
 
 from ostrace import cli
 from ostrace.exporters import EXPORTERS
+from ostrace.storage.session import META_NAME, SPOOL_NAME
 from tests.helpers import ERRORS, MIXED, plain
 
 if TYPE_CHECKING:
@@ -303,6 +305,54 @@ class TestItSaysWhatItCouldNotRead:
         assert cli.main(["export", str(damaged), "-f", "markdown"]) == cli.EXIT_OK
 
         assert "could not be decoded" in plain(capsys.readouterr().err)
+
+    def test_a_capture_from_the_legacy_relay_says_what_is_missing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The sharpest drift the 0.2.0 analysis found, closed by writing code.
+
+        `docs/formats/session-file.md` promises that an export can say a
+        session came from the legacy `syslog_relay` -- which carries only the
+        Notice tier and no subsystem on any record -- "rather than let a reader
+        conclude the device emitted nothing at DEBUG". The field was carried
+        faithfully from disk and read by nothing, anywhere.
+
+        Synthetic on purpose, and legitimate: the session format is ours, and
+        what is under test is how a sidecar is *interpreted*, not how device
+        output is parsed. `ostrace` cannot write one of these -- ADR 0002 --
+        which is precisely why it has to be built here.
+        """
+        session = tmp_path / "legacy.ostrace"
+        session.mkdir()
+        shutil.copyfile(MIXED, session / SPOOL_NAME)
+        (session / META_NAME).write_text(
+            json.dumps(
+                {
+                    "format_version": 1,
+                    "device": {"udid": "u", "name": "Old iPhone", "product_type": "iPhone10,1"},
+                    "source": "syslog_relay",
+                    "started_at": "2026-08-08T13:00:00+03:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assert cli.main(["export", str(session), "-f", "markdown"]) == cli.EXIT_OK
+
+        err = plain(capsys.readouterr().err)
+        assert "syslog_relay" in err
+        assert "missing from the capture, not" in err
+
+    def test_an_ordinary_capture_says_nothing_about_its_source(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The other half. Every capture this program writes comes from
+        `os_trace_relay`, and a note on all of them is a note nobody reads."""
+        assert cli.main(
+            ["export", str(MIXED), "-f", "markdown", "-o", str(tmp_path / "out.md")]
+        ) == (cli.EXIT_OK)
+
+        assert "syslog_relay" not in plain(capsys.readouterr().err)
 
     def test_quiet_still_says_the_capture_was_incomplete(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

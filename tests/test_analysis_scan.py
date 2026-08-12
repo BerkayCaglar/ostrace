@@ -12,13 +12,17 @@ on, are asserted against the committed fixture at the end.
 from __future__ import annotations
 
 import datetime as dt
+from typing import TYPE_CHECKING
 
 import pytest
 
-from ostrace.analysis.scan import MAX_TEMPLATES, ScanResult, scan
-from ostrace.model import Level, Record
+from ostrace.analysis.scan import MAX_TEMPLATES, ScanResult, counted, scan
+from ostrace.model import Gap, Level, Record
 from ostrace.storage.spool import SpoolReader
 from tests.helpers import MIXED, make_gap, make_record
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class TestCounting:
@@ -257,3 +261,58 @@ def _stamped(when: dt.datetime, *, level: Level = Level.NOTICE) -> Record:
         message=base.message,
         platform=base.platform,
     )
+
+
+class TestCounted:
+    """The walk five exporters used to write out for themselves.
+
+    Six of them kept a counter, incremented it for records only and called
+    `add` or `add_gap` -- the same eight lines apiece, and the counter is the
+    line number that makes `errors.log`'s pointers mean anything.
+    """
+
+    def test_it_numbers_records_and_not_gaps(self) -> None:
+        """A gap occupies no line in the formats that number their lines, so
+        the record after one takes the next number rather than skipping it."""
+        result = ScanResult()
+        items: list[Record | Gap] = [make_record(0), make_gap(0), make_record(1)]
+
+        list(counted(items, result))
+
+        assert result.records == 2
+        assert len(result.gaps) == 1
+
+    def test_the_line_a_record_took_is_the_count_after_it(self) -> None:
+        """Which is what lets the one caller that needs the number read it off
+        the scan instead of being handed a tuple per record."""
+        result = ScanResult()
+        seen: list[int] = []
+
+        for item in counted([make_record(index) for index in range(5)], result):
+            assert isinstance(item, Record)
+            seen.append(result.records)
+
+        assert seen == [1, 2, 3, 4, 5]
+
+    def test_everything_passes_through_in_order(self) -> None:
+        """It folds on the way past; it does not filter, reorder or hold."""
+        items: list[Record | Gap] = [make_record(0), make_gap(0), make_record(1)]
+
+        assert list(counted(items, ScanResult())) == items
+
+    def test_it_does_not_materialise_its_input(self) -> None:
+        """An export may be handed a stream and `items` is consumed once, which
+        is the rule `exporters.base` states."""
+        result = ScanResult()
+        taken = 0
+
+        def source() -> Iterator[Record | Gap]:
+            nonlocal taken
+            for index in range(100):
+                taken += 1
+                yield make_record(index)
+
+        first = next(iter(counted(source(), result)))
+
+        assert isinstance(first, Record)
+        assert taken == 1, "the whole stream was pulled to yield one item"

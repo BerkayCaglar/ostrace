@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from ostrace.model import DeviceInfo, Gap, Record
+    from ostrace.storage.session import SessionMeta
 
 __all__ = ["Capture", "open_capture"]
 
@@ -50,15 +51,28 @@ class Capture:
             self._reader = SpoolReader(self.path)
 
     @property
+    def meta(self) -> SessionMeta | None:
+        """What the capture says about itself, or ``None`` for a bare spool.
+
+        The whole sidecar rather than a field at a time. Everything on it is
+        needed by somebody -- the device by the title, the source by the
+        exporters' caveat, the counts by a summary -- and adding an accessor
+        per field is how one consumer ends up reaching past this class for the
+        one nobody added yet.
+        """
+        if isinstance(self._reader, SessionReader):
+            return self._reader.meta
+        return None
+
+    @property
     def device(self) -> DeviceInfo | None:
         """Which device this came from, when the capture says.
 
         ``None`` for a bare spool, which carries no sidecar. Consumers render
         without it rather than requiring it.
         """
-        if isinstance(self._reader, SessionReader) and self._reader.meta is not None:
-            return self._reader.meta.device
-        return None
+        meta = self.meta
+        return meta.device if meta is not None else None
 
     @property
     def truncated(self) -> bool:

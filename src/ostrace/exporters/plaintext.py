@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ostrace.analysis.scan import ABSENT, ScanResult
+from ostrace.analysis.scan import ABSENT, ScanResult, counted
 from ostrace.exporters.base import ExportResult, escape, register
 from ostrace.model import Record
 
@@ -101,14 +101,10 @@ class PlaintextExporter:
         scan = ScanResult()
 
         with destination.open("w", encoding="utf-8", newline="\n") as handle:
-            number = 0
-            for item in items:
+            for item in counted(items, scan):
                 if isinstance(item, Record):
-                    number += 1
-                    scan.add(item, number)
                     handle.write(line(item) + "\n")
                 else:
-                    scan.add_gap(item)
                     handle.write(
                         gap_line(
                             f"{item.start:%H:%M:%S}",

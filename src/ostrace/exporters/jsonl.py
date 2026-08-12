@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from ostrace.analysis.scan import ScanResult
+from ostrace.analysis.scan import ScanResult, counted
 from ostrace.exporters.base import ExportResult, register
 from ostrace.model import Record
 from ostrace.storage.codec import encode_gap, encode_record
@@ -52,15 +52,8 @@ class JsonLinesExporter:
         scan = ScanResult()
 
         with destination.open("w", encoding="utf-8", newline="\n") as handle:
-            line = 0
-            for item in items:
-                if isinstance(item, Record):
-                    line += 1
-                    scan.add(item, line)
-                    payload = encode_record(item)
-                else:
-                    scan.add_gap(item)
-                    payload = encode_gap(item)
+            for item in counted(items, scan):
+                payload = encode_record(item) if isinstance(item, Record) else encode_gap(item)
                 # ensure_ascii=False keeps the file readable: device messages
                 # are full of non-ASCII, and escaping it costs bytes and eyes.
                 handle.write(json.dumps(payload, ensure_ascii=False) + "\n")

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ostrace.analysis.scan import ScanResult
+from ostrace.analysis.scan import ScanResult, counted
 from ostrace.analysis.trace import (
     DEFAULT_AFTER,
     TracePolicy,
@@ -26,14 +26,13 @@ from ostrace.analysis.trace import (
 )
 from ostrace.exporters.base import ExportResult, register
 from ostrace.exporters.plaintext import line as plain_line
-from ostrace.model import Record
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
     from pathlib import Path
 
     from ostrace.analysis.trace import Window
-    from ostrace.model import DeviceInfo, Gap
+    from ostrace.model import DeviceInfo, Gap, Record
 
 __all__ = ["TraceExporter", "render"]
 
@@ -72,7 +71,7 @@ class TraceExporter:
         # is what lets the header say how much of the capture it represents.
         # Walking twice would mean reading the session twice.
         scan = ScanResult()
-        traced = trace(_counting(items, scan), anchor=self.anchor, policy=self.policy)
+        traced = trace(counted(items, scan), anchor=self.anchor, policy=self.policy)
 
         destination.write_text(
             "\n".join(render(traced, scan, device)) + "\n",
@@ -80,18 +79,6 @@ class TraceExporter:
             newline="\n",
         )
         return ExportResult(destination=destination, files=[destination], scan=scan)
-
-
-def _counting(items: Iterable[Record | Gap], scan: ScanResult) -> Iterator[Record | Gap]:
-    """Fold each item into ``scan`` as it passes through to the tracer."""
-    line = 0
-    for item in items:
-        if isinstance(item, Record):
-            line += 1
-            scan.add(item, line)
-        else:
-            scan.add_gap(item)
-        yield item
 
 
 def render(

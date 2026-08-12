@@ -294,7 +294,13 @@ class ExportDialog(QDialog):
         if not isinstance(outcome, ExportResult):  # pragma: no cover - defensive
             return
         self.result_path = outcome.destination
-        notes = export_notes(outcome, truncated=self.capture.truncated, running=self.running)
+        meta = self.capture.meta
+        notes = export_notes(
+            outcome,
+            truncated=self.capture.truncated,
+            running=self.running,
+            source=meta.source if meta is not None else None,
+        )
         lines = [f"{outcome.records:,} records → {outcome.destination}"]
         if notes:
             lines.append("")
