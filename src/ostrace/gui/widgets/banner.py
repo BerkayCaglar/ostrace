@@ -16,6 +16,7 @@ log viewers most consistently lack.
 
 from __future__ import annotations
 
+from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal
@@ -27,7 +28,26 @@ if TYPE_CHECKING:
 
     from PySide6.QtWidgets import QWidget
 
-__all__ = ["Banner"]
+__all__ = ["Banner", "Notice"]
+
+
+class Notice(Enum):
+    """Which notice is showing, for the code that has to ask.
+
+    Only the ones somebody *identifies* are named. Twenty messages are raised
+    here and most are shown and then dismissed by the user; naming those too
+    would be a vocabulary nobody reads. A notice with no key is a notice no
+    code asks about.
+
+    A plain ``Enum`` rather than a ``StrEnum`` like
+    :class:`~ostrace.sources.base.CaptureState`: nothing carries this across a
+    Qt signal, so there is no conversion to survive and no reason to let it
+    compare equal to a string.
+    """
+
+    RECONNECTING = auto()
+    PAUSED = auto()
+    FILTER_HIDES_EVERYTHING = auto()
 
 
 class Banner(QFrame):
@@ -58,6 +78,7 @@ class Banner(QFrame):
         layout.addWidget(self._action)
 
         self._handler: Callable[[], None] | None = None
+        self._key: Notice | None = None
         self.hide()
 
     def show_message(
@@ -66,6 +87,7 @@ class Banner(QFrame):
         action: str | None = None,
         *,
         on_action: Callable[[], None] | None = None,
+        key: Notice | None = None,
     ) -> None:
         """Display ``text``, with ``action`` as the way out if there is one.
 
@@ -74,7 +96,16 @@ class Banner(QFrame):
         a filter hiding everything, a paused view, a capture that stopped --
         and matching on the text to decide what the button meant is a bug
         waiting for someone to reword a sentence.
+
+        ``key`` is that argument's other half. One strip shows one notice at a
+        time, so a caller that raised one and later wants to take it down has
+        to know whether it is still the one showing -- and the two answers
+        invented for that, a string comparison and a flag on the window, were
+        both wrong in the same direction: they recorded what had been *raised*
+        rather than what is *there*. Pass a key and ask
+        :attr:`current_key`.
         """
+        self._key = key
         self._label.setText(text)
         self._action.setText(action or "")
         self._action.setVisible(action is not None)
@@ -108,3 +139,15 @@ class Banner(QFrame):
         an unshown banner and a dismissed one identically.
         """
         return "" if self.isHidden() else self._label.text()
+
+    @property
+    def current_key(self) -> Notice | None:
+        """Which notice is on screen, or ``None`` if none is.
+
+        Read from the same ``isHidden()`` as :attr:`text`, which is what makes
+        it answer about the strip rather than about the last call: a notice
+        replaced by another, dismissed by the user, or taken down with the
+        capture stops being the current one without anybody having to remember
+        to say so.
+        """
+        return None if self.isHidden() else self._key

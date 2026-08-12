@@ -56,6 +56,20 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Fixed
 
+- **Resuming a paused view took down whatever notice was on screen**, including
+  one that was still true. A reader who paused, watched the device drop while
+  paused, and then resumed was left with a device that was still gone and
+  nothing saying so — and nothing would say so again, because the banner speaks
+  when the state *changes*. It now takes down only its own notice, which is
+  what the outage notice had always done in the other direction.
+
+- **Widening a filter took down whatever notice was on screen.** The window
+  kept a flag recording that it had raised the "all records are hidden by the
+  filter" notice, and a flag records what was *raised* rather than what is
+  *there*: anything shown afterwards inherited its dismissal. Both cases come
+  from the same missing idea — a notice now carries what it is, and a caller
+  asks the banner what is showing rather than remembering what it said.
+
 - **Every link in the README pointed at a page that does not exist on PyPI.**
   Ten of them — the troubleshooting guide, four ADRs, the design contract, the
   format contracts, `CONTRIBUTING.md`, `LICENSE` — were written relative to the

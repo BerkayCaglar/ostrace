@@ -70,7 +70,7 @@ from ostrace.gui.pump import Pump
 from ostrace.gui.shortcuts import BINDINGS, RELOCATED, key_table, sequences
 from ostrace.gui.theme import Scheme, apply_theme, scheme_for
 from ostrace.gui.timeinput import EXAMPLES, parse_jump
-from ostrace.gui.widgets.banner import Banner
+from ostrace.gui.widgets.banner import Banner, Notice
 from ostrace.gui.widgets.detail_pane import DetailPane
 from ostrace.gui.widgets.device_button import DeviceButton
 from ostrace.gui.widgets.export_dialog import ExportDialog
@@ -255,7 +255,6 @@ class MainWindow(QMainWindow):
         #: rather than pushed to from wherever the name happened to arrive.
         self._device_name: str | None = None
         self._loader: CaptureLoader | None = None
-        self._showing_filter_notice = False
         #: When the tail last scrolled. See `_follow`.
         self._scrolled = QElapsedTimer()
         self._capture_thread: CaptureThread | None = None
@@ -1113,7 +1112,6 @@ class MainWindow(QMainWindow):
         # Nothing follows to redraw it, unlike the doors that start a loader.
         self.minimap.rebuild()
         self.banner.hide()
-        self._showing_filter_notice = False
         self.status.set_device(None)
         self.status.set_rate(None)
         self._retitle()
@@ -1361,8 +1359,13 @@ class MainWindow(QMainWindow):
                 "writing every record to the session file.",
                 "Resume",
                 on_action=lambda: self.action_pause.setChecked(False),
+                key=Notice.PAUSED,
             )
-        else:
+        elif self.banner.current_key is Notice.PAUSED:
+            # Its own notice and no other. Resuming used to clear the strip
+            # outright, so a reader who paused during an outage and then
+            # resumed was left with a device that was still gone and nothing
+            # on screen saying so.
             self.banner.hide()
 
     def _set_capturing(self, *, capturing: bool) -> None:
@@ -1435,9 +1438,14 @@ class MainWindow(QMainWindow):
         the only decision left to the user is whether to stop waiting.
         """
         if state == CaptureState.RECONNECTING:
-            self.banner.show_message(RECONNECT_MESSAGE, "Disconnect", on_action=self.stop_capture)
-        elif state == CaptureState.STREAMING and self.banner.text == RECONNECT_MESSAGE:
-            # Only its own message. A pause banner raised during the outage is
+            self.banner.show_message(
+                RECONNECT_MESSAGE,
+                "Disconnect",
+                on_action=self.stop_capture,
+                key=Notice.RECONNECTING,
+            )
+        elif state == CaptureState.STREAMING and self.banner.current_key is Notice.RECONNECTING:
+            # Only its own notice. A pause banner raised during the outage is
             # a different state that is still true, and clearing it here would
             # leave the view frozen with nothing on screen saying why.
             self.banner.hide()
@@ -2131,12 +2139,11 @@ class MainWindow(QMainWindow):
                 f"All {self.model.retained:,} records are hidden by the filter.",
                 "Clear filter",
                 on_action=self.filter_bar.clear,
+                key=Notice.FILTER_HIDES_EVERYTHING,
             )
-            self._showing_filter_notice = True
             return
-        if self._showing_filter_notice:
+        if self.banner.current_key is Notice.FILTER_HIDES_EVERYTHING:
             self.banner.hide()
-            self._showing_filter_notice = False
         if self.capture is not None and self.model.retained == 0:
             # An empty capture is a fact about the capture, not about the
             # filter and not about the device. Saying nothing here leaves the
