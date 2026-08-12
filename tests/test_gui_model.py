@@ -409,6 +409,33 @@ def test_is_record_and_is_marker_are_complements(records: list[Record]) -> None:
         assert is_record(row) != is_marker(row)
 
 
+def test_a_mark_still_points_at_its_own_record_after_a_trim(qt_app: object) -> None:
+    """The coverage hole the analysis found, and the reason marks are held by
+    source index rather than by row number.
+
+    A trim drops a prefix and inserts a notice, so every surviving index moves
+    -- and the marks have to move with it exactly. One off by one and the user
+    jumps to the record *beside* the one they marked, which is worse than
+    losing the mark: it is a wrong answer that looks like a right one.
+
+    Asserted through the record itself rather than through an index, because an
+    index is the thing under test.
+    """
+    del qt_app
+    model = RecordModel(Scheme.LIGHT, row_cap=100)
+    model.append([make_record(index, message=f"m{index}") for index in range(150)])
+    marked_row = model.rowCount() - 5
+    model.toggle_mark(marked_row)
+    wanted = model.row_at(marked_row)
+    assert isinstance(wanted, Record)
+
+    model.append([make_record(index, message=f"later {index}") for index in range(80)])
+
+    still = [row for row in range(model.rowCount()) if model.is_marked(row)]
+    assert len(still) == 1, "the mark was lost or duplicated by the trim"
+    assert model.row_at(still[0]) == wanted, "the mark moved to a different record"
+
+
 class TestEmptyingInPlace:
     """`clear` replaced the model swap the window used to do.
 

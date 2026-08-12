@@ -24,15 +24,17 @@ throughput.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeAlias, TypeGuard
 
 from ostrace.model import Gap, Record
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
 
-__all__ = ["Eviction", "Row", "is_marker", "is_record", "when"]
+__all__ = ["Eviction", "Row", "TrimPlan", "is_marker", "is_record", "plan_trim", "when"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,3 +109,89 @@ def is_marker(row: Row) -> bool:
     explaining why data is missing.
     """
     return not is_record(row)
+
+
+@dataclass(frozen=True, slots=True)
+class TrimPlan:
+    """What one trim will do, worked out before anything moves.
+
+    Separated from the doing because the arithmetic is the hard part and the
+    bracketing is the dangerous part, and neither is easy to read while it is
+    tangled with the other. `beginRemoveRows` and `beginInsertRows` are not
+    interchangeable and the wrong one silently corrupts a view's idea of its
+    own rows -- so the decision about *which* bracket to open is made here,
+    where it can be asserted without a model, and carried out there, next to
+    the mutation it protects.
+    """
+
+    #: Source rows leaving, always a prefix and always on a row boundary.
+    drop: int
+    #: What every surviving index moves by. One less than ``drop`` when a
+    #: notice takes the departing rows' place at the top.
+    offset: int
+    #: View rows leaving. Zero when the filter was already hiding all of them.
+    gone: int
+    #: The eviction notice to put at the top, or ``None`` when nothing dropped
+    #: was a record -- there is no such thing as "gaps evicted".
+    notice: Eviction | None
+    #: Whether a notice is already at the top, being replaced rather than
+    #: added. The difference between the surviving rows keeping their view
+    #: positions and all of them shifting by one.
+    replacing: bool
+    #: Records and gaps in the dropped prefix, for the counters the status bar
+    #: reads once per pump tick.
+    records: int
+    gaps: int
+
+
+def plan_trim(
+    rows: Sequence[Row],
+    visible: Sequence[int],
+    *,
+    row_cap: int,
+    margin: float,
+    evicted: int,
+) -> TrimPlan | None:
+    """Work out the trim, or ``None`` when the cap has not been exceeded.
+
+    One pass over the prefix that is leaving. The newest dropped timestamp
+    comes out of that pass rather than from a ``max()`` over twenty thousand
+    rows, because they are in arrival order and it is always the last one --
+    which was measured, and was part of the 118 ms this operation used to cost.
+
+    ``visible`` is ascending, so the visible rows being removed are a
+    contiguous prefix of it: that is what makes a trim one removal rather than
+    twenty thousand, and it is why the answer can be found by bisection.
+    """
+    if len(rows) <= int(row_cap * (1 + margin)):
+        return None
+
+    drop = len(rows) - row_cap
+    records = 0
+    gaps = 0
+    newest: datetime | None = None
+    for row in rows[:drop]:
+        if isinstance(row, Record):
+            records += 1
+            newest = row.timestamp
+        elif isinstance(row, Gap):
+            gaps += 1
+
+    notice = Eviction(count=evicted + records, through=newest) if newest is not None else None
+    replacing = bool(rows) and isinstance(rows[0], Eviction)
+
+    gone = bisect_left(visible, drop)
+    if notice is not None and replacing:
+        # The old notice is inside the dropped prefix and the new one takes its
+        # place, so one fewer row actually leaves the view.
+        gone -= 1
+
+    return TrimPlan(
+        drop=drop,
+        offset=drop - 1 if notice is not None else drop,
+        gone=gone,
+        notice=notice,
+        replacing=replacing,
+        records=records,
+        gaps=gaps,
+    )
