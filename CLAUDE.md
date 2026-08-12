@@ -149,10 +149,17 @@ operating systems with no hardware.
   device output is interpreted.
 - New behaviour ships with a test. A bug fix ships with the test that fails
   without it.
-- `test_sources_os_trace.py` stubs `_stream_once` wholesale. That is where the
-  service connection lives, so socket ownership is *structurally invisible*
-  there and belongs in a device test. Coverage of that file proves control
-  flow, not resource handling.
+- `test_sources_os_trace.py` scripts the *service*, through the `_open_service`
+  seam. It replaced `_stream_once` wholesale until 0.2.0, and that is the method
+  which acquires, records and releases the second socket — so socket ownership
+  was structurally invisible there, and measurably: deleting the
+  `_stream_service` binding and swapping the `async with` operands each left all
+  520 tests green. Both fail now. Anything that replaces `_stream_once` again
+  gives that up, and the six named mutations are the check.
+- What stays device-only is the wire: whether closing the real socket interrupts
+  a blocked `recvall`, the `-O` hazard, and whether the relay is busy on the next
+  capture. Those cannot be faked, and a green run without hardware says nothing
+  about them.
 
 ## Etiquette
 

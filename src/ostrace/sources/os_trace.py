@@ -410,19 +410,42 @@ class OsTraceSource(SourceCloseMixin):
                     raise
                 await asyncio.sleep(self.reconnect.delay)
 
+    def _open_service(self, lockdown: Any) -> Any:  # noqa: ANN401 - OsTraceService
+        """Build the relay service for one connection.
+
+        Its own method because it is the seam a test replaces. Everything that
+        makes the second socket real -- entering it, recording it, releasing it
+        in the right order -- lives in ``_stream_once`` below, so a test that
+        replaces *that* can see none of it, which is what the whole suite used
+        to do. Two mutations measured the hole: deleting the ``_stream_service``
+        binding, and swapping the ``async with`` operands so the lockdown closes
+        first, each left all 520 tests green while recreating the failure the
+        two-socket rule exists for.
+
+        Constructing costs nothing -- ``OsTraceService`` opens its connection
+        lazily, from ``__aenter__`` -- so what is really deferred here is the
+        import, and it stays deferred.
+        """
+        from pymobiledevice3.services.os_trace import OsTraceService  # noqa: PLC0415
+
+        return OsTraceService(lockdown=lockdown)
+
     async def _stream_once(
         self,
         lockdown: Any,  # noqa: ANN401 - LockdownClient, imported lazily
         tz: tzinfo,
     ) -> AsyncGenerator[Record, None]:
-        from pymobiledevice3.services.os_trace import OsTraceService  # noqa: PLC0415
-
         try:
             # The service is entered as a context manager rather than merely
             # constructed: it owns a connection of its own, and leaving that to
             # the lockdown's teardown leaks it -- the lockdown does not know
             # about it.
-            async with lockdown, OsTraceService(lockdown=lockdown) as service:
+            #
+            # The operand order is the two-socket rule in one line: `async with
+            # a, b` releases b first, so the service -- the socket the loop
+            # below is blocked reading -- goes before the lockdown that started
+            # it.
+            async with lockdown, self._open_service(lockdown) as service:
                 self._stream_service = service
                 async for entry in service.syslog(
                     pid=self.pid,
