@@ -25,6 +25,7 @@ pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
 from ostrace.gui.filters import Filter
 from ostrace.gui.markers import when
+from ostrace.gui.settings import WindowSettings
 from ostrace.gui.widgets.filter_bar import NO_RECENT, FilterBar
 from ostrace.gui.windows.main import MainWindow
 from ostrace.storage.capture import open_capture
@@ -189,10 +190,10 @@ class TestTheRecentList:
         window.filter_bar.set_filter(Filter(process="dasd"))
         window._apply_filter()
         window._remember_filter()
-        settings = window._settings()
-        stored = settings.value("filters/recent")
+        settings = WindowSettings()
+        stored = settings.store.value("filters/recent")
         assert isinstance(stored, list)
-        settings.setValue("filters/recent", ["{ not json", *stored])
+        settings.store.setValue("filters/recent", ["{ not json", *stored])
 
         reopened = MainWindow()
 

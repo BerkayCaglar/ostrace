@@ -29,11 +29,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import (
-    QByteArray,
     QElapsedTimer,
     QModelIndex,
     QPoint,
-    QSettings,
     QSize,
     Qt,
     QTimer,
@@ -61,12 +59,13 @@ from ostrace.errors import OstraceError
 from ostrace.exporters.base import escape
 from ostrace.gui import icons
 from ostrace.gui.columns import COLUMNS
-from ostrace.gui.filters import RECENT_KEPT, Filter, remember
+from ostrace.gui.filters import Filter, remember
 from ostrace.gui.live import CaptureThread
 from ostrace.gui.loader import CaptureLoader
 from ostrace.gui.markers import when
 from ostrace.gui.models import Find, RecordModel
 from ostrace.gui.pump import Pump
+from ostrace.gui.settings import Layout, WindowSettings
 from ostrace.gui.shortcuts import BINDINGS, RELOCATED, key_table, sequences
 from ostrace.gui.theme import Scheme, apply_theme, scheme_for
 from ostrace.gui.timeinput import EXAMPLES, parse_jump
@@ -294,7 +293,7 @@ class MainWindow(QMainWindow):
         was the only behaviour. The checkbox is set through `_show_theme_state`
         so that restoring a preference does not look like expressing one.
         """
-        stored = self._settings().value("window/theme")
+        stored = WindowSettings().theme
         if stored not in (Scheme.LIGHT.value, Scheme.DARK.value):
             return
         scheme = Scheme(stored)
@@ -373,7 +372,7 @@ class MainWindow(QMainWindow):
         if isinstance(app, QApplication):
             apply_theme(app, scheme)
         self.set_scheme(scheme)
-        self._settings().setValue("window/theme", scheme.value)
+        WindowSettings().theme = scheme.value
 
     def set_scheme(self, scheme: Scheme) -> None:
         """Move the colours this window prebuilt for itself to ``scheme``.
@@ -690,17 +689,6 @@ class MainWindow(QMainWindow):
 
     # -- what the window remembers ---------------------------------------
 
-    def _settings(self) -> QSettings:
-        """Where the layout is kept between sessions.
-
-        `gui.app` has set the organisation and application names since it was
-        written -- which is what stops Qt filing settings under a vendor called
-        "Unknown" -- and nothing ever constructed a `QSettings` to use them.
-        Qt picks the location per platform, so this is not a decision `paths`
-        owns: no file of ours is being placed.
-        """
-        return QSettings()
-
     def _restore_detail_visible(self) -> None:
         """Put the pane back the way the last session left it.
 
@@ -713,42 +701,17 @@ class MainWindow(QMainWindow):
         window is built in, and setting a checkable action to the value it
         already holds emits nothing.
         """
-        if self._settings().value("window/detail", defaultValue=True, type=bool) is False:
+        if not WindowSettings().read_layout().detail_visible:
             self.action_detail_pane.setChecked(False)
 
     def _save_recent(self) -> None:
-        """Keep the recent filters between sessions.
-
-        Deliberately not the same decision as `_save_layout`'s refusal to
-        remember the *applied* filter. A filter that survived a restart is one
-        the user has to remember they set, which is "where did my logs go" with
-        a longer fuse; a filter that is merely *offered* changes nothing about
-        what the window shows until somebody picks it.
-        """
-        self._settings().setValue("filters/recent", [entry.as_stored() for entry in self._recent])
+        WindowSettings().write_recent(self._recent)
 
     def _restore_recent(self) -> list[Filter]:
-        """What the last session left, minus anything unreadable.
-
-        Entry by entry rather than all or nothing: one line written by a
-        version that spelled a field differently should cost that line, not the
-        other nine.
-        """
-        stored = self._settings().value("filters/recent")
-        if not isinstance(stored, list):
-            return []
-        entries = (Filter.from_stored(line) for line in stored if isinstance(line, str))
-        return [entry for entry in entries if entry is not None][:RECENT_KEPT]
+        return WindowSettings().read_recent()
 
     def _restore_jump(self) -> Find:
-        """Which jump target the last session left the toolbar on."""
-        stored = self._settings().value("table/jump")
-        try:
-            return Find(stored)
-        except ValueError:
-            # Absent, or written by a version that offered a kind this one does
-            # not. The default is the one every reader wants first.
-            return Find.ERROR
+        return WindowSettings().read_layout().jump
 
     def _on_a_screen(self) -> bool:
         """Is this window somewhere a person could actually see it?
@@ -766,40 +729,33 @@ class MainWindow(QMainWindow):
         )
 
     def _save_layout(self) -> None:
-        """Remember the window, the split and the columns.
+        """Remember where the window was and how it was arranged.
 
-        Only geometry. Not the filter, and not the open capture: a viewer that
-        reopened yesterday's file would be guessing, and a filter that survived
-        a restart is one the user has to remember they set -- which is the
-        "where did my logs go" failure with a longer fuse.
+        What is *not* remembered, and why, is `gui.settings`' module docstring:
+        the policy travels with the code that enforces it.
         """
-        settings = self._settings()
-        settings.setValue("window/geometry", self.saveGeometry())
-        settings.setValue("window/state", self.saveState())
-        settings.setValue("window/split", self._split.saveState())
-        settings.setValue(
-            "table/columns",
-            [self.table.columnWidth(index) for index in range(len(COLUMNS))],
+        WindowSettings().write_layout(
+            Layout(
+                geometry=self.saveGeometry(),
+                state=self.saveState(),
+                split=self._split.saveState(),
+                columns=[self.table.columnWidth(index) for index in range(len(COLUMNS))],
+                jump=self._jump,
+                detail_visible=self.detail.isVisible(),
+            )
         )
-        # A way of reading rather than a property of a capture, so it belongs
-        # with the geometry and not with the filter, which is deliberately not
-        # remembered.
-        settings.setValue("table/jump", self._jump.value)
-        settings.setValue("window/detail", self.detail.isVisible())
 
     def _restore_layout(self) -> bool:
         """Put it back, and say whether there was anything to put.
 
-        Column widths are only restored if the count still matches: a capture
-        opened by a version with a different set of columns would otherwise get
-        widths applied to the wrong ones, which looks like a rendering fault
-        rather than like stale settings.
+        Decoding is `gui.settings`' half, and it hands back only what it could
+        read. Deciding whether the result is *usable* is this one's, because
+        answering that takes the screens and the window's own frame.
         """
-        settings = self._settings()
-        geometry = settings.value("window/geometry")
-        if not isinstance(geometry, QByteArray):
+        layout = WindowSettings().read_layout()
+        if layout.geometry is None:
             return False
-        if not self.restoreGeometry(geometry) or not self._on_a_screen():
+        if not self.restoreGeometry(layout.geometry) or not self._on_a_screen():
             # A geometry can be well-formed and still unusable: saved on a
             # second monitor that is no longer attached, saved by a window
             # manager that reported a size of nothing, or -- how this was
@@ -808,17 +764,14 @@ class MainWindow(QMainWindow):
             # and the program looked as though it had failed to start.
             self.resize(_DEFAULT_SIZE)
             return False
-        state = settings.value("window/state")
-        if isinstance(state, QByteArray):
-            self.restoreState(state)
-        split = settings.value("window/split")
-        if isinstance(split, QByteArray):
-            self._split.restoreState(split)
-        widths = settings.value("table/columns")
-        if isinstance(widths, list) and len(widths) == len(COLUMNS):
+        if layout.state is not None:
+            self.restoreState(layout.state)
+        if layout.split is not None:
+            self._split.restoreState(layout.split)
+        if layout.columns is not None:
             # Through the table rather than column by column, so that it knows
             # these are the user's widths and stops fitting its own.
-            self.table.restore_column_widths([int(width) for width in widths])
+            self.table.restore_column_widths(layout.columns)
         return True
 
     # -- actions ---------------------------------------------------------
