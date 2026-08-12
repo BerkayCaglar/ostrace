@@ -409,6 +409,76 @@ def test_is_record_and_is_marker_are_complements(records: list[Record]) -> None:
         assert is_record(row) != is_marker(row)
 
 
+class TestEmptyingInPlace:
+    """`clear` replaced the model swap the window used to do.
+
+    Emptying rather than replacing is what deletes the leak by construction:
+    a model that is never abandoned cannot be the half of a pair that nobody
+    released. What it has to get right instead is everything a fresh model used
+    to get for free.
+    """
+
+    @pytest.fixture
+    def filled(self, qt_app: object) -> RecordModel:
+        del qt_app
+        model = RecordModel(Scheme.LIGHT, row_cap=50)
+        model.append([make_record(index) for index in range(200)])
+        model.toggle_mark(0)
+        return model
+
+    def test_it_is_a_reset_and_it_is_bracketed(self, filled: RecordModel) -> None:
+        """The mirror of the trim guard above, and the opposite answer.
+
+        A trim drops a prefix, so it brackets removals; this drops everything,
+        so every index a view holds is invalid and a reset is the honest signal.
+        Unbracketed, the views keep stale indices and nothing offscreen
+        notices -- measured: removing `beginResetModel` left all 388 GUI tests
+        green.
+        """
+        started: list[int] = []
+        finished: list[int] = []
+        filled.modelAboutToBeReset.connect(lambda: started.append(1))
+        filled.modelReset.connect(lambda: finished.append(1))
+
+        filled.clear()
+
+        assert started == [1], "a view was never told the indices were going"
+        assert finished == [1]
+
+    def test_nothing_is_left_to_show(self, filled: RecordModel) -> None:
+        filled.clear()
+
+        assert filled.rowCount() == 0
+        assert filled.retained == 0
+        assert filled.marks == 0
+
+    def test_the_counts_a_status_bar_reads_go_with_the_rows(self, filled: RecordModel) -> None:
+        """`retained`, the eviction count and the gap count are maintained on
+        ingestion rather than counted on demand, because the status bar asks
+        once per pump tick. Maintained state has to be reset with the rows it
+        describes, and forgetting to left the bar reporting the last capture's
+        evictions against an empty table -- measured green, because every other
+        test here asserts row counts.
+        """
+        assert filled.evicted > 0, "the fixture never evicted, so this proves nothing"
+
+        filled.clear()
+
+        assert filled.evicted == 0
+        assert filled.gaps == 0
+
+    def test_the_filter_is_left_alone(self, filled: RecordModel) -> None:
+        """Which filter an emptied model carries is the caller's policy --
+        closing clears it, every other door carries it -- and it is stated at
+        those doors rather than guessed here."""
+        wanted = Filter(minimum_level=Level.ERROR)
+        filled.set_filter(wanted)
+
+        filled.clear()
+
+        assert filled.filter == wanted
+
+
 def test_trimming_removes_rows_rather_than_resetting_the_model(qt_app: object) -> None:
     """A reset throws away the selection and the scroll position.
 

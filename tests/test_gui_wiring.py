@@ -62,29 +62,33 @@ def test_a_standing_filter_reaches_the_next_capture(window: MainWindow) -> None:
 def test_nothing_from_the_previous_capture_outlives_the_swap(window: MainWindow) -> None:
     """Every capture opened in a session used to stay in memory.
 
-    Both halves are asserted because the model has two owners and releasing
-    one of them frees nothing. The window is its Qt parent, so Qt holds it
-    until the window dies; the loader keeps it in an attribute, and the loader
-    is parented to the window too, which keeps its Python wrapper alive and the
-    model reference in it. Measured over twenty successive opens: deleting only
-    the model grows the process 41.2 MiB, only the loader 40.6 MiB, neither
-    41.0 MiB, both 2.2 MiB.
+    The model had two owners and releasing one of them freed nothing. The
+    window is its Qt parent, so Qt held it until the window died; the loader
+    kept it in an attribute, and the loader is parented to the window too.
+    Measured over twenty successive opens: deleting only the model grew the
+    process 41.2 MiB, only the loader 40.6 MiB, neither 41.0 MiB, both 2.2 MiB.
 
-    So a spy on one of them would pass while the leak continued, which is what
-    makes the pair worth pinning rather than the pair being tidy.
+    Half of that pairing is retired here rather than dropped. Opening a capture
+    no longer builds a model -- it empties the one that exists -- so there is
+    no abandoned model to release and no spy to put on one. The loader is still
+    replaced on every open, and it is still the half that keeps rows alive, so
+    it is still asserted. What guards the other half now is that the model
+    object never changes: the assertion below says so, and it would fail the
+    moment somebody reintroduced a swap without the deletion that made it safe.
     """
     load(window, ERRORS)
-    replaced_model = window.model
+    kept = window.model
     replaced_loader = window._loader
     assert replaced_loader is not None
     gone: list[str] = []
-    replaced_model.destroyed.connect(lambda *_: gone.append("model"))
     replaced_loader.destroyed.connect(lambda *_: gone.append("loader"))
 
     load(window, MIXED)
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
-    assert sorted(gone) == ["loader", "model"], f"still alive: {gone}"
+    assert gone == ["loader"], f"still alive: {gone}"
+    assert window.model is kept, "a capture built a second model, which is how the leak worked"
+    assert window.model.rowCount() > 0, "and it is the one holding the new capture"
 
 
 def test_a_capture_that_will_not_open_offers_another(

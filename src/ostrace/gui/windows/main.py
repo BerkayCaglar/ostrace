@@ -526,15 +526,9 @@ class MainWindow(QMainWindow):
         selection = self.table.selectionModel()
         if selection is not None:
             selection.currentRowChanged.connect(self._on_current_row_changed)
-        # A new capture and a newly opened file both build a new model, and a
-        # connection to the old one dies with it.
-        #
-        # Reached through `getattr` for the same reason the swap above does: the
-        # first call arrives from `_replace_model` while the window is still
-        # being built, before there is a controller to tell.
-        follow = getattr(self, "follow_controller", None)
-        if follow is not None:
-            follow.set_model(self.model)
+        # Called once, at construction: the model is emptied rather than
+        # replaced now, so the selection model it belongs to outlives every
+        # capture and there is nothing to re-attach.
         self.model.top_shifted.connect(self._keep_place)
 
     def _on_user_scroll(self) -> None:
@@ -774,21 +768,33 @@ class MainWindow(QMainWindow):
         minimap have only just let go of this and Qt may still be holding a
         pointer this far up the stack.
         """
-        previous = getattr(self, "model", None)
-
-        self.model = RecordModel(self.scheme, parent=self)
-        self.table.setModel(self.model)
-        self.minimap.set_model(self.model)
-        self._connect_selection()
+        if getattr(self, "model", None) is None:
+            # The window's own construction: the one door with nothing to
+            # empty. Everything after this point is wired to *this* model and
+            # stays wired, which is the whole of the change.
+            self.model = RecordModel(self.scheme, parent=self)
+            self.table.setModel(self.model)
+            self.minimap.set_model(self.model)
+            self._connect_selection()
+        else:
+            self.model.clear()
+        # Every door, not only the first: emptying the model is what a new
+        # capture is now, and the tail goes back on with it.
+        #
+        # Through `getattr` because the first call comes from `__init__`, before
+        # there is a controller to tell -- the window builds its model here and
+        # its controllers afterwards, since they take it.
+        follow = getattr(self, "follow_controller", None)
+        if follow is not None:
+            follow.set_model(self.model)
         self.detail.clear()
-
-        # Absent exactly once: the window's own construction is the one door
-        # with nothing to replace.
-        if previous is not None:
-            previous.deleteLater()
 
         if not keep_filter:
             self.filter_bar.clear()
+            # Stated here rather than assumed inside `clear`, which empties the
+            # rows and leaves the filter alone: which filter an emptied model
+            # should carry is this method's policy, and it differs by door.
+            self.model.set_filter(Filter())
             return
         wanted = self._bar_filter()
         if wanted is not None:
