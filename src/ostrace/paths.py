@@ -9,10 +9,10 @@ anywhere else.
 
 "Where a session lives" is one decision, so this module owns all of it -- the
 directory, the sanitised name, the suffix and the length budget. Splitting it
-was actively harmful: the suffix used to be applied elsewhere with
-``Path.with_suffix``, which *replaces* the last dotted component, so a device
-called ``iPhone 15.1`` produced ``iPhone-15.ostrace`` and lost the timestamp
-that makes the name unique. Two captures then landed in the same directory.
+is actively harmful: applying the suffix elsewhere with ``Path.with_suffix``
+*replaces* the last dotted component, so a device called ``iPhone 15.1`` yields
+``iPhone-15.ostrace`` and loses the timestamp that makes the name unique --
+after which two captures land in the same directory.
 
 One macOS trap is worth stating because it is invisible from Windows: there the
 config directory and the data directory are the same path, both

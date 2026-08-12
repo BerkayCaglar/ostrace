@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Why the device cannot be reached, in the window rather than in a terminal.
 
-The checks have existed since phase 1 and only `ostrace doctor` could run them,
-so somebody who installed this for the window met a dead end at exactly the
-moment something was wrong -- and the answer is almost never in the program.
-It is a service that was never installed, a device that was never trusted, or a
-cable that only carries power.
+The checks belong to `devices.doctor`, and reaching them only from `ostrace
+doctor` leaves somebody who installed this for the window at a dead end at
+exactly the moment something is wrong -- and the answer is almost never in the
+program. It is a service that was never installed, a device that was never
+trusted, or a cable that only carries power.
 
 Two things here are deliberate.
 
@@ -149,9 +149,9 @@ class DoctorWindow(QDialog):
         # Here as well as in `start`, and the two are not the same act: that
         # one empties the list because a diagnosis is *running* and the old
         # answer is no longer true, and this one because the method that fills
-        # the rows is the method that has to own emptying them. Only `start`
-        # cleared, so a second report reached through any other path -- a test,
-        # a retry wired up later -- appended to the first.
+        # the rows is the method that has to own emptying them. Clearing only
+        # in `start` leaves a second report reached through any other path -- a
+        # test, a retry wired up later -- appended to the first.
         self.checks.clear()
         failures = [check for check in report.checks if check.status is Status.FAIL]
         self._summary.setText(

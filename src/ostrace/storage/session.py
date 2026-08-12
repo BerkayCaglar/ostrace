@@ -147,7 +147,7 @@ class SessionWriter:
         spool_path = self.path / SPOOL_NAME
         if spool_path.exists():
             # `gzip.open(..., "wb")` truncates, so a second `capture -o
-            # ~/logs/today` used to replace the first one's records with no
+            # ~/logs/today` would replace the first one's records with no
             # warning and exit successfully. A capture is not reproducible --
             # the device has moved on -- so overwriting one is the single most
             # expensive thing this package can do by accident.

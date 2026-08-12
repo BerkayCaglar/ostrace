@@ -113,8 +113,8 @@ async def read_device_info(
     # carries none of the guidance the rest of this layer provides.
     offset_seconds = _as_float(values.get("TimeZoneOffsetFromUTC"))
     # Range-checked as well as parsed. `timedelta` accepts any number of
-    # seconds but `timezone` does not, so an out-of-range value survived this
-    # function and detonated later in `DeviceInfo.tzinfo` -- reached from
+    # seconds but `timezone` does not, so an out-of-range value that leaves
+    # this function detonates later in `DeviceInfo.tzinfo` -- reached from
     # `device.now()` at the top of `capture()`, before a single record, as a
     # bare ValueError naming neither the device nor the key.
     utc_offset = (

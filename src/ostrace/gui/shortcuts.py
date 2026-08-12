@@ -306,8 +306,8 @@ BINDINGS: tuple[Binding, ...] = (
 #: kept apart from `BINDINGS` because the window has to give them a menu *role*
 #: as well as a key, and the role is the point -- but they are `Binding`s all
 #: the same, so `unbound` and `key_table` see them like everything else. Held
-#: separately and read together was how `Ctrl+Q` came to exist without ever
-#: appearing on the keyboard sheet.
+#: separately and read *together*: a check that walks only `BINDINGS` is how
+#: `Ctrl+Q` ends up answering to a key that appears on no keyboard sheet.
 #:
 #: No Settings. There is nothing to configure in this release -- the theme
 #: follows the system, the row cap and the drain interval are measured
@@ -322,10 +322,10 @@ RELOCATED: tuple[Binding, ...] = (
         # has, so on its own it leaves no way out. Measured through
         # `QKeySequence.keyBindings` on Windows and again on macOS 15 under the
         # offscreen plugin, where the help sheet renders the pair as
-        # `Exit  ·  Cmd-Q` -- so Exit is not the Windows answer it was first
-        # taken for. Whether a cocoa session resolves it differently is
-        # untested; see `docs/design/gui.md` section 12 for what the offscreen
-        # platform can and cannot settle.
+        # `Exit  ·  Cmd-Q` -- so Exit is what both platforms resolve it to,
+        # not a Windows peculiarity. Whether a cocoa session resolves it
+        # differently is untested; see `docs/design/gui.md` section 12 for what
+        # the offscreen platform can and cannot settle.
         #
         # The alias is what carries the action either way: Qt renders `Ctrl+Q`
         # as Cmd-Q on a Mac, so it is right on both and costs nothing on
