@@ -64,11 +64,13 @@ one: the god node, the module boundaries, and the seams that make socket
 ownership provable in CI. Its plan is written down outside this repository,
 beside the design notes.
 
-Most of it is on `main` and none of it is released. The window has been
+All of it is on `main` and none of it is released. The window has been
 decomposed into five controllers, the source has grown the seam that lets a
 test watch the second socket, the storage facade decides on its own what a
-capture is, and three ADRs — 0007 to 0009 — record the shapes and what was
-rejected. What is left is the public surface and the paper trail.
+capture is, the README states which imports are supported and what the commands
+promise a script, and three ADRs — 0007 to 0009 — record the shapes and what was
+rejected. What has not happened is a run on a real device against any of it
+since package C.
 
 The documentation under `formats/` and `design/` describes contracts, which are
 specified before they are implemented so that the shape is a decision rather

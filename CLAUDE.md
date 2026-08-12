@@ -13,12 +13,13 @@ redesign's must-have tier is finished and released, and so are the fixes that
 came out of the 0.2.0 analysis.
 
 The next version is 0.2.0 and it is a structural one: the plan lives outside
-this repository, beside the design notes. Seven of its eight packages have
-landed — P (public presence and application identity), A (contract safety
+this repository, beside the design notes. **All eight of its packages have
+landed** — P (public presence and application identity), A (contract safety
 nets), B (the source seam), C (GUI mechanics), D (the capture, follow and theme
-controllers), E (the view layer) and F (the storage facade). What is left is
-G: the public surface and the paper trail, which is documentation and a comment
-sweep rather than code.
+controllers), E (the view layer), F (the storage facade) and G (the public
+surface and the paper trail). Nothing structural is outstanding. What 0.2.0 has
+not had is a run on hardware: the viewer was exercised on a real device after C
+and not since, so D, E and F have only ever met a fixture.
 
 The window went from 2,155 lines to 1,817 across C, D and E, and five
 controllers came out of it — `gui/settings.py`, `gui/actions.py`,
