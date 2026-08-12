@@ -225,6 +225,14 @@ can disagree with the view, and then the button is lying.
 **Breaks follow:** selecting a row, scrolling up by any amount, an explicit
 jump. **Does not break follow:** horizontal scrolling.
 
+Since 0.2.0 the derivation lives in `gui/follow.py` rather than on the window,
+and the rule survives the move intact: `MainWindow.following` still answers on
+every read, by asking the object that also does the scrolling. Two inputs are
+*noted* there — whether the view was at the bottom when a person last moved it,
+and that a scroll has happened and not yet been read, because `actionTriggered`
+arrives before the scrollbar's value changes. Neither is the answer. What this
+section forbids is storing the conclusion, and nothing does.
+
 The set must be *complete and symmetric*. klogg's is neither — a plain click
 does not break follow but moving the selection down does — and a user cannot
 build a mental model from that. With a detail pane, selection is the primary

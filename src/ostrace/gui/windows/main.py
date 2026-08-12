@@ -29,7 +29,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import (
-    QElapsedTimer,
     QModelIndex,
     QPoint,
     QSize,
@@ -61,6 +60,7 @@ from ostrace.gui.actions import build_actions, build_menus, menu_items
 from ostrace.gui.capture_controller import CaptureController, Lifecycle
 from ostrace.gui.columns import COLUMNS
 from ostrace.gui.filters import Filter, remember
+from ostrace.gui.follow import FollowController
 from ostrace.gui.loader import CaptureLoader
 from ostrace.gui.markers import when
 from ostrace.gui.models import Find, RecordModel
@@ -118,18 +118,6 @@ _SEPARATOR = " — "
 #: Windows' is fractional.
 _TABLE_STRETCH = 3
 _DETAIL_STRETCH = 1
-
-#: How near the bottom still counts as "at the bottom" for auto-follow. A few
-#: pixels of slack, because a scrollbar rarely lands exactly on its maximum.
-_FOLLOW_SLACK = 4
-
-#: How often the tail may actually scroll. Ten times a second still reads as
-#: continuous, and it is the difference between a third of the GUI thread going
-#: into repaints and a fifth: at device throughput every drain scrolls further
-#: than the viewport is tall, so each one is a full repaint of every visible
-#: cell. `docs/design/gui.md` §9 asks for this to be a preference; a measured
-#: constant is what 0.1.0 ships.
-_FOLLOW_MIN_MS = 100
 
 #: How long the filter waits for the typing to stop. Long enough that a word is
 #: one rescan rather than five, short enough that the table does not feel
@@ -214,10 +202,6 @@ class MainWindow(QMainWindow):
         #: Set once the user picks a theme, after which the system stops
         #: being consulted. Default is to follow it.
         self._theme_chosen = False
-        #: Whether the tail should stay at the bottom. Only a person can
-        #: turn it off -- see `_on_user_scroll`.
-        self._at_bottom = True
-        self._user_scrolled = False
         #: What the toolbar's chevrons move between. Read before the toolbar is
         #: built, since the button is constructed with it, and separately from
         #: `_restore_layout`, which is allowed to give up on a geometry that no
@@ -237,12 +221,12 @@ class MainWindow(QMainWindow):
         #: rather than pushed to from wherever the name happened to arrive.
         self._device_name: str | None = None
         self._loader: CaptureLoader | None = None
-        #: When the tail last scrolled. See `_follow`.
-        self._scrolled = QElapsedTimer()
         # `_replace_model` builds the first model, so the controller is made
         # after it and pointed at each replacement as it happens.
         self._replace_model(keep_filter=True)
         self.capture_controller = CaptureController(self.model, parent=self)
+        self.follow_controller = FollowController(self.table, self.model, parent=self)
+        self.follow_controller.changed.connect(self._show_follow_state)
         self.minimap.row_requested.connect(self.go_to)
 
         self._filter_debounce = QTimer(self)
@@ -600,23 +584,18 @@ class MainWindow(QMainWindow):
             selection.currentRowChanged.connect(self._on_current_row_changed)
         # A new capture and a newly opened file both build a new model, and a
         # connection to the old one dies with it.
-        self._at_bottom = True
+        #
+        # Reached through `getattr` for the same reason the swap above does: the
+        # first call arrives from `_replace_model` while the window is still
+        # being built, before there is a controller to tell.
+        follow = getattr(self, "follow_controller", None)
+        if follow is not None:
+            follow.set_model(self.model)
         self.model.top_shifted.connect(self._keep_place)
 
     def _on_user_scroll(self) -> None:
-        """The user moved the view themselves.
-
-        ``actionTriggered`` fires for a drag, a wheel, an arrow and a page --
-        and *not* for ``setValue``, which is how everything this window does
-        moves the view. That distinction is the whole mechanism: leaving the
-        bottom is something a person does, and nothing else here can be
-        mistaken for it.
-
-        The position cannot be read yet -- the signal arrives before the value
-        changes -- so this only records that a look is owed, and `_follow`
-        takes it.
-        """
-        self._user_scrolled = True
+        """The user moved the view themselves."""
+        self.follow_controller.note_scroll()
 
     def _keep_place(self, shifted: int) -> None:
         """Hold the same records under the reader when the top is trimmed.
@@ -1330,20 +1309,13 @@ class MainWindow(QMainWindow):
     def following(self) -> bool:
         """Whether the next batch of records will be scrolled to.
 
-        Derived, and this is the *only* derivation -- `_follow` acts on it and
-        the status bar shows it, so the indicator cannot disagree with the
-        behaviour. `docs/design/gui.md` §4 is explicit that a stored bit can
-        disagree with the view, and Console.app shipped an eleven-month bug of
-        exactly that shape; an indicator computed separately from the thing it
-        indicates is the same mistake with a second face.
+        Delegated rather than moved out of sight: `docs/design/gui.md` §4 makes
+        a claim about this window's surface, and the claim stays true here
+        because the answer is still derived on every read -- now by the object
+        that also does the scrolling, so the indicator and the behaviour cannot
+        come to different conclusions.
         """
-        last = self.model.rowCount() - 1
-        current = self.table.currentIndex()
-        if last >= 0 and current.isValid() and current.row() < last:
-            # A selection that is not the last row is the evidence of a reader
-            # who has stopped tailing, read from the view rather than stored.
-            return False
-        return self._at_bottom
+        return self.follow_controller.following
 
     def set_detail_visible(self, *, visible: bool) -> None:
         """Put the detail pane away, or bring it back where it was.
@@ -1368,40 +1340,16 @@ class MainWindow(QMainWindow):
 
     @property
     def behind(self) -> int:
-        """How many records sit below the bottom of the viewport, unseen.
-
-        Derived from the view on every read, like `following` and for the same
-        reason: a counter kept alongside the tail is a second thing that can
-        disagree with it, and this window has already been bitten once by a
-        follow state that did.
-
-        Read off the *bottom row* rather than by counting arrivals, which makes
-        it O(1) and makes it right after a filter change, a trim or a jump --
-        each of which moves the reader relative to the end without a record
-        arriving at all. A partially visible row at the bottom edge counts as
-        behind, which errs towards "you have not read this one".
-        """
-        _, bottom = self.table.visible_rows()
-        return max(0, self.model.rowCount() - 1 - bottom)
+        """How many records sit below the bottom of the viewport, unseen."""
+        return self.follow_controller.behind
 
     def set_following(self, *, follow: bool) -> None:
-        """Turn the tail on or off, from the status bar or the keyboard.
-
-        Selecting a row stops the tail deliberately, and getting back to it
-        meant a key nobody had been told about or a menu item two levels down.
-        Turning it back on therefore lets go of the row as well as returning to
-        the end -- asking to watch the newest records is not asking to keep one
-        old record open while they race past. That is the same thing the second
-        press of `Go to Bottom` does, for the same reason.
-        """
-        self._user_scrolled = False
-        self._at_bottom = follow
+        """Turn the tail on or off, from the status bar or the keyboard."""
+        self.follow_controller.set_following(follow=follow)
+        # The detail pane is the window's, so clearing it is too: the
+        # controller lets go of the row and this stops showing it.
         if follow:
-            self.table.clearSelection()
-            self.table.setCurrentIndex(QModelIndex())
             self.detail.clear()
-            self.table.scrollToBottom()
-        self._show_follow_state()
 
     def _on_follow_clicked(self) -> None:
         """The status bar's control was pressed: do the other thing.
@@ -1427,56 +1375,22 @@ class MainWindow(QMainWindow):
         # The count is about a tail, and a file has none: in a loaded capture
         # every row below the viewport has already been there since it opened,
         # and calling that "behind" would invent an arrival. Asked of the
-        # control rather than of the capture thread so the two cannot disagree
-        # -- the number is silent exactly when the button beside it is dead.
-        behind = self.behind if self.status.follow.isEnabled() else 0
+        # capture rather than of the control that reports it -- a widget's
+        # enabled state is a rendering of the answer, not the answer.
+        behind = self.behind if self.capture_controller.is_running else 0
         self.status.set_following(following=following, behind=behind)
         self.action_follow.blockSignals(True)
         self.action_follow.setChecked(following)
         self.action_follow.blockSignals(False)
 
     def _follow(self) -> None:
-        """Stay at the bottom, but only if that is where the user already is.
+        """Advance the tail, and say where it is.
 
-        Derived on every tick rather than stored as a mode. A stored flag can
-        disagree with the view -- Console.app kept one and shipped an
-        eleven-month bug where selecting a row silently stopped the tail.
-
-        Two ways to leave the bottom, and both have to count. Scrolling up is
-        the obvious one. **Selecting a row is the other, and it is not
-        optional here**: this window has a detail pane, so selection is the
-        primary interaction, and a tail that survived it would drag the row out
-        from under whoever just clicked it -- which is the Console.app bug from
-        the other direction.
-
-        Still no stored bit. A selection that is no longer the last row *is*
-        the evidence, and it is read from the view like the scrollbar. The
-        `following` property is where that reading lives, so the indicator in
-        the status bar and this method cannot come to different conclusions.
+        Two halves, and the split is the point: `tick` decides and scrolls,
+        this puts the answer on screen. The controller says when to look rather
+        than what to show.
         """
-        if self._user_scrolled:
-            # Read once, when a person has just moved the view. Reading it on
-            # every tick instead is what broke this: appending raises the
-            # maximum and leaves the value alone, so a view that had simply not
-            # been scrolled *yet* -- or one whose scroll had just been skipped
-            # by the throttle below -- looked exactly like a reader who had
-            # gone up, and follow died on the first batch and stayed dead.
-            bar = self.table.verticalScrollBar()
-            self._at_bottom = bar.value() >= bar.maximum() - _FOLLOW_SLACK
-            self._user_scrolled = False
-        self._show_follow_state()
-        if self.model.rowCount() == 0 or not self.following:
-            return
-        # Throttled apart from the drain. Each tick appends about a hundred
-        # rows and the scroll advances by a hundred, but the viewport holds
-        # forty -- so there is nothing to blit and every tick costs a full
-        # repaint, measured at 20 ms, 15 times a second, a third of the GUI
-        # thread. Draining stays at 50 ms so the queue never builds; only the
-        # scrolling is coalesced, and no record is lost by coalescing it.
-        if self._scrolled.isValid() and self._scrolled.elapsed() < _FOLLOW_MIN_MS:
-            return
-        self._scrolled.restart()
-        self.table.scrollToBottom()
+        self.follow_controller.tick()
 
     def export_capture(self) -> None:
         """Open the export dialog, if there is anything to export."""

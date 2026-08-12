@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from ostrace.model import Gap, Level, Record
-from tests.helpers import ERRORS, load, make_record
+from tests.helpers import ERRORS, ScriptedSource, load, make_record
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
@@ -372,7 +372,7 @@ def test_the_tail_follows_a_capture_that_was_never_scrolled(window: MainWindow) 
 
     for batch in range(3):
         window.model.append([make_record(batch * 100 + i) for i in range(100)])
-        window._scrolled.invalidate()  # the 100 ms coalescing, not the rule
+        window.follow_controller.min_ms = 0  # the coalescing, not the rule
         window._follow()
 
     assert bar.value() >= bar.maximum() - 4
@@ -438,7 +438,7 @@ def test_escape_lets_go_of_a_row_and_the_tail_resumes(window: MainWindow) -> Non
 
     assert not window.table.currentIndex().isValid()
     window.model.append([make_record(200 + i) for i in range(100)])
-    window._scrolled.invalidate()
+    window.follow_controller.min_ms = 0
     window._follow()
     bar = window.table.verticalScrollBar()
     assert bar.value() >= bar.maximum() - 4, "the tail did not resume"
@@ -644,6 +644,42 @@ class TestGoToTime:
         assert not window.table.currentIndex().isValid()
 
 
+def test_a_new_capture_starts_with_the_tail_on(window: MainWindow) -> None:
+    """Every door that empties the table builds a fresh model, and the tail goes
+    back on with it.
+
+    Without that, a reader who had scrolled up in the last capture opens the
+    next one already not following -- the records arrive, the view stays where
+    it was, and nothing on screen says why. Measured: removing the line leaves
+    all 386 GUI tests green.
+    """
+    window.set_following(follow=False)
+    window.table.verticalScrollBar().setValue(0)
+    left_off = window.following
+
+    window.start_capture(ScriptedSource([make_record(0)], delay=5.0))
+
+    assert not left_off, "the tail was never turned off, so this proves nothing"
+    assert window.following, "the new capture opened with the tail already off"
+    window.stop_capture()
+
+
+def _capturing(window: MainWindow) -> None:
+    """A real capture, running, because the readout now asks whether one is.
+
+    It used to ask the control beside it -- `status.follow.isEnabled()` -- and a
+    widget's enabled state is a rendering of the answer rather than the answer.
+    So these drive a source that has not finished rather than setting the
+    rendering by hand.
+    """
+    rows = [window.model.row_at(index) for index in range(window.model.rowCount())]
+    window.start_capture(ScriptedSource([make_record(0)], delay=5.0))
+    # Starting one builds a fresh model, as every door that empties the table
+    # does. The fixture's capture goes back into it: what is under test is the
+    # readout, not what a swap does to the rows.
+    window.model.append(rows)
+
+
 class TestTheUnseenCount:
     """The other half of §4, and the one it calls more useful.
 
@@ -662,7 +698,7 @@ class TestTheUnseenCount:
         whatever the state -- so a test that skipped this would pass against
         a `behind` that always returned zero.
         """
-        window._set_capturing(capturing=True)
+        _capturing(window)
         window.table.resize(600, 300)
         window.table.show()
         QApplication.processEvents()
@@ -702,7 +738,7 @@ class TestTheUnseenCount:
         spoke during that window would flicker on every tick of every capture,
         which is a readout teaching the eye to skip it.
         """
-        window._set_capturing(capturing=True)
+        _capturing(window)
         window.table.resize(600, 300)
         window.table.show()
         QApplication.processEvents()
@@ -727,7 +763,7 @@ class TestTheUnseenCount:
         self._scrolled_away(window)
         assert window.status.behind_text != "", "nothing was behind to begin with"
 
-        window._set_capturing(capturing=False)
+        window.stop_capture()
 
         assert window.behind > 0
         assert window.status.behind_text == ""
@@ -775,7 +811,7 @@ def test_scrolling_up_stops_the_tail_and_scrolling_back_resumes_it(window: MainW
     bar.actionTriggered.emit(QAbstractSlider.SliderAction.SliderPageStepSub.value)
     bar.setValue(0)
     window.model.append([make_record(i) for i in range(500, 600)])
-    window._scrolled.invalidate()
+    window.follow_controller.min_ms = 0
     window._follow()
 
     assert bar.value() == 0, "the tail dragged a reader who had scrolled away"
@@ -783,7 +819,7 @@ def test_scrolling_up_stops_the_tail_and_scrolling_back_resumes_it(window: MainW
     bar.actionTriggered.emit(QAbstractSlider.SliderAction.SliderToMaximum.value)
     bar.setValue(bar.maximum())
     window.model.append([make_record(i) for i in range(600, 700)])
-    window._scrolled.invalidate()
+    window.follow_controller.min_ms = 0
     window._follow()
 
     assert bar.value() >= bar.maximum() - 4, "the tail did not resume"
