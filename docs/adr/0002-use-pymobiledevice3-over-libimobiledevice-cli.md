@@ -23,9 +23,17 @@ same device (`iPhone18,2`, iOS 26.5.2, 20-second capture):
 | NOTICE | 604 | 11.8% |
 | ERROR | 74 | 1.4% |
 
-`syslog_relay` delivers essentially only the NOTICE tier — about 900–1,200
-lines per second of almost entirely NOTICE. The DEBUG and INFO records, which
-are the ones that matter when debugging your own app, never arrive.
+`syslog_relay` delivers the NOTICE tier and above, and nothing below it. The
+DEBUG and INFO records, which are the ones that matter when debugging your own
+app, never arrive.
+
+That boundary was an inference when this decision was taken and is now measured:
+reading both services from one process over the same minute, `syslog_relay`
+returned 11,642 entries against 11,479 records at NOTICE and above on
+`os_trace_relay` — 1.4% apart, and exactly equal in one of the shorter runs. The
+figure this ADR used to give, "about 900–1,200 lines per second", was a line
+count from a separate run and does not reconcile with the table above; see
+[log-sources-comparison.md](../research/log-sources-comparison.md) Finding 1b.
 
 **Structured metadata exists and is being thrown away.** 96.8% of records carry
 a `subsystem` and `category`. `os_trace_relay` also carries `thread_id`, the

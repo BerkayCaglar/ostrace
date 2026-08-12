@@ -62,6 +62,27 @@ such: the `Record` model and the on-disk export formats documented in
 - `Documentation` added to `project.urls`, which earns the entry an icon on the
   PyPI sidebar and a place under Verified details.
 
+- **The README carries the comparison the whole project rests on, measured
+  rather than argued.** Both lockdown services were read at the same time, from
+  one process, over the same minute: `os_trace_relay` returned 233,956 records
+  and `syslog_relay` 11,642. The claim behind it is sharper than "more records" —
+  `syslog_relay` returns the NOTICE tier and above and nothing below it, to
+  within 1.4% in that run and exactly in one of two shorter ones.
+
+  The image had been designed and withheld for a year of releases because its
+  second bar had no measurement behind it; an early draft labelled it *678
+  records*, which was two rows of the first bar added together. `idevicesyslog`
+  was never needed to settle it: it is a client of `com.apple.syslog_relay` and
+  so is `pymobiledevice3`, which is already a dependency, so the service the
+  claim is about could be read directly. `tools/build_source_chart.py` draws the
+  chart from the measurement, in the viewer's own severity colours.
+
+  Both relays at once, rather than one after the other, because the same phone
+  delivered 5,140 records in one 20-second window and 36,763 in another —
+  sequential runs would compare the device's mood. The ratio between the two
+  services moved between 9.1× and 20.1× across three runs for the same reason,
+  which is why the chart shows tiers and not a multiplier.
+
 - **The README documents the supported library API** — the seven import paths,
   what each is for, and the promise that none of them loads Qt or the device
   library. Nothing moved to make that true; it was true and undocumented, which
