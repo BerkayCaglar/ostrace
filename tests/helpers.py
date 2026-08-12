@@ -36,6 +36,19 @@ FIXTURES = Path(__file__).parent / "fixtures"
 MIXED = FIXTURES / "ios26-mixed.jsonl.gz"
 ERRORS = FIXTURES / "ios26-errors.jsonl.gz"
 
+
+def committed_captures() -> list[Path]:
+    """Every capture under ``fixtures/``, found rather than listed.
+
+    The privacy gate reads this. A named list is a gate that covers what
+    somebody remembered to add to it: a third fixture was prepared and both the
+    suite and CI would have audited the first two and ignored it, because both
+    enumerated them by hand. Only ``release.yml`` globbed, and that fires at the
+    tag, which is far too late to be the first check.
+    """
+    return sorted(FIXTURES.glob("*.jsonl.gz"))
+
+
 #: The offset the test device reported (Europe/Istanbul at capture time).
 DEVICE_TZ = timedelta(hours=3)
 

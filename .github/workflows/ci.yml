@@ -67,11 +67,21 @@ jobs:
       # identifier is the failure this gate exists to make loud. The same check
       # runs in the test suite; it is here as well so that a lint-only run
       # cannot miss it.
+      #
+      # Found rather than listed, and an empty match is a failure rather than a
+      # pass -- the same shape `release.yml` uses on the sdist. Naming them cost
+      # nothing until a third fixture arrived and this step went on auditing the
+      # first two.
       - name: Audit the fixtures for device identifiers
         run: |
-          python tools/audit_capture.py \
-            tests/fixtures/ios26-mixed.jsonl.gz \
-            tests/fixtures/ios26-errors.jsonl.gz
+          shopt -s nullglob
+          fixtures=(tests/fixtures/*.jsonl.gz)
+          if [ ${#fixtures[@]} -eq 0 ]; then
+            echo "::error::No captures found under tests/fixtures; this gate would have passed by checking nothing."
+            exit 1
+          fi
+          printf 'auditing %s\n' "${fixtures[@]}"
+          python tools/audit_capture.py "${fixtures[@]}"
 
       # Type-check every target platform, not just the runner's. Windows-only
       # and macOS-only branches are otherwise never checked at all: this job
