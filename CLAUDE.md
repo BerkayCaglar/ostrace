@@ -13,9 +13,18 @@ redesign's must-have tier is finished and released, and so are the fixes that
 came out of the 0.2.0 analysis.
 
 The next version is 0.2.0 and it is a structural one: the plan lives outside
-this repository, beside the design notes. It now opens with a package that is
-not structural at all — the project's public presence and its identity to the
-operating system — placed first because it edits files the later packages move.
+this repository, beside the design notes. Seven of its eight packages have
+landed — P (public presence and application identity), A (contract safety
+nets), B (the source seam), C (GUI mechanics), D (the capture, follow and theme
+controllers), E (the view layer) and F (the storage facade). What is left is
+G: the public surface and the paper trail, which is documentation and a comment
+sweep rather than code.
+
+The window went from 2,155 lines to 1,817 across C, D and E, and five
+controllers came out of it — `gui/settings.py`, `gui/actions.py`,
+`gui/capture_controller.py`, `gui/follow.py`, `gui/theme_policy.py`. ADRs 0007
+to 0009 record why they are shaped that way and what deliberately stayed on the
+window.
 
 0.1.0 does not exist. It was published and withdrawn the next day over the
 fixtures inside its `sdist`, and the number will not be reused — so there is
