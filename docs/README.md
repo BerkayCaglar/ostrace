@@ -60,9 +60,15 @@ audited the artifact it published, and CI running a device test that passed
 without a device.
 
 The next version is 0.2.0, and it is a structural one rather than a feature
-one: the god node, the module boundaries, and the seams that would make socket
+one: the god node, the module boundaries, and the seams that make socket
 ownership provable in CI. Its plan is written down outside this repository,
 beside the design notes.
+
+Most of it is on `main` and none of it is released. The window has been
+decomposed into five controllers, the source has grown the seam that lets a
+test watch the second socket, the storage facade decides on its own what a
+capture is, and three ADRs — 0007 to 0009 — record the shapes and what was
+rejected. What is left is the public surface and the paper trail.
 
 The documentation under `formats/` and `design/` describes contracts, which are
 specified before they are implemented so that the shape is a decision rather
