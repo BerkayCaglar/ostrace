@@ -43,7 +43,6 @@ It is the right advice in C++ and the wrong advice here.
 from __future__ import annotations
 
 from bisect import bisect_left
-from enum import IntFlag, StrEnum
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import (
@@ -54,22 +53,37 @@ from PySide6.QtCore import (
     Signal,
 )
 
+from ostrace.analysis.scan import ABSENT
 from ostrace.exporters.plaintext import gap_line
 from ostrace.gui.columns import COLUMNS, Column
 from ostrace.gui.filters import Filter
+from ostrace.gui.finding import MATCHERS, Band, Find
 from ostrace.gui.markers import Eviction, is_record, when
 from ostrace.gui.theme import Scheme, Severity, mark_tint, severity_for
 from ostrace.model import Gap, Level, Record
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Iterable, Sequence
     from datetime import datetime
 
     from PySide6.QtCore import QObject
 
     from ostrace.gui.markers import Row
 
-__all__ = ["BUCKET_ROWS", "MARKER_LEVEL", "MAX_ROWS", "TRIM_MARGIN", "Band", "Find", "RecordModel"]
+#: `ABSENT`, `Band` and `Find` are re-exported rather than defined here.
+#: They moved out in 0.2.0 -- to `analysis.scan` and `gui.finding` -- and the
+#: names stay importable from here for that release so a consumer is not
+#: obliged to move in the same commit.
+__all__ = [
+    "ABSENT",
+    "BUCKET_ROWS",
+    "MARKER_LEVEL",
+    "MAX_ROWS",
+    "TRIM_MARGIN",
+    "Band",
+    "Find",
+    "RecordModel",
+]
 
 #: Markers borrow a severity so their colour comes from the theme rather than
 #: from a literal here. NOTICE is plain body text in both schemes, which is
@@ -88,9 +102,6 @@ TRIM_MARGIN = 0.1
 #: that an append touches only the last bucket; see `_rebuild_buckets`.
 BUCKET_ROWS = 256
 
-#: What an absent optional field reads as -- the exporters' spelling, so a value
-#: copied out of the table matches what a bundle would contain.
-ABSENT = "-"
 
 _Index = QModelIndex | QPersistentModelIndex
 
@@ -104,79 +115,6 @@ _ANSWERED_ROLES = frozenset(
         Qt.ItemDataRole.ToolTipRole.value,
     }
 )
-
-
-class Band(IntFlag):
-    """What one stripe of the minimap has in it.
-
-    A flag set rather than a count: the strip is a few hundred pixels tall, and
-    a number it has no room to draw is a number nobody asked for.
-    """
-
-    NONE = 0
-    ERROR = 1
-    MARKER = 2
-    MARK = 4
-
-
-class Find(StrEnum):
-    """What `RecordModel.find` looks for.
-
-    What went wrong, where data is missing, and where the reader left a note to
-    themselves -- the three things worth jumping between in a log. Named rather
-    than passed as a predicate so the key bindings, the menu and the toolbar's
-    target picker can all refer to the same thing.
-
-    The severity entries are *thresholds*, not equalities: `Level` is ordered
-    on purpose (Apple's own values are not, which is why this project keeps its
-    own enum), so `NOTICE` finds everything a reader would call interesting
-    without them having to know which of four names the device chose. Jumping
-    to a level exactly would be a filter, and there is already a filter.
-    """
-
-    ERROR = "error"
-    FAULT = "fault"
-    NOTICE = "notice"
-    MARKER = "marker"
-    MARK = "mark"
-
-    @property
-    def label(self) -> str:
-        """How the target picker names it."""
-        return _FIND_LABELS[self]
-
-
-#: Beside the enum rather than in the window, so that adding a target and
-#: naming it are one edit. A member with no label raises here rather than
-#: rendering as its own lowercase value in a menu.
-_FIND_LABELS: dict[Find, str] = {
-    Find.ERROR: "Errors and Faults",
-    Find.FAULT: "Faults",
-    Find.NOTICE: "Notices and above",
-    Find.MARKER: "Gaps",
-    Find.MARK: "Marked rows",
-}
-
-
-def _at_least(level: Level) -> Callable[[RecordModel, int], bool]:
-    """Match records at or above ``level``. Markers are never records."""
-
-    def matches(model: RecordModel, row: int) -> bool:
-        record = model.row_at(row)
-        return isinstance(record, Record) and record.level >= level
-
-    return matches
-
-
-_MATCHERS: dict[Find, Callable[[RecordModel, int], bool]] = {
-    # `Record.is_error` is `level >= ERROR`, so this is the same predicate it
-    # always was, spelled once instead of twice.
-    Find.ERROR: _at_least(Level.ERROR),
-    Find.FAULT: _at_least(Level.FAULT),
-    Find.NOTICE: _at_least(Level.NOTICE),
-    Find.MARKER: lambda model, row: not isinstance(model.row_at(row), Record),
-    Find.MARK: lambda model, row: model.is_marked(row),
-}
 
 
 def _field(record: Record, column: Column) -> str:
@@ -349,7 +287,7 @@ class RecordModel(QAbstractTableModel):
         if total == 0:
             return None
         step = -1 if backwards else 1
-        matches = _MATCHERS[kind]
+        matches = MATCHERS[kind]
         for offset in range(1, total + 1):
             row = (start + step * offset) % total
             if matches(self, row):

@@ -15,6 +15,7 @@ from datetime import timedelta
 
 import pytest
 
+from ostrace.analysis.scan import ABSENT
 from ostrace.model import Gap, Record
 from ostrace.storage.spool import SpoolReader
 from tests.helpers import MIXED
@@ -23,7 +24,7 @@ pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
 from PySide6.QtWidgets import QApplication, QLabel
 
-from ostrace.gui.widgets.detail_pane import ABSENT, DetailPane
+from ostrace.gui.widgets.detail_pane import DetailPane
 from ostrace.gui.windows.main import MainWindow
 
 pytestmark = pytest.mark.gui
@@ -98,6 +99,21 @@ def test_absent_fields_use_the_exporters_spelling(pane: DetailPane, records: lis
     without_subsystem = next(r for r in records if r.subsystem is None)
     pane.show_record(without_subsystem)
     assert pane.field("Subsystem") == ABSENT
+
+
+def test_the_table_and_the_exporters_agree_on_the_spelling() -> None:
+    """One definition, three readers. It was defined three times -- in this
+    pane, in the model and in `analysis.scan` -- and three copies of a
+    one-character constant agree right up until somebody changes one, at which
+    point a value copied out of the viewer stops matching the bundle it came
+    from.
+
+    The pane's half is the test above: its assertion now reads the definition
+    in `analysis.scan`, which it could not have done while it had its own.
+    """
+    from ostrace.gui import models
+
+    assert models.ABSENT is ABSENT
 
 
 def test_a_gap_says_plainly_that_the_records_are_unrecoverable(pane: DetailPane) -> None:

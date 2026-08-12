@@ -35,7 +35,7 @@ from PySide6.QtCore import QByteArray, QSettings
 
 from ostrace.gui.columns import COLUMNS
 from ostrace.gui.filters import RECENT_KEPT, Filter
-from ostrace.gui.models import Find
+from ostrace.gui.finding import Find
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

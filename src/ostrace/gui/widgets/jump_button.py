@@ -21,7 +21,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import QMenu, QToolButton
 
-from ostrace.gui.models import Find
+from ostrace.gui.finding import Find
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QAction

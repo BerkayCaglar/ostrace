@@ -200,6 +200,30 @@ class TestTheRecentList:
         assert reopened.filter_bar.recent_entries == ["process dasd"]
 
 
+class TestWhetherTheBarNarrowsAnything:
+    """The window asks this to tell "the device is quiet" from "your filter
+    hides everything", which are the same empty table otherwise."""
+
+    def test_an_untouched_bar_narrows_nothing(self, qt_app: object) -> None:
+        del qt_app
+        assert FilterBar().is_empty
+
+    def test_a_half_typed_pattern_is_not_an_empty_bar(self, qt_app: object) -> None:
+        """It is a narrowing the user is in the middle of writing, and the
+        answer decides whether the window offers to clear a filter or explains
+        that the capture is empty.
+
+        Asked of the assembled filter now rather than of the five fields, so
+        the bar and the filter cannot disagree about what empty means -- and
+        assembling can fail, which the fields never could.
+        """
+        bar = FilterBar()
+        bar._regex.setChecked(True)
+        bar._search.setText("[unclosed")
+
+        assert not bar.is_empty
+
+
 class TestSettingTheBar:
     """One change rather than five."""
 

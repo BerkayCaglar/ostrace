@@ -56,9 +56,7 @@ if TYPE_CHECKING:
 
 __all__ = ["DetailPane"]
 
-#: What an absent optional field reads as. The same spelling the exporters use,
-#: so a value copied out of here matches what a bundle would contain.
-ABSENT = "-"
+from ostrace.analysis.scan import ABSENT
 
 #: How many field columns the grid has. Two, because the fields are short: at
 #: one column a dozen of them leave most of the pane empty and push the message

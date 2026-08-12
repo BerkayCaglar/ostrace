@@ -1217,7 +1217,7 @@ class MainWindow(QMainWindow):
         # disconnect first. `busy_udid` covers the scan that was already in
         # flight when the capture started.
         self.device_button.setEnabled(not capturing)
-        self.device_button.busy_udid = self.device_button.udid if capturing else None
+        self.device_button.set_busy(self.device_button.udid if capturing else None)
         # The funnel every capture state change passes through, including the
         # one at construction -- which is what puts a sentence on the cold-start
         # window instead of an empty grid, and the right name on the title bar
@@ -1242,7 +1242,7 @@ class MainWindow(QMainWindow):
                 # are not when nobody did -- and the one a scan must leave
                 # alone is the one the capture thread is blocked on reading,
                 # which only the device itself can say.
-                self.device_button.busy_udid = device.udid
+                self.device_button.set_busy(device.udid)
             # The title has been saying "Capturing" until now, because until
             # now that was the whole of what was known.
             self._device_name = device.name
@@ -1858,13 +1858,7 @@ class MainWindow(QMainWindow):
         fraction of a second later.
         """
         try:
-            return Filter(
-                minimum_level=self.filter_bar.minimum_level,
-                process=self.filter_bar.process,
-                subsystem=self.filter_bar.subsystem,
-                search=self.filter_bar.search,
-                regex=self.filter_bar.regex,
-            )
+            return self.filter_bar.current()
         except ValueError as exc:
             # Half a pattern is not an empty log. The previous filter stays
             # applied and the user is told why, rather than watching the view
