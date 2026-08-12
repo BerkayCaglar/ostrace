@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.helpers import ERRORS, MIXED, make_record
+from tests.helpers import ERRORS, MIXED, committed_captures, make_record
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -45,16 +45,35 @@ def _load_tool() -> ModuleType:
 audit_capture = _load_tool()
 
 
-@pytest.mark.parametrize("fixture", [MIXED, ERRORS], ids=["mixed", "errors"])
+@pytest.mark.parametrize(
+    "fixture", committed_captures(), ids=lambda path: path.name.removesuffix(".jsonl.gz")
+)
 def test_the_committed_fixtures_carry_no_device_identifiers(fixture: Path) -> None:
     """The gate. If this fails, something is about to be published that should not be.
 
     A finding is not automatically a bug in the fixture -- it may be a value
     that is genuinely safe -- but it is always a decision for a human, recorded
     either as a redaction or as an entry in ``KNOWN_SYNTHETIC`` with a reason.
+
+    Parametrised over what is *there*, not over a list. Both this and the CI
+    step named the first two fixtures by hand, so the third would have been
+    published unchecked by either.
     """
     findings = audit_capture.audit(audit_capture.read(fixture))
     assert findings == [], "\n" + "\n".join(str(f) for f in findings)
+
+
+def test_the_gate_is_looking_at_something() -> None:
+    """A gate that finds nothing to check passes, and means nothing.
+
+    ``release.yml`` already says this in shell -- an empty glob is an error
+    there rather than a green step -- and the reason is the same here: the
+    discovery above turns a missing directory, a renamed suffix or a moved
+    ``tests/`` into a silent pass with no fixtures audited at all.
+    """
+    found = {path.name for path in committed_captures()}
+
+    assert {MIXED.name, ERRORS.name} <= found, "the known fixtures are not being audited"
 
 
 class TestTheRulesCatchWhatTheyClaimTo:
