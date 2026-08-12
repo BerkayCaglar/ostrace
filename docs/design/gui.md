@@ -748,6 +748,16 @@ Derive from the palette roles rather than inventing colours: `Base` /
 `PlaceholderText` for dimming — the theme's own grey is better than ours — and
 `Accent`.
 
+**Which scheme is in force is a separate question from what a scheme looks
+like**, and since 0.2.0 it has a separate module: `gui/theme_policy.py` decides
+between chosen, followed and remembered, and `gui/theme.py` stays the function
+from a scheme to a palette. The rule it holds is that the operating system is
+the **default, not the authority** — once somebody picks a theme, in this
+session or an earlier one, the system stops being consulted. Two halves move on
+every change and both every time: the application palette, and whatever a
+window resolved once and held. A switch that moved only one of them is a bug
+this project has already shipped.
+
 **A mark has its own colour, and it is not the accent.** The first attempt
 borrowed one and produced a marked row identical to a selected one — the user
 could not tell what they had marked from what they had merely clicked. Marks

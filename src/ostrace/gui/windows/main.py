@@ -66,7 +66,8 @@ from ostrace.gui.markers import when
 from ostrace.gui.models import Find, RecordModel
 from ostrace.gui.settings import Layout, WindowSettings
 from ostrace.gui.shortcuts import key_table
-from ostrace.gui.theme import Scheme, apply_theme, scheme_for
+from ostrace.gui.theme import Scheme
+from ostrace.gui.theme_policy import ThemePolicy
 from ostrace.gui.timeinput import EXAMPLES, parse_jump
 from ostrace.gui.widgets.banner import Banner, Notice
 from ostrace.gui.widgets.detail_pane import DetailPane
@@ -199,9 +200,6 @@ class MainWindow(QMainWindow):
     def __init__(self, scheme: Scheme = Scheme.LIGHT, parent: QWidgetType | None = None) -> None:
         super().__init__(parent)
         self.scheme = scheme
-        #: Set once the user picks a theme, after which the system stops
-        #: being consulted. Default is to follow it.
-        self._theme_chosen = False
         #: What the toolbar's chevrons move between. Read before the toolbar is
         #: built, since the button is constructed with it, and separately from
         #: `_restore_layout`, which is allowed to give up on a geometry that no
@@ -248,61 +246,25 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
 
         self._connect_actions()
-        self._follow_color_scheme()
-        self._restore_theme()
+        # After the actions, because restoring a preference moves the checkbox
+        # that reports it -- and before the first paint, so nothing is drawn in
+        # a scheme the user overruled a session ago.
+        self.theme_policy = ThemePolicy(parent=self)
+        self.theme_policy.scheme_changed.connect(self._on_scheme_changed)
+        self.theme_policy.follow_system()
+        self.theme_policy.restore()
         self._set_capturing(capturing=False)
 
-    def _restore_theme(self) -> None:
-        """Re-apply a theme the user chose in an earlier session.
+    def _on_scheme_changed(self, scheme: object) -> None:
+        """The scheme moved. Repaint what this window prebuilt for itself.
 
-        Absent, the window follows the system, which is the right default and
-        was the only behaviour. The checkbox is set through `_show_theme_state`
-        so that restoring a preference does not look like expressing one.
+        Which scheme is in force is `gui.theme_policy`'s decision and the
+        application palette is already on it by the time this runs; what is
+        left is the colours resolved once and held here, and the checkbox that
+        reports the answer.
         """
-        stored = WindowSettings().theme
-        if stored not in (Scheme.LIGHT.value, Scheme.DARK.value):
+        if not isinstance(scheme, Scheme):  # pragma: no cover - the signal carries one
             return
-        scheme = Scheme(stored)
-        self._theme_chosen = True
-        app = QApplication.instance()
-        if isinstance(app, QApplication):
-            apply_theme(app, scheme)
-        self.set_scheme(scheme)
-        self._show_theme_state()
-
-    def _follow_color_scheme(self) -> None:
-        """Track the operating system's light/dark setting while this window lives.
-
-        A bound method rather than a lambda closing over ``self``: Qt drops a
-        connection whose receiver is a destroyed ``QObject``, and a lambda would
-        instead keep this window alive for as long as the application and then
-        call into a deleted C++ object.
-        """
-        app = QApplication.instance()
-        if not isinstance(app, QApplication):  # pragma: no cover - no app, no signal
-            return
-        app.styleHints().colorSchemeChanged.connect(self._on_color_scheme_changed)
-
-    def _on_color_scheme_changed(self, colour_scheme: Qt.ColorScheme) -> None:
-        """Follow the operating system, if the user has not overruled it.
-
-        Both halves of the switch happen here, and that is the point.
-        `apply_theme` moves the application -- palette, tooltips, chrome
-        stylesheet -- and `set_scheme` moves what this window prebuilt for
-        itself. `gui.app` used to make the first call from its own connection
-        to this same signal, under a rule that could not see `_theme_chosen`,
-        so the two listeners disagreed the moment anybody picked a theme: the
-        chrome went dark and the table stayed white, which reads as a broken
-        dark mode rather than as a preference being honoured.
-        """
-        if self._theme_chosen:
-            # The user said which one they wanted. The operating system is the
-            # default, not the authority.
-            return
-        scheme = scheme_for(colour_scheme)
-        app = QApplication.instance()
-        if isinstance(app, QApplication):
-            apply_theme(app, scheme)
         self.set_scheme(scheme)
         self._show_theme_state()
 
@@ -319,26 +281,8 @@ class MainWindow(QMainWindow):
         self.action_dark_mode.blockSignals(False)
 
     def toggle_dark_mode(self, *, dark: bool) -> None:
-        """Choose a theme, rather than inheriting one.
-
-        The viewer followed the system and offered no way to disagree with it,
-        which is fine until you are the person reading a log at night on a
-        machine set to light -- or the reverse. Reported as "there is no dark
-        mode", and there was one; there was no way to ask for it.
-
-        Choosing stops the following, and it is remembered. `apply_theme` is
-        called here as well as `set_scheme`: the palette belongs to the
-        application and the prebuilt colours belong to this window, and a
-        switch that moved only one of them is the bug this project already
-        found once, where every severity colour stayed in the previous scheme.
-        """
-        self._theme_chosen = True
-        scheme = Scheme.DARK if dark else Scheme.LIGHT
-        app = QApplication.instance()
-        if isinstance(app, QApplication):
-            apply_theme(app, scheme)
-        self.set_scheme(scheme)
-        WindowSettings().theme = scheme.value
+        """The menu item was used. Choosing is the policy's to record."""
+        self.theme_policy.choose(dark=dark)
 
     def set_scheme(self, scheme: Scheme) -> None:
         """Move the colours this window prebuilt for itself to ``scheme``.
