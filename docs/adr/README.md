@@ -12,6 +12,7 @@ Why the code looks the way it does. Format is [MADR 4.0.0](https://adr.github.io
 | [0006](0006-defer-wifi-capture.md) | Defer network (Wi-Fi) capture to a later release | accepted |
 | [0007](0007-capture-lifecycle-the-pump-outlives-the-thread.md) | Capture lifecycle: no shared session class, and the pump outlives the thread | accepted |
 | [0008](0008-cooperating-controllers-not-a-layered-mvp.md) | Decompose MainWindow into cooperating controllers, not a layered MVP | accepted |
+| [0009](0009-keep-the-model-core-inside-the-qt-model.md) | Keep `RecordModel`'s core inside the Qt model; extract only pure arithmetic | accepted |
 
 ## Adding one
 
