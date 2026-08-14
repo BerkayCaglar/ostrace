@@ -1106,16 +1106,29 @@ toggle~~ · ~~named saved filters~~ · ~~`Copy filter` text form~~ · search-ter
 highlighting inside the Message cell · marks panel · minimap keyboard focus and
 band stepping · minimap time axis · ~~capture options dialog (duration, max
 records, no-reconnect, output)~~ · ~~status-bar bytes-on-disk~~ · ~~`N buffered`
-in the paused banner~~ · export radio list · export header line ·
-reveal-in-folder link · export on a thread · `F2`/`Shift+F2` layout-safe gap
-keys · ~~`F5` refresh~~ · `Ctrl+Shift+C` copy message · `Ctrl+Shift+B` marks
+in the paused banner~~ · ~~export radio list~~ · ~~export header line~~ ·
+~~reveal-in-folder link~~ · ~~export on a thread~~ · `F2`/`Shift+F2` layout-safe
+gap keys · ~~`F5` refresh~~ · `Ctrl+Shift+C` copy message · `Ctrl+Shift+B` marks
 panel · filter bar wrapping at narrow widths · ~~loader progress with Cancel~~.
 
 > **Struck through: shipped.** This tier is being taken in four packages, one
 > pull request each, grouped by the sentence they belong to rather than by the
-> file they touch. The filter bar was the first and the capture options the
-> second. The remaining two are the export dialog, and the View menu — marks,
-> the minimap's keyboard, and the columns.
+> file they touch: the filter bar, the capture options, the export dialog, and
+> the View menu — marks, the minimap's keyboard, and the columns. Only the last
+> is outstanding.
+>
+> **`export on a thread` was already done** and should not have been on this
+> list. `ExportWorker` shipped in 0.1.2, with the measurement that justified it
+> — 1.5 to 2.3 seconds on a 61,190 record capture, against a 200,000 cap. It is
+> struck through as shipped rather than deleted, because a list that quietly
+> loses an item reads as a list that never had it.
+>
+> **Two items from the closed must-have tier were not actually done.** §10's
+> item 21 asks for `Choose…` beside the destination field and for the Export
+> button to name the format; the tier is marked closed and neither had been
+> built. Both are in the export package. The wait cursor and the disabled button
+> from the same item *were* built, which is presumably how the whole line came
+> to be ticked.
 >
 > The loader's Cancel is on the capture package rather than on the export one
 > because it is the same sentence: what the window says about work it is in the

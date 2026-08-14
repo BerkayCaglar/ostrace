@@ -14,6 +14,29 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Added
 
+- **The export dialog shows all six formats at once**, as a list rather than a
+  dropdown. Six is the count where a list wins: the formats *are* the product,
+  their descriptions are already written on the exporters, and a combo hid five
+  of the six behind a click — so the reader had to open it to find out that
+  anything but the default existed.
+
+- **The dialog says what it is exporting**, in a line above the formats: the
+  capture's name, and its record and gap counts when they are known. They are
+  known from a *finalised* sidecar or not at all — a capture still recording has
+  one written at open whose counts are zero until it closes, and a bare spool has
+  none to ask. A zero printed beside `records` would be read as a fact about the
+  capture.
+
+- **`Show in folder`**, after a successful export. That is the answer to "where
+  did it go", which the report could previously give only as a path somebody
+  then had to retype. The folder rather than the file, because an agent bundle
+  *is* a directory and a `jsonl` export is a file.
+
+- **A snapshot taken while a capture runs says how much it would be**, as the
+  size on disk. Not a record count: getting one means decompressing the whole
+  spool, on the interface thread, at the moment the dialog opens, for a file that
+  is still growing.
+
 - **`Capture ▸ Capture Options…`**, carrying the four things `ostrace capture`
   has taken since phase 3a and the viewer had no way to say: stop after a time,
   stop after a count, fail on the first outage instead of reconnecting, and
@@ -94,6 +117,11 @@ such: the `Record` model and the on-disk export formats documented in
   keep it reproducible; it refuses to run rather than let Qt substitute a font.
 
 ### Changed
+
+- **The Export button names the format** it will write — `Export agent-bundle` —
+  and **`Choose…` sits beside the destination field** rather than under it, where
+  it read as a control belonging to something else. Both were on the redesign's
+  must-have list, which had been marked closed without them.
 
 - **The `Regex` checkbox moved inside the Search field**, as a `.*` toggle at
   its trailing edge. A checkbox sitting after three fields does not say which of
