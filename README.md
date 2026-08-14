@@ -255,8 +255,17 @@ says so. Anything not listed here is internal, `ostrace.gui` included.
     <img alt="The same window on macOS, drawn in the system font, with no menu bar inside it because macOS puts one in the screen menu instead" src="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-macos-light.png">
   </picture>
 
-  *The same capture and the same code on macOS. The window carries no menu bar
-  of its own: there it belongs to the screen.*
+  *The same capture on macOS. The window carries no menu bar of its own: there
+  it belongs to the screen.*
+
+  This pair is from 0.1.2 and the Windows pair above is from 0.2.0, so the
+  filter bar differs between them: 0.2.0 moved the `Regex` checkbox inside the
+  Search field and put a `≠` in Process and Subsystem. A macOS screenshot has
+  to be rendered on a Mac under the `cocoa` plugin — the offscreen plugin
+  resolves the interface font to Qt's generic `Sans Serif`, which is right
+  about layout and wrong about the one thing anybody looks at a macOS
+  screenshot for — so this one waits for a Mac rather than being regenerated
+  in CI.
 - **Only iOS is supported.** The device layer is written around lockdown and
   `os_trace_relay`.
 
