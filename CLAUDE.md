@@ -38,6 +38,15 @@ controllers came out of it — `gui/settings.py`, `gui/actions.py`,
 to 0009 record why they are shaped that way and what deliberately stayed on the
 window.
 
+**It is 2,188 lines now**, which is 33 more than before the refactor started.
+The structural work took out 338 and the four feature packages put 371 back —
+H 85, J 138, K none of it (an export change lands in the dialog), L 148. That is
+not the refactor failing: what came out were *responsibilities*, and what went
+back in is the wiring for four features the window did not have. But the number
+is the number, and a document claiming 1,817 while the file reads 2,188 is the
+kind of stale measurement this repository keeps being bitten by. The next
+package that touches this file should read it before adding to it.
+
 0.1.0 does not exist. It was published and withdrawn the next day over the
 fixtures inside its `sdist`, and the number will not be reused — so there is
 deliberately no `v0.1.0` tag, and a commit or document referring to one is

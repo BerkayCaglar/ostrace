@@ -18,11 +18,16 @@ eight packages, none of which a user would notice. The GUI redesign's
 nice-to-have tier went in on top of it, and that tier is what this release
 mostly reads as.
 
-`MainWindow` went from 2,155 lines to 1,817 and five controllers came out of it;
-ADRs 0007 to 0009 record their shapes and what was rejected. The measurement the
-whole project rests on — `os_trace_relay` against `syslog_relay` — was taken
-properly for the first time, over one minute from one process, and the README
-carries the chart.
+`MainWindow` went from 2,155 lines to 1,817 across the structural work and five
+controllers came out of it; ADRs 0007 to 0009 record their shapes and what was
+rejected. The four feature packages then put 371 lines back, so it ships at
+2,188 — 33 more than it started. What came out were responsibilities and what
+went back is the wiring for four features it did not have, but the number is
+worth stating rather than quoting the low-water mark.
+
+The measurement the whole project rests on — `os_trace_relay` against
+`syslog_relay` — was taken properly for the first time, over one minute from one
+process, and the README carries the chart.
 
 ### Added
 
