@@ -1101,21 +1101,42 @@ New:
 
 ### Nice-to-have if cheap
 
-Column chooser · ~~negate toggles on Process and Subsystem~~ · ~~in-field regex
-toggle~~ · ~~named saved filters~~ · ~~`Copy filter` text form~~ · search-term
-highlighting inside the Message cell · marks panel · minimap keyboard focus and
-band stepping · minimap time axis · ~~capture options dialog (duration, max
-records, no-reconnect, output)~~ · ~~status-bar bytes-on-disk~~ · ~~`N buffered`
-in the paused banner~~ · ~~export radio list~~ · ~~export header line~~ ·
-~~reveal-in-folder link~~ · ~~export on a thread~~ · `F2`/`Shift+F2` layout-safe
-gap keys · ~~`F5` refresh~~ · `Ctrl+Shift+C` copy message · `Ctrl+Shift+B` marks
-panel · filter bar wrapping at narrow widths · ~~loader progress with Cancel~~.
+~~Column chooser~~ · ~~negate toggles on Process and Subsystem~~ · ~~in-field
+regex toggle~~ · ~~named saved filters~~ · ~~`Copy filter` text form~~ ·
+~~search-term highlighting inside the Message cell~~ · ~~marks panel~~ ·
+~~minimap keyboard focus and band stepping~~ · **minimap time axis — does not
+fit, see below** · ~~capture options dialog (duration, max records,
+no-reconnect, output)~~ · ~~status-bar bytes-on-disk~~ · ~~`N buffered` in the
+paused banner~~ · ~~export radio list~~ · ~~export header line~~ ·
+~~reveal-in-folder link~~ · ~~export on a thread~~ · ~~`F2`/`Shift+F2`
+layout-safe gap keys~~ · ~~`F5` refresh~~ · ~~`Ctrl+Shift+C` copy message~~ ·
+~~`Ctrl+Shift+B` marks panel~~ · ~~filter bar wrapping at narrow widths~~ ·
+~~loader progress with Cancel~~.
 
-> **Struck through: shipped.** This tier is being taken in four packages, one
-> pull request each, grouped by the sentence they belong to rather than by the
-> file they touch: the filter bar, the capture options, the export dialog, and
-> the View menu — marks, the minimap's keyboard, and the columns. Only the last
-> is outstanding.
+> **This tier is closed.** It was taken in four packages, one pull request
+> each, grouped by the sentence they belong to rather than by the file they
+> touch: the filter bar, the capture options, the export dialog, and the View
+> menu — marks, the minimap's keyboard, and the columns.
+>
+> **One item was not built, and the reason is a measurement.** The *minimap time
+> axis* asked for the first and last timestamps drawn at the strip's ends. The
+> strip is `_WIDTH_CHARS` wide, which measures **12 px** on the shipped font,
+> and the shortest reading anybody could use — `09:14`, no seconds — needs
+> **27**; the full `09:14:02.118` needs **63**. Drawing it means widening the
+> strip fivefold and taking 51 px off the Message column of every window,
+> permanently, for two labels. The two readings went into the strip's tooltip
+> instead, which answers the same question at no width at all, on the control
+> people already point at.
+>
+> **Column visibility was documented as persisted and was not.** Must-have item
+> 19 lists "column widths and visibility"; `Layout` carried widths and nothing
+> else. The chooser brought the missing half with it.
+>
+> **The wrap breakpoint was unreachable when first written.** A `QGridLayout`
+> imposes its own minimum on its widget under `SetDefaultConstraint`, and the
+> flat arrangement's is 914 px — above the 900 the fold triggers at. Qt clamped
+> the bar there, the resize below 900 never arrived, and the breakpoint was dead
+> code. `setMinimumWidth(0)` does not help; Qt reads a zero minimum as unset.
 >
 > **`export on a thread` was already done** and should not have been on this
 > list. `ExportWorker` shipped in 0.1.2, with the measurement that justified it

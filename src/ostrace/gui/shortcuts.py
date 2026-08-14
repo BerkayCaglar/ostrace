@@ -146,6 +146,14 @@ BINDINGS: tuple[Binding, ...] = (
         description="Copy the selected rows as tab-separated text",
     ),
     Binding(
+        "copy_message",
+        "Copy &Message",
+        "Ctrl+Shift+C",
+        menu="edit",
+        group="clipboard",
+        description="Copy only the message text of the selected rows",
+    ),
+    Binding(
         "copy_filter",
         "Copy &Filter",
         "Ctrl+Alt+C",
@@ -254,11 +262,17 @@ BINDINGS: tuple[Binding, ...] = (
         group="kinds",
         description="Previous Error or Fault",
     ),
+    # `[` and `]` are the log-viewer tradition and they are not where the hand
+    # expects them on every layout: a Turkish F keyboard, a German one and a
+    # French AZERTY all put at least one of the pair behind a modifier, which
+    # turns a one-key step into a chord that varies by country. `F2` is in the
+    # same place on all of them, so the pair is aliased rather than moved --
+    # the tradition keeps its keys for whoever has them.
     Binding(
         "next_marker",
         "Next &Gap",
         "Ctrl+Shift+G",
-        aliases=("]",),
+        aliases=("]", "F2"),
         group="kinds",
         description="Next gap or eviction notice — where records are missing",
     ),
@@ -266,7 +280,7 @@ BINDINGS: tuple[Binding, ...] = (
         "previous_marker",
         "Previous Ga&p",
         "Ctrl+Alt+Shift+G",
-        aliases=("[",),
+        aliases=("[", "Shift+F2"),
         group="kinds",
         description="Previous gap or eviction notice",
     ),
@@ -298,6 +312,20 @@ BINDINGS: tuple[Binding, ...] = (
         group="rows",
         description="Previous row, even when the detail pane has focus",
     ),
+    Binding(
+        "marks_panel",
+        "&Marks Panel",
+        "Ctrl+Shift+B",
+        checkable=True,
+        group="panes",
+        description="A list of the rows you marked. `B` for bookmark",
+    ),
+    # `View ▸ Columns` is deliberately *not* here. It opens a submenu rather
+    # than doing anything, and a submenu is not an action: it has no key to
+    # document, and `actions.menu_items` excludes the entries that open one on
+    # purpose, so a binding for it would be a row this table promises is in a
+    # menu and which that function cannot see. What is inside it is named by
+    # `gui.columns.COLUMNS`, which is the same guarantee reached the other way.
     Binding(
         "detail_pane",
         "&Detail Pane",

@@ -142,6 +142,16 @@ class RecordModel(QAbstractTableModel):
     #: the view was told however the branches inside `_trim` fall.
     top_shifted = Signal(int)
 
+    #: A mark was added, removed, or all of them were dropped.
+    #:
+    #: Separate from `dataChanged`, which is also emitted and is what repaints
+    #: the row. A panel listing the marks needs the *set* to have changed, and
+    #: `dataChanged` fires for every reason a cell can look different -- so
+    #: rebuilding on it would rebuild a list of marks whenever a theme switched.
+    #: Not emitted by a trim or a rebase: those move the marks with the records
+    #: rather than changing which records are marked.
+    marks_changed = Signal()
+
     def __init__(
         self,
         scheme: Scheme = Scheme.LIGHT,
@@ -255,10 +265,25 @@ class RecordModel(QAbstractTableModel):
             marked = True
         cell = self.index(view_row, 0)
         self.dataChanged.emit(cell, self.index(view_row, len(COLUMNS) - 1))
+        self.marks_changed.emit()
         return marked
 
     def is_marked(self, view_row: int) -> bool:
         return self._visible[view_row] in self._marks
+
+    def marked_view_rows(self) -> list[int]:
+        """Every marked row the filter still shows, in view order.
+
+        Rows rather than records, because what a reader does with this list is
+        go back to one -- and the row is what a view is asked to scroll to. A
+        mark on a record the standing filter hides is not offered: the panel is
+        a way back to something on screen, and an entry that selected nothing
+        would look broken.
+
+        O(visible), on a human action, which is the precedent `find` already
+        sets a few methods down.
+        """
+        return [row for row, source in enumerate(self._visible) if source in self._marks]
 
     @property
     def marks(self) -> int:
@@ -272,6 +297,7 @@ class RecordModel(QAbstractTableModel):
             self.dataChanged.emit(
                 self.index(0, 0), self.index(len(self._visible) - 1, len(COLUMNS) - 1)
             )
+        self.marks_changed.emit()
 
     # -- navigation ------------------------------------------------------
 
@@ -715,6 +741,10 @@ class RecordModel(QAbstractTableModel):
         self._buckets = []
         self._marker_sources = []
         self.endResetModel()
+        # After the bracket, and said out loud: emptying the model empties the
+        # marks with it, and anything listing them is otherwise left offering
+        # rows that no longer exist.
+        self.marks_changed.emit()
 
     def set_filter(self, new: Filter) -> None:
         """Apply a filter, rescanning everything retained.

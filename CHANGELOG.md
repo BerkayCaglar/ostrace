@@ -14,6 +14,48 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Added
 
+- **A marks panel**, on `Ctrl+Shift+B` and hidden until asked for. Marking has
+  existed since phase 4 and the only way back to a mark was to step through them
+  one at a time — which works at three and is a tour of the whole capture at
+  twenty, at which point the marks stop being worth setting. A mark the standing
+  filter hides is not offered: the panel is a way back to something on screen.
+
+- **A column chooser**, under `View ▸ Columns`, with the visibility that
+  `QSettings` was documented as keeping and did not — `Layout` carried widths
+  and nothing else. The last remaining column cannot be turned off, and the tick
+  is disabled rather than ignored so the refusal is visible before the press.
+
+- **The overview strip answers the keyboard.** Arrow keys step a band, page keys
+  ten, `Home` and `End` are the ends of the capture. It could be driven only by
+  mouse, and it never took focus, so a keyboard user had no way to know it was a
+  control at all.
+
+- **The strip says when the capture begins and ends**, in its tooltip. The
+  research asked for these drawn at its ends as a time axis; measured, they do
+  not fit — the strip is 12 px and the shortest usable reading needs 27, the
+  full one 63. Drawing it means widening the strip fivefold and taking 51 px off
+  the Message column of every window, for two labels.
+
+- **The search term is highlighted where it appears in the message**, which
+  answers "why did this row match?" with no new control. The cost was measured
+  rather than assumed, because the research and the table's own code disagreed:
+  a Python `paint` costs about 1 ms on a 30 ms repaint **for one column**, and
+  the highlight drawing itself nothing measurable. The wash is held to a
+  contrast floor so the text under it stays readable.
+
+- **`Ctrl+Shift+C` copies just the message.** A tab-separated record with five
+  fields in front of the sentence is context around the one thing somebody
+  wanted to quote.
+
+- **`F2` and `Shift+F2` step between gaps**, beside the `[` and `]` the log
+  viewers use. Those two sit behind a modifier on Turkish, German and French
+  layouts, which turns a one-key step into a chord that varies by country.
+
+- **The filter bar folds onto two lines below 900 px** rather than squeezing.
+  Measured as the width where folding first gives the Search field more room
+  than not folding — 40 characters against 38, widening to 27 against 11 at 740,
+  where the flat arrangement has bottomed out at its own minimum of 9.
+
 - **The export dialog shows all six formats at once**, as a list rather than a
   dropdown. Six is the count where a list wins: the formats *are* the product,
   their descriptions are already written on the exporters, and a combo hid five
