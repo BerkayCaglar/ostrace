@@ -27,12 +27,25 @@ if TYPE_CHECKING:
 
     from ostrace.model import Record
 
-__all__ = ["RECENT_KEPT", "Filter", "remember"]
+__all__ = ["RECENT_KEPT", "Filter", "SavedFilter", "forget", "remember", "save"]
 
 #: How many filters back the recent list goes. Ten is about a session's worth
 #: of narrowing and short enough to read without scrolling a menu, which is the
 #: whole reason for offering the last ones rather than all of them.
 RECENT_KEPT = 10
+
+#: What forces a value to be quoted in the text form. Whitespace separates one
+#: term from the next, and the quote and the backslash are the escape mechanism
+#: itself, so a value carrying any of the three cannot be written bare.
+_MUST_QUOTE = re.compile(r'[\s"\\]')
+
+
+def _quote(value: str) -> str:
+    """One term's value: bare where it can be, quoted where it must be."""
+    if not _MUST_QUOTE.search(value):
+        return value
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +64,16 @@ class Filter:
     subsystem: str = ""
     search: str = ""
     regex: bool = False
+
+    #: Turn the process and subsystem terms into exclusions. Only those two:
+    #: shutting up one chatty daemon is the case people have, where "messages
+    #: not containing X" is rare and reads better as a narrowing of what to
+    #: highlight than as a filter.
+    #:
+    #: A flag set over an empty field excludes nothing, which is why `is_empty`
+    #: asks about the fields and not about these.
+    process_exclude: bool = False
+    subsystem_exclude: bool = False
 
     #: Compiled once at construction. Rebuilding it per record would put a regex
     #: compile in the innermost loop of the whole program.
@@ -95,12 +118,47 @@ class Filter:
         if self.minimum_level is not Level.DEBUG:
             parts.append(f"{self.minimum_level.title}+")
         if self.process:
-            parts.append(f"process {self.process}")
+            # The same glyph the toggle in the bar carries, so a menu entry and
+            # the control that produced it read as the same thing.
+            parts.append(f"process {'≠ ' if self.process_exclude else ''}{self.process}")
         if self.subsystem:
-            parts.append(f"subsystem {self.subsystem}")
+            parts.append(f"subsystem {'≠ ' if self.subsystem_exclude else ''}{self.subsystem}")
         if self.search:
             parts.append(f"{'regex' if self.regex else 'text'} {self.search!r}")
         return " · ".join(parts) if parts else "everything"
+
+    def as_text(self) -> str:
+        """This filter as one line somebody can paste into an issue.
+
+        `summary` is for a person reading a menu; this is for a person
+        reproducing what somebody else was looking at. The spelling is fixed in
+        `docs/formats/filter-text-form.md` before anything reads it, on the same
+        argument the on-disk contracts are written before they are implemented:
+        a format nobody specified is one every reader guesses at differently.
+
+        Two places where the obvious spelling was wrong and the measurement
+        settled it. The research proposed marking a pattern by prefixing its
+        value with ``~``, which cannot express a literal search for a string
+        that *starts* with one -- and `~` is in real device output, twice in
+        8,000 committed fixture messages, one of them the banner ``~~~~~ PCS
+        Cache ~~~~~`` that somebody would plausibly search for. The marker is a
+        key here instead, so no value is ever inspected for a prefix. And the
+        level is written by its enum name rather than its title, because
+        `Level.USER_ACTION.title` contains a space, which is the one character
+        the term separator claims.
+        """
+        terms: list[str] = []
+        if self.minimum_level is not Level.DEBUG:
+            terms.append(f"level:{self.minimum_level.name.lower()}")
+        if self.process:
+            terms.append(f"{'-' if self.process_exclude else ''}process:{_quote(self.process)}")
+        if self.subsystem:
+            terms.append(
+                f"{'-' if self.subsystem_exclude else ''}subsystem:{_quote(self.subsystem)}"
+            )
+        if self.search:
+            terms.append(f"{'regex' if self.regex else 'search'}:{_quote(self.search)}")
+        return " ".join(terms)
 
     def as_stored(self) -> str:
         """This filter as one line of text, for `QSettings`.
@@ -109,16 +167,61 @@ class Filter:
         version that wrote it: a stored entry from an older release has to be
         readable by a newer one, and an entry a newer one cannot read has to be
         droppable rather than fatal. `_pattern` is derived and is not stored.
+
+        Not `as_text`, which is the other direction of the same argument. That
+        form exists to be read by a person and is lossy about exactly the thing
+        settings must not be lossy about -- it omits every term that does not
+        narrow -- and a round trip through it would need the reader this
+        release deliberately does not ship.
         """
-        return json.dumps(
-            {
-                "minimum_level": int(self.minimum_level),
-                "process": self.process,
-                "subsystem": self.subsystem,
-                "search": self.search,
-                "regex": self.regex,
-            }
-        )
+        return json.dumps(self.as_fields())
+
+    def as_fields(self) -> dict[str, object]:
+        """Every term as plain data, for whoever does the encoding.
+
+        Separate from `as_stored` because a *named* filter stores this nested
+        under its name, and getting there by decoding the string `as_stored`
+        would have produced is a round trip through JSON to arrive back at what
+        was already in hand.
+        """
+        return {
+            "minimum_level": int(self.minimum_level),
+            "process": self.process,
+            "subsystem": self.subsystem,
+            "search": self.search,
+            "regex": self.regex,
+            "process_exclude": self.process_exclude,
+            "subsystem_exclude": self.subsystem_exclude,
+        }
+
+    @classmethod
+    def from_fields(cls, stored: object) -> Filter | None:
+        """Plain data back to a filter, or ``None`` if it cannot be read.
+
+        The `dict` check is what lets everything below be read without a cast:
+        this is decoded JSON, so it is as likely to be a list or a bare string
+        as a mapping.
+
+        The exclusion flags are read with a default rather than required. Every
+        line written before they existed is missing both, and requiring them
+        would silently empty the recent list of anyone upgrading -- a loss they
+        would read as the feature having broken, on the release that improved
+        it.
+        """
+        if not isinstance(stored, dict):
+            return None
+        try:
+            return cls(
+                minimum_level=Level(int(stored["minimum_level"])),
+                process=str(stored["process"]),
+                subsystem=str(stored["subsystem"]),
+                search=str(stored["search"]),
+                regex=bool(stored["regex"]),
+                process_exclude=bool(stored.get("process_exclude", False)),
+                subsystem_exclude=bool(stored.get("subsystem_exclude", False)),
+            )
+        except (TypeError, ValueError, KeyError):
+            return None
 
     @classmethod
     def from_stored(cls, text: str) -> Filter | None:
@@ -130,30 +233,39 @@ class Filter:
         turned a convenience into a way of losing the application.
         """
         try:
-            stored = json.loads(text)
-            return cls(
-                minimum_level=Level(int(stored["minimum_level"])),
-                process=str(stored["process"]),
-                subsystem=str(stored["subsystem"]),
-                search=str(stored["search"]),
-                regex=bool(stored["regex"]),
-            )
-        except (TypeError, ValueError, KeyError):
+            decoded = json.loads(text)
+        except ValueError:
             return None
+        return cls.from_fields(decoded)
 
     def matches(self, record: Record) -> bool:
         """Whether ``record`` should be shown.
 
         Ordered cheapest first: an integer comparison rejects most records
         under a raised level threshold before any string work happens.
+
+        A term rejects when its hit and its exclusion flag agree: a match under
+        `≠` is the record being excluded, and a miss under an ordinary term is
+        the record failing to be included. One comparison covers both, and it
+        costs an excluding term nothing over an including one.
         """
         if record.level < self.minimum_level:
             return False
-        if self.process and not self._matches_process(record):
+        if self.process and self._matches_process(record) == self.process_exclude:
             return False
-        if self.subsystem and self.subsystem.casefold() not in (record.subsystem or "").casefold():
+        if self.subsystem and self._matches_subsystem(record) == self.subsystem_exclude:
             return False
         return not (self._pattern is not None and not self._pattern.search(record.message))
+
+    def _matches_subsystem(self, record: Record) -> bool:
+        """Match a subsystem by substring, on a record that may not have one.
+
+        A record with no subsystem is a miss rather than an error -- and under
+        `≠` that makes it a *hit*, which is the answer somebody excluding a
+        noisy subsystem wants: they asked to see everything else, and a record
+        with no subsystem at all is everything else.
+        """
+        return self.subsystem.casefold() in (record.subsystem or "").casefold()
 
     def _matches_process(self, record: Record) -> bool:
         """Match a process by name or by pid.
@@ -167,6 +279,75 @@ class Filter:
         if needle.isdigit():
             return record.pid == int(needle)
         return needle in record.process.casefold()
+
+
+@dataclass(frozen=True, slots=True)
+class SavedFilter:
+    """A filter somebody gave a name to.
+
+    The expensive half of remembering a filter, and the one worth having only
+    for the handful somebody comes back to for weeks -- `remember` covers the
+    rest, unnamed and automatic. Kept apart from `Filter` because a name is not
+    a term: two saved filters with the same terms and different names are two
+    entries, and `Filter` equality is what decides whether the model rescans.
+    """
+
+    name: str
+    terms: Filter
+
+    def as_stored(self) -> str:
+        """One line for `QSettings`, with the terms nested under the name.
+
+        Nested rather than beside them, so that a term called ``name`` some
+        release from now cannot collide with this one.
+        """
+        return json.dumps({"name": self.name, "filter": self.terms.as_fields()})
+
+    @classmethod
+    def from_stored(cls, text: str) -> SavedFilter | None:
+        """One stored line back, or ``None``. Never raises, as `Filter` does not."""
+        try:
+            decoded = json.loads(text)
+        except ValueError:
+            return None
+        if not isinstance(decoded, dict):
+            return None
+        name = decoded.get("name")
+        terms = Filter.from_fields(decoded.get("filter"))
+        # An unnamed saved filter is unreachable: the menu offers it by name,
+        # so a blank one is a row nobody can tell from the row above it.
+        if not isinstance(name, str) or not name.strip() or terms is None:
+            return None
+        return cls(name=name, terms=terms)
+
+
+def save(saved: Sequence[SavedFilter], entry: SavedFilter) -> list[SavedFilter]:
+    """``saved`` with ``entry`` in it, replacing any entry of the same name.
+
+    Replacing rather than appending, and *in place* rather than at the front:
+    saving over a name is how somebody corrects one, and a list that reordered
+    itself under them each time would make the menu a different shape after
+    every correction. Names are compared as they read -- case and surrounding
+    space folded -- because two entries a menu shows identically are two nobody
+    can choose between.
+
+    Pure, so the window can hold the list and this can be tested without one.
+    """
+    key = _name_key(entry.name)
+    if any(_name_key(item.name) == key for item in saved):
+        return [entry if _name_key(item.name) == key else item for item in saved]
+    return [*saved, entry]
+
+
+def forget(saved: Sequence[SavedFilter], name: str) -> list[SavedFilter]:
+    """``saved`` without the entry of that name."""
+    key = _name_key(name)
+    return [item for item in saved if _name_key(item.name) != key]
+
+
+def _name_key(name: str) -> str:
+    """A name as the menu shows it, for deciding whether two are the same one."""
+    return name.strip().casefold()
 
 
 def remember(recent: Sequence[Filter], filter_: Filter) -> list[Filter]:

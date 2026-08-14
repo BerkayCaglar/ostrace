@@ -129,6 +129,14 @@ BINDINGS: tuple[Binding, ...] = (
         description="Copy the selected rows as tab-separated text",
     ),
     Binding(
+        "copy_filter",
+        "Copy &Filter",
+        "Ctrl+Alt+C",
+        menu="edit",
+        group="clipboard",
+        description="Copy the standing filter as one line, to paste into an issue",
+    ),
+    Binding(
         "find",
         "&Find",
         QKeySequence.StandardKey.Find,

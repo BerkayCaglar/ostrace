@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """What the window remembers between sessions, and what it deliberately does not.
 
-Seven keys across three namespaces. Qt decides where they are kept, per
+Nine keys across three namespaces. Qt decides where they are kept, per
 platform, which is why this is not a decision ``paths`` owns: no file of ours is
 being placed. ``gui.app`` sets the organisation and application names, which is
 what stops Qt filing them under a vendor called "Unknown".
@@ -12,9 +12,9 @@ that reopened yesterday's file would be guessing, and a filter that survived a
 restart is one the user has to remember they set -- which is the "where did my
 logs go" failure with a longer fuse.
 
-The recent filters *are* remembered, and that is the same rule rather than an
-exception to it. A filter that is merely **offered** changes nothing about what
-the window shows until somebody picks it.
+The recent and saved filters *are* remembered, and that is the same rule rather
+than an exception to it. A filter that is merely **offered** changes nothing
+about what the window shows until somebody picks it.
 
 Everything read back is treated as untrusted. It was written by some version of
 this program, possibly not this one, and a settings store is also a file a
@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QByteArray, QSettings
 
 from ostrace.gui.columns import COLUMNS
-from ostrace.gui.filters import RECENT_KEPT, Filter
+from ostrace.gui.filters import RECENT_KEPT, Filter, SavedFilter
 from ostrace.gui.finding import Find
 
 if TYPE_CHECKING:
@@ -50,6 +50,7 @@ _DETAIL = "window/detail"
 _COLUMNS = "table/columns"
 _JUMP = "table/jump"
 _RECENT = "filters/recent"
+_SAVED = "filters/saved"
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,5 +176,33 @@ class WindowSettings:
             if not isinstance(line, str):
                 continue
             entry = Filter.from_stored(line)
+            if entry is not None:
+                yield entry
+
+    # -- the saved filters -----------------------------------------------
+
+    def read_saved(self) -> list[SavedFilter]:
+        """The named ones, in the order they were saved.
+
+        Unbounded where the recent list is capped at ten, and that is the
+        difference between the two: the cap exists because the recent list is
+        written *for* you and would otherwise grow without your asking. A named
+        one is something you did on purpose, and a viewer that silently dropped
+        the oldest would be discarding work.
+        """
+        stored = self.store.value(_SAVED)
+        if not isinstance(stored, list):
+            return []
+        return list(self._named(stored))
+
+    def write_saved(self, saved: list[SavedFilter]) -> None:
+        self.store.setValue(_SAVED, [entry.as_stored() for entry in saved])
+
+    @staticmethod
+    def _named(stored: list[object]) -> Iterator[SavedFilter]:
+        for line in stored:
+            if not isinstance(line, str):
+                continue
+            entry = SavedFilter.from_stored(line)
             if entry is not None:
                 yield entry

@@ -59,7 +59,7 @@ from ostrace.gui import icons
 from ostrace.gui.actions import build_actions, build_menus, menu_items
 from ostrace.gui.capture_controller import CaptureController, Lifecycle
 from ostrace.gui.columns import COLUMNS
-from ostrace.gui.filters import Filter, remember
+from ostrace.gui.filters import Filter, SavedFilter, remember, save
 from ostrace.gui.follow import FollowController
 from ostrace.gui.loader import CaptureLoader
 from ostrace.gui.markers import when
@@ -77,6 +77,7 @@ from ostrace.gui.widgets.filter_bar import FilterBar
 from ostrace.gui.widgets.jump_button import JumpButton
 from ostrace.gui.widgets.log_table import LogTable
 from ostrace.gui.widgets.minimap import Minimap
+from ostrace.gui.widgets.saved_filters_dialog import SavedFiltersDialog
 from ostrace.gui.widgets.status_bar import StatusBar
 from ostrace.gui.windows.doctor import open_doctor
 from ostrace.model import DeviceInfo, Record
@@ -172,6 +173,7 @@ class MainWindow(QMainWindow):
     action_close: QAction
     action_export: QAction
     action_copy: QAction
+    action_copy_filter: QAction
     action_deselect: QAction
     action_find: QAction
     action_mark: QAction
@@ -236,6 +238,9 @@ class MainWindow(QMainWindow):
         #: has been used rather than typed through. See `_remember_filter`.
         self._recent: list[Filter] = self._restore_recent()
         self.filter_bar.set_recent(self._recent)
+        #: The named ones. Not capped and not automatic -- see `settings`.
+        self._saved: list[SavedFilter] = WindowSettings().read_saved()
+        self.filter_bar.set_saved(self._saved)
         self._filter_settled = QTimer(self)
         self._filter_settled.setSingleShot(True)
         self._filter_settled.setInterval(_FILTER_SETTLED_MS)
@@ -246,6 +251,10 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
 
         self._connect_actions()
+        # A fresh window shows everything, so there is no filter to copy yet.
+        # Stated here rather than left to the first filter change, which on a
+        # window nobody touches never comes.
+        self.action_copy_filter.setEnabled(False)
         # After the actions, because restoring a preference moves the checkbox
         # that reports it -- and before the first paint, so nothing is drawn in
         # a scheme the user overruled a session ago.
@@ -302,12 +311,13 @@ class MainWindow(QMainWindow):
         self.minimap.set_scheme(scheme)
         self.table.set_scheme(scheme)
         self.device_button.set_scheme(scheme)
+        self.filter_bar.set_scheme(scheme)
         icons.clear_cache()
         self._apply_icons()
 
     def _build_layout(self) -> None:
         """Assemble the widgets. No behaviour, no state."""
-        self.filter_bar = FilterBar(self)
+        self.filter_bar = FilterBar(self, scheme=self.scheme)
         self.banner = Banner(self)
         self.table = LogTable(self, scheme=self.scheme)
         self.detail = DetailPane(self)
@@ -453,6 +463,8 @@ class MainWindow(QMainWindow):
         """
         self.filter_bar.changed.connect(self._on_filter_changed)
         self.filter_bar.recent_chosen.connect(self._on_recent_chosen)
+        self.filter_bar.save_requested.connect(self.name_current_filter)
+        self.filter_bar.manage_requested.connect(self.manage_saved_filters)
         self.table.customContextMenuRequested.connect(self._on_context_menu)
         self.action_open.triggered.connect(self.choose_capture)
         self.action_close.triggered.connect(self.close_capture)
@@ -461,6 +473,7 @@ class MainWindow(QMainWindow):
         self.action_pause.toggled.connect(self.set_paused)
 
         self.action_copy.triggered.connect(self.copy_selection)
+        self.action_copy_filter.triggered.connect(self.copy_filter)
         self.action_deselect.triggered.connect(self.deselect)
         # The pane's own way out. `Esc` was the only one, which is a key you
         # have to be told about; a control you can see is not.
@@ -1552,6 +1565,31 @@ class MainWindow(QMainWindow):
         if clipboard is not None:
             clipboard.setText("\n".join(lines))
 
+    def copy_filter(self) -> None:
+        """Copy the standing filter as one line of text.
+
+        The half of a shareable filter that needs no parser. Somebody says
+        "I only see this under `level:error -process:backupd`" in an issue and
+        the reader sets the same four controls in four seconds, where a
+        screenshot of the bar makes them squint and a description of it makes
+        them guess.
+
+        The bar's value, not the model's: a half-typed regular expression
+        leaves the model on the previous filter, and copying that would hand
+        over the filter the user is *leaving* rather than the one in front of
+        them. `current()` raises on it, and an unusable filter is not worth
+        putting on the clipboard silently.
+        """
+        try:
+            text = self.filter_bar.current().as_text()
+        except ValueError:
+            self.status.showMessage("The filter is not finished, so there is nothing to copy")
+            return
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(text)
+        self.status.showMessage(f"Copied the filter: {text}")
+
     def show_keys(self) -> None:
         """The key sheet, rendered from the same table the bindings come from.
 
@@ -1602,6 +1640,10 @@ class MainWindow(QMainWindow):
         self._filter_debounce.start()
         # Restarted, so only a filter left alone is ever remembered.
         self._filter_settled.start()
+        # Not debounced: the menu item is read at the moment somebody opens the
+        # menu, and a Copy Filter that stays enabled for a third of a second
+        # after the bar was emptied copies an empty line.
+        self.action_copy_filter.setEnabled(not self.filter_bar.is_empty)
 
     def _remember_filter(self) -> None:
         """Add the standing filter to the recent list, if it is worth having.
@@ -1620,6 +1662,49 @@ class MainWindow(QMainWindow):
         """Put a remembered filter back in the bar, which applies it."""
         if isinstance(entry, Filter):
             self.filter_bar.set_filter(entry)
+
+    def name_current_filter(self) -> None:
+        """Ask for a name and keep the standing filter under it.
+
+        The name is asked for *after* the filter exists, never before: a viewer
+        that wants a name up front is one people decline, which is the whole
+        reason the recent list is unnamed.
+
+        Saving over an existing name replaces it, and the prompt is
+        pre-filled with nothing rather than with a guess -- a suggested name
+        derived from the terms would be accepted unread, and a menu of
+        `level:error process:dasd` is the summary line the recent half already
+        offers.
+        """
+        try:
+            terms = self.filter_bar.current()
+        except ValueError:
+            self.status.showMessage("The filter is not finished, so there is nothing to save")
+            return
+        if terms.is_empty:  # pragma: no cover - the menu row is disabled
+            return
+        name, chosen = QInputDialog.getText(self, "Save filter", "Name")
+        if not chosen or not name.strip():
+            return
+        self._set_saved(save(self._saved, SavedFilter(name=name.strip(), terms=terms)))
+        self.status.showMessage(f"Saved the filter as {name.strip()!r}")
+
+    def manage_saved_filters(self) -> None:
+        """Open the list of named filters, and keep whatever it returns.
+
+        Split from the dialog itself the way every other modal here is: the
+        window builds it, and what the dialog does to the list is testable
+        without opening one.
+        """
+        dialog = SavedFiltersDialog(self._saved, self)
+        dialog.exec()
+        self._set_saved(dialog.saved)
+
+    def _set_saved(self, saved: list[SavedFilter]) -> None:
+        """Hold the named filters, offer them, and write them down."""
+        self._saved = saved
+        self.filter_bar.set_saved(saved)
+        WindowSettings().write_saved(saved)
 
     def _on_context_menu(self, position: QPoint) -> None:
         """Pop the row menu where it was asked for.

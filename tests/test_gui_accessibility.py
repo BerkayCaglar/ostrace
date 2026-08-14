@@ -92,6 +92,17 @@ class TestEveryControlHasAName:
         assert bar._search.accessibleName() == "Search"
         assert bar._level.accessibleName() == "Level"
 
+    def test_the_in_field_toggles_say_which_field_they_belong_to(self, window: MainWindow) -> None:
+        """They have no visible label at all -- an icon inside a text field --
+        so the action's own text is the whole of what is read aloud. And it
+        has to name the *field*: three toggles announced as "Exclude" are
+        three a listener cannot tell apart."""
+        bar = window.filter_bar
+
+        assert bar._process_exclude.text() == "Exclude this process"
+        assert bar._subsystem_exclude.text() == "Exclude this subsystem"
+        assert bar._regex.text() == "Regular expression"
+
 
 class TestTheBannerAnnouncesItself:
     """Every state this project calls "must be visible" arrives here.
