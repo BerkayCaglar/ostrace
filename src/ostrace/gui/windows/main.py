@@ -70,6 +70,7 @@ from ostrace.gui.theme import Scheme
 from ostrace.gui.theme_policy import ThemePolicy
 from ostrace.gui.timeinput import EXAMPLES, parse_jump
 from ostrace.gui.widgets.banner import Banner, Notice
+from ostrace.gui.widgets.capture_options_dialog import CaptureOptions, CaptureOptionsDialog
 from ostrace.gui.widgets.detail_pane import DetailPane
 from ostrace.gui.widgets.device_button import DeviceButton
 from ostrace.gui.widgets.export_dialog import ExportDialog
@@ -84,6 +85,7 @@ from ostrace.model import DeviceInfo, Record
 from ostrace.paths import export_stem, sessions_dir
 from ostrace.sources.base import CaptureState
 from ostrace.storage.capture import Capture, open_capture
+from ostrace.storage.session import META_NAME, SPOOL_NAME
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -167,6 +169,8 @@ class MainWindow(QMainWindow):
     # asserted against the table in `test_gui_shortcuts.py`, so the two cannot
     # drift.
     action_capture: QAction
+    action_refresh_devices: QAction
+    action_capture_options: QAction
     action_pause: QAction
     action_disconnect: QAction
     action_open: QAction
@@ -241,6 +245,10 @@ class MainWindow(QMainWindow):
         #: The named ones. Not capped and not automatic -- see `settings`.
         self._saved: list[SavedFilter] = WindowSettings().read_saved()
         self.filter_bar.set_saved(self._saved)
+        #: How the next capture should run. Deliberately not restored from
+        #: settings: a duration remembered from yesterday would stop today's
+        #: capture and look exactly like a device dropping off USB.
+        self.capture_options = CaptureOptions()
         self._filter_settled = QTimer(self)
         self._filter_settled.setSingleShot(True)
         self._filter_settled.setInterval(_FILTER_SETTLED_MS)
@@ -251,6 +259,7 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
 
         self._connect_actions()
+        self._connect_widgets()
         # A fresh window shows everything, so there is no filter to copy yet.
         # Stated here rather than left to the first filter change, which on a
         # window nobody touches never comes.
@@ -457,27 +466,26 @@ class MainWindow(QMainWindow):
     def _connect_actions(self) -> None:
         """Wire every action to what it does.
 
-        Separate from ``__init__`` because there are twenty of them and a
+        Separate from ``__init__`` because there are twenty-odd of them and a
         constructor that also happens to be the wiring diagram is one nobody
-        reads.
+        reads. Split from `_connect_widgets` along the same line: this half is
+        the menu bar and the toolbar, which is what somebody looking for "what
+        does Capture do" is reading.
         """
-        self.filter_bar.changed.connect(self._on_filter_changed)
-        self.filter_bar.recent_chosen.connect(self._on_recent_chosen)
-        self.filter_bar.save_requested.connect(self.name_current_filter)
-        self.filter_bar.manage_requested.connect(self.manage_saved_filters)
-        self.table.customContextMenuRequested.connect(self._on_context_menu)
         self.action_open.triggered.connect(self.choose_capture)
         self.action_close.triggered.connect(self.close_capture)
         self.action_capture.triggered.connect(self.capture_from_device)
+        # The same scan the device menu runs when it opens, on a key. A phone
+        # plugged in after the menu was last looked at is otherwise invisible
+        # until something happens to reopen it.
+        self.action_refresh_devices.triggered.connect(self.device_button.rescan)
+        self.action_capture_options.triggered.connect(self.ask_for_capture_options)
         self.action_disconnect.triggered.connect(self.stop_capture)
         self.action_pause.toggled.connect(self.set_paused)
 
         self.action_copy.triggered.connect(self.copy_selection)
         self.action_copy_filter.triggered.connect(self.copy_filter)
         self.action_deselect.triggered.connect(self.deselect)
-        # The pane's own way out. `Esc` was the only one, which is a key you
-        # have to be told about; a control you can see is not.
-        self.detail.closed.connect(self.deselect)
         self.action_dark_mode.toggled.connect(lambda on: self.toggle_dark_mode(dark=on))
         self.action_find.triggered.connect(self.filter_bar.focus_search)
         self.action_mark.triggered.connect(self.toggle_mark)
@@ -487,7 +495,6 @@ class MainWindow(QMainWindow):
         self.action_go_time.triggered.connect(self.ask_for_time)
         self.action_detail_pane.toggled.connect(lambda on: self.set_detail_visible(visible=on))
         self.action_follow.toggled.connect(lambda on: self.set_following(follow=on))
-        self.status.follow.clicked.connect(self._on_follow_clicked)
         self.action_next_jump.triggered.connect(lambda: self.find_next(self._jump))
         self.action_previous_jump.triggered.connect(
             lambda: self.find_next(self._jump, backwards=True)
@@ -513,6 +520,28 @@ class MainWindow(QMainWindow):
         # their construction. Where a platform puts an item is the factory's
         # business; what the item does is this window's, and that is the whole
         # split.
+        self.action_quit.triggered.connect(self.close)
+        self.action_about.triggered.connect(self.show_about)
+
+    def _connect_widgets(self) -> None:
+        """Wire what the window's own parts say to each other.
+
+        The other half of `_connect_actions`: nothing here is a menu item.
+        These are the controls and the controllers reporting -- a filter
+        edited, a row right-clicked, a device that came back, a pump tick --
+        and they are the wiring somebody debugging a *state* is reading, which
+        is a different errand from "what does this menu item do".
+        """
+        self.filter_bar.changed.connect(self._on_filter_changed)
+        self.filter_bar.recent_chosen.connect(self._on_recent_chosen)
+        self.filter_bar.save_requested.connect(self.name_current_filter)
+        self.filter_bar.manage_requested.connect(self.manage_saved_filters)
+        self.table.customContextMenuRequested.connect(self._on_context_menu)
+        # The pane's own way out. `Esc` was the only one, which is a key you
+        # have to be told about; a control you can see is not.
+        self.detail.closed.connect(self.deselect)
+        self.status.follow.clicked.connect(self._on_follow_clicked)
+
         self.capture_controller.state_changed.connect(self._on_lifecycle)
         self.capture_controller.identified.connect(self._on_identified)
         self.capture_controller.session_at.connect(self._adopt_session)
@@ -520,8 +549,7 @@ class MainWindow(QMainWindow):
         self.capture_controller.finished.connect(self._on_capture_finished)
         self.capture_controller.rate_changed.connect(self._on_rate)
         self.capture_controller.overflowed.connect(self._on_pause_overflow)
-        self.action_quit.triggered.connect(self.close)
-        self.action_about.triggered.connect(self.show_about)
+        self.capture_controller.buffered.connect(self._on_buffered)
         self.capture_state.connect(self._on_capture_state)
 
     def clear_marks(self) -> None:
@@ -853,8 +881,38 @@ class MainWindow(QMainWindow):
         self._loader.finished.connect(self._on_loaded)
         self._loader.failed.connect(self._on_load_failed)
         self._loader.start()
+        # `CaptureLoader.cancel` has existed since the loader was written and
+        # nothing in the interface could reach it. A large capture read from a
+        # zero-delay timer keeps the window responsive, which is worse than it
+        # sounds: responsive and unstoppable is a window that answers every
+        # press except the one asking it to stop.
+        self.banner.show_message(
+            f"Reading {export_stem(capture.path)}…",
+            "Stop reading",
+            on_action=self.cancel_loading,
+            key=Notice.LOADING,
+        )
 
         self._retitle()
+
+    def cancel_loading(self) -> None:
+        """Stop reading, keeping what has been read.
+
+        A half-read capture is not a failure state: the records that arrived
+        are as true as they would have been at the end. So the notice says how
+        far it got rather than disappearing, and every other control goes on
+        working against what is there.
+        """
+        if self._loader is None:  # pragma: no cover - the banner is only up with one
+            return
+        self._loader.cancel()
+        loaded = self._loader.loaded
+        self._on_progress(loaded)
+        self.minimap.rebuild()
+        self.banner.show_message(
+            f"Stopped reading at {loaded:,} records. What was read is shown.",
+            "Dismiss",
+        )
 
     def close_capture(self) -> None:
         """Put the window back the way it starts.
@@ -949,6 +1007,11 @@ class MainWindow(QMainWindow):
     def _on_loaded(self) -> None:
         self._on_progress(self._loader.loaded if self._loader else 0)
         self.minimap.rebuild()
+        if self.banner.current_key is Notice.LOADING:
+            # Its own notice and no other: an outage that arrived while a
+            # capture was being read has a banner of its own, and the reading
+            # finishing is not a reason to take it down.
+            self.banner.hide()
         if self.capture is not None and self.capture.truncated:
             # Worth saying out loud: the end of a truncated capture is missing,
             # and its absence says nothing about the device.
@@ -999,7 +1062,7 @@ class MainWindow(QMainWindow):
         depends on at import time, which is a decision for the packages moving
         this code rather than for the commit correcting the sentence.
         """
-        from ostrace.sources.os_trace import OsTraceSource  # noqa: PLC0415
+        from ostrace.sources.os_trace import OsTraceSource, ReconnectPolicy  # noqa: PLC0415
 
         # The udid the toolbar is showing, which until the device selector
         # existed was always `None` -- "whichever answers first". With two
@@ -1010,7 +1073,25 @@ class MainWindow(QMainWindow):
         # so the emission is queued and delivered where it can touch widgets.
         # Calling a method directly from there would repaint from the wrong
         # thread, which Qt does not always refuse and never survives.
-        return OsTraceSource(self.device_button.udid, on_state=self.capture_state.emit)
+        # Reconnect is the source's decision rather than the capture's: it is
+        # what turns an outage into a `Gap` in the stream instead of into the
+        # end of the session, and only the thing holding the socket can retry.
+        policy = ReconnectPolicy() if self.capture_options.reconnect else ReconnectPolicy.disabled()
+        return OsTraceSource(
+            self.device_button.udid, reconnect=policy, on_state=self.capture_state.emit
+        )
+
+    def ask_for_capture_options(self) -> None:
+        """Set the four knobs the command line has.
+
+        Built and shown in one method, unlike the row menu and the export
+        dialog: this one has nothing to drive from a test but the value it
+        returns, and `CaptureOptionsDialog.options` is reachable without
+        opening anything.
+        """
+        dialog = CaptureOptionsDialog(self.capture_options, self)
+        if dialog.exec():
+            self.capture_options = dialog.options()
 
     def start_capture(self, source: LogSource, *, destination: Path | None = None) -> None:
         """Begin a live capture into a fresh model.
@@ -1019,7 +1100,12 @@ class MainWindow(QMainWindow):
         `ostrace.capture.capture` the CLI runs. A live view that keeps nothing
         would make "pause" a promise it cannot honour and would lose everything
         the moment the window closed. ``destination`` overrides where that file
-        goes; by default `paths` decides, as it does for the CLI.
+        goes; by default `capture_options` decides, and failing that `paths`
+        does, as it does for the CLI.
+
+        The parameter still wins over the option. It is what a caller with a
+        specific directory in hand passes, and an option set through a dialog
+        should not silently redirect it.
         """
         self._replace_model(keep_filter=True)
         self.capture = None
@@ -1028,7 +1114,13 @@ class MainWindow(QMainWindow):
         self._device_name = None
 
         self.capture_controller.set_model(self.model)
-        self.capture_controller.start(source, destination=destination)
+        wanted = destination if destination is not None else self.capture_options.destination
+        self.capture_controller.start(
+            source,
+            destination=wanted,
+            duration=self.capture_options.duration,
+            max_records=self.capture_options.max_records,
+        )
         self.minimap.start()
 
     def stop_capture(self) -> None:
@@ -1077,13 +1169,7 @@ class MainWindow(QMainWindow):
         """Freeze the view. The device is not consulted."""
         self.capture_controller.set_paused(paused)
         if paused:
-            self.banner.show_message(
-                "The view is paused. The capture is still running and still "
-                "writing every record to the session file.",
-                "Resume",
-                on_action=lambda: self.action_pause.setChecked(False),
-                key=Notice.PAUSED,
-            )
+            self._show_paused(0)
         elif self.banner.current_key is Notice.PAUSED:
             # Its own notice and no other. Resuming used to clear the strip
             # outright, so a reader who paused during an outage and then
@@ -1161,6 +1247,35 @@ class MainWindow(QMainWindow):
         self.status.set_rate(rate)
         self._update_counts()
         self._follow()
+
+    def _show_paused(self, buffered: int) -> None:
+        """The paused notice, carrying how much is waiting behind it.
+
+        The count is the answer to the question a pause actually raises --
+        whether it is safe to keep reading, or whether the queue is about to
+        hit its limit and start evicting. Silent at zero rather than saying
+        `0 waiting`, which is a number that teaches the eye to skip the line
+        it sits on.
+        """
+        waiting = f" {buffered:,} records are waiting." if buffered else ""
+        self.banner.show_message(
+            "The view is paused. The capture is still running and still "
+            f"writing every record to the session file.{waiting}",
+            "Resume",
+            on_action=lambda: self.action_pause.setChecked(False),
+            key=Notice.PAUSED,
+        )
+
+    def _on_buffered(self, buffered: int) -> None:
+        """A paused tick. Refresh the count, and nothing else.
+
+        Guarded on the notice actually being the paused one: the pump keeps
+        ticking through an outage, and a reconnect banner replaced by a paused
+        one every fiftieth of a second is the more urgent message losing to the
+        less urgent.
+        """
+        if self.banner.current_key is Notice.PAUSED:
+            self._show_paused(buffered)
 
     def _on_pause_overflow(self, dropped: int) -> None:
         self.banner.show_message(
@@ -1796,9 +1911,32 @@ class MainWindow(QMainWindow):
 
     def _update_counts(self) -> None:
         """Refresh the readouts that a filter change moves."""
-        self.status.set_volume(self.model.retained)
+        self.status.set_volume(self.model.retained, self._bytes_on_disk())
         self.status.set_gap_count(self.model.gaps)
         self.status.set_shown(self.model.rowCount(), self.model.retained)
+
+    def _bytes_on_disk(self) -> int | None:
+        """How large the session has grown, or ``None`` if there is not one.
+
+        `StatusBar.set_volume` has taken this since it was written and nothing
+        ever supplied it. It is how somebody decides whether to let a capture
+        keep running: the retained count is capped and says nothing about the
+        file, which is not.
+
+        Two `stat` calls per pump tick, on the records and the sidecar. Missing
+        is not an error -- there is a moment between the capture starting and
+        the file existing, and a readout is not worth an exception.
+        """
+        session = self.capture_controller.path
+        if session is None:
+            return None
+        total = 0
+        for name in (SPOOL_NAME, META_NAME):
+            try:
+                total += (session / name).stat().st_size
+            except OSError:
+                continue
+        return total
 
     def _anchor(self) -> int | None:
         """Which retained item the user is currently reading.

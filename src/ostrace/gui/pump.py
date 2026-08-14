@@ -71,6 +71,10 @@ class Pump(QObject):
     rate_changed = Signal(float)
     #: Emitted when the paused queue overflowed, with how many were dropped.
     overflowed = Signal(int)
+    #: How many records are waiting while the view is paused, each tick. Only
+    #: while paused: running, the answer is always somewhere near zero and the
+    #: readout that matters is the rate.
+    buffered = Signal(int)
 
     def __init__(
         self,
@@ -128,6 +132,11 @@ class Pump(QObject):
         """Take everything queued and give it to the model in one batch."""
         if self.paused:
             self._enforce_pause_limit()
+            # Said on every paused tick, because it is the only number moving:
+            # `rate_changed` is deliberately not emitted here, and a paused
+            # view reading `0 rec/s` would claim the device had gone quiet
+            # when what stopped was the reading, not the talking.
+            self.buffered.emit(len(self.queue))
             return
 
         now = self._clock.elapsed()

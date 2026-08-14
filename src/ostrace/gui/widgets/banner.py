@@ -48,6 +48,10 @@ class Notice(Enum):
     RECONNECTING = auto()
     PAUSED = auto()
     FILTER_HIDES_EVERYTHING = auto()
+    #: A capture is being read from disk. Identified because the reading ends
+    #: on its own, and the notice offering to stop it has to come down when it
+    #: does -- but only if it is still the one showing.
+    LOADING = auto()
 
 
 class Banner(QFrame):
