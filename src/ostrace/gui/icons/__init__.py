@@ -4,10 +4,16 @@
 
 The set in ``icons/`` is original, drawn to the convention every current icon
 library shares -- a 24-unit grid, a 2-unit stroke, round caps and joins -- so
-that it sits comfortably beside the platform's own chrome. Nine files, 2.2 kB
-in total, which is why they are shipped as files rather than pulled from a
+that it sits comfortably beside the platform's own chrome. Eleven files, 2,649
+bytes in total, which is why they are shipped as files rather than pulled from a
 dependency: an icon library would be a runtime dependency and a licence
-obligation for two kilobytes of geometry.
+obligation for two and a half kilobytes of geometry.
+
+``exclude`` and ``regex`` are drawn to the same grid but are not toolbar icons:
+they sit *inside* a `QLineEdit` as trailing actions, which is a smaller button
+than the toolbar's. Both were rendered at 16 and read there -- the `≠` at three
+strokes, and `.*` as an asterisk with the dot detached at lower left, which is
+the size the dot survives at.
 
 ``app.svg`` is the exception to the 2-unit stroke and carries 3, which is the
 only stroke width that survives the size the mark is judged at: 3 of 24 is

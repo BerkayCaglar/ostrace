@@ -4,7 +4,7 @@
 | --- | --- |
 | [adr/](adr/) | Architecture decision records — what was decided and why |
 | [research/](research/) | The measurements and comparisons the decisions rest on |
-| [formats/](formats/) | On-disk format contracts |
+| [formats/](formats/) | Format contracts: what is written on disk, and the one line a filter is copied as |
 | [design/](design/) | Behaviour contracts, written before the code |
 | [troubleshooting.md](troubleshooting.md) | When no device shows up |
 

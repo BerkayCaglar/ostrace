@@ -696,6 +696,32 @@ string the delegate is already about to draw — O(1) per *visible* row, ~40 row
 per repaint, well inside the budget. It is fiddly against eliding and a fixed row
 height, which is why it is **NICE** rather than MUST.
 
+> **Measured, 2026-08-14.** This estimate and `widgets/log_table.py`'s
+> `SeverityDelegate` docstring — "a Python `paint` on that path is the one thing
+> the table cannot afford" — appeared to contradict each other, so the paint was
+> timed rather than argued about. 200,000 rows, 60 repaints of a 1400×900
+> viewport, three delegates **interleaved** across five rounds, median of the
+> round medians:
+>
+> | | median | over the shipped delegate |
+> | --- | ---: | ---: |
+> | shipped (`initStyleOption` only) | 29.64 ms | — |
+> | a `paint` that only calls `super()` | 30.69 ms | +1.05 ms |
+> | that `paint` plus the highlight fill | 30.43 ms | +0.78 ms |
+>
+> **Both statements are true and they are about different quantities.** Crossing
+> into Python costs about 1 ms on a 30 ms repaint *for one column*; the docstring
+> is about `SeverityDelegate`, which is set view-wide and would pay that for
+> every column at once. The highlight drawing itself costs nothing measurable —
+> 27,360 `paint` calls were counted, 288 of which found the term, and the arm
+> that drew came out 0.26 ms *under* the arm that did not, inside a round-to-round
+> spread of about 2 ms.
+>
+> Two runs at different points in a sequence are not a comparison: run one arm
+> after another, the first pays every one-time cost and the later ones do not,
+> and the first attempt at this had a *slower* delegate measuring 4 ms faster
+> than no delegate at all. Interleaving is what fixed it.
+
 ### 4.7 A filter that hides everything always offers a way back
 
 Already true and already tested (`windows/main.py:971-978`;
@@ -1075,15 +1101,26 @@ New:
 
 ### Nice-to-have if cheap
 
-Column chooser · negate toggles on Process and Subsystem · in-field regex toggle ·
-named saved filters · `Copy filter` text form · search-term highlighting inside
-the Message cell · marks panel · minimap keyboard focus and band stepping ·
-minimap time axis · capture options dialog (duration, max records, no-reconnect,
-output) · status-bar bytes-on-disk · `N buffered` in the paused banner · export
-radio list · export header line · reveal-in-folder link · export on a thread ·
-`F2`/`Shift+F2` layout-safe gap keys · `F5` refresh · `Ctrl+Shift+C` copy message ·
-`Ctrl+Shift+B` marks panel · filter bar wrapping at narrow widths · loader
-progress with Cancel.
+Column chooser · ~~negate toggles on Process and Subsystem~~ · ~~in-field regex
+toggle~~ · ~~named saved filters~~ · ~~`Copy filter` text form~~ · search-term
+highlighting inside the Message cell · marks panel · minimap keyboard focus and
+band stepping · minimap time axis · capture options dialog (duration, max
+records, no-reconnect, output) · status-bar bytes-on-disk · `N buffered` in the
+paused banner · export radio list · export header line · reveal-in-folder link ·
+export on a thread · `F2`/`Shift+F2` layout-safe gap keys · `F5` refresh ·
+`Ctrl+Shift+C` copy message · `Ctrl+Shift+B` marks panel · filter bar wrapping at
+narrow widths · loader progress with Cancel.
+
+> **Struck through: shipped.** This tier is being taken in four packages, one
+> pull request each, grouped by the sentence they belong to rather than by the
+> file they touch. The filter bar was the first. The remaining three are the
+> capture options the command line has and the viewer does not, the export
+> dialog, and the View menu — marks, the minimap's keyboard, and the columns.
+>
+> Two items moved between packages on the way. Search-term highlighting and the
+> bar's narrow-width wrapping were drafted with the filter bar and belong with
+> the table and the layout, so they went to the View package; the paint
+> measurement in §4.6 was taken for them and is recorded there.
 
 ### Later
 

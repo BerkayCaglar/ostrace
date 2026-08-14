@@ -14,6 +14,38 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Added
 
+- **A filter can exclude instead of include.** The Process and Subsystem fields
+  each carry a `≠` toggle, which is the case people actually have: one chatty
+  daemon to shut up, rather than one process to look at. A record with no
+  subsystem survives an excluded subsystem, because somebody excluding one asked
+  to see everything else and a record that has none is everything else.
+
+  Only those two fields. "Messages not containing X" is rare and reads better as
+  a narrowing of what to look *for*.
+
+- **`Edit ▸ Copy Filter`** (`Ctrl+Alt+C`), which puts the standing filter on the
+  clipboard as one line — `level:error -process:backupd` — so it can be pasted
+  into an issue and set again by somebody else in a few seconds. The spelling is
+  fixed in [`docs/formats/filter-text-form.md`](docs/formats/filter-text-form.md)
+  before anything parses it; a reader is deliberately not in this release.
+
+  Two places where the obvious spelling was wrong. A pattern is marked by its
+  key, `regex:`, rather than by a `~` on the value, because a value can *start*
+  with `~` — twice in the 8,000 committed fixture messages, one of them the
+  banner `~~~~~ PCS Cache ~~~~~`, which is exactly what somebody searches for.
+  And a level is written by its enum name rather than its title, because
+  `User Action` contains the one character the term separator claims.
+
+- **Filters can be named and kept.** The bar's `Recent` button is now `Filters`
+  and carries both halves: the last ten, unnamed and automatic, and underneath
+  them the ones you named. `Manage saved filters…` renames and removes, because
+  a name typed by mistake that cannot be removed is on the menu for the life of
+  the installation.
+
+  Named filters are not capped where the recent list is. The cap exists because
+  the recent list is written *for* you; a named one is something you did on
+  purpose, and silently dropping the oldest would be discarding work.
+
 - **An export from a capture taken over the legacy `syslog_relay` now says so.**
   That service carries only the Notice tier and no subsystem or category on any
   record, so what is missing from such an export is missing from the *capture*
@@ -30,6 +62,11 @@ such: the `Record` model and the on-disk export formats documented in
   keep it reproducible; it refuses to run rather than let Qt substitute a font.
 
 ### Changed
+
+- **The `Regex` checkbox moved inside the Search field**, as a `.*` toggle at
+  its trailing edge. A checkbox sitting after three fields does not say which of
+  them it applies to; the `≠` toggles have no unambiguous place beside the bar
+  at all, so both went in for the same reason.
 
 - **A new application mark**, and the reason is arithmetic rather than taste.
   The one it replaces was drawn on a 64-unit grid with 5-unit bars, which is

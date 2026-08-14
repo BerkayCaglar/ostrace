@@ -23,10 +23,13 @@ from tests.helpers import ERRORS
 
 pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
-from ostrace.gui.filters import Filter
+from PySide6.QtWidgets import QApplication
+
+from ostrace.gui.filters import Filter, SavedFilter, save
 from ostrace.gui.markers import when
 from ostrace.gui.settings import WindowSettings
-from ostrace.gui.widgets.filter_bar import NO_RECENT, FilterBar
+from ostrace.gui.widgets.filter_bar import NO_RECENT, NO_SAVED, FilterBar
+from ostrace.gui.widgets.saved_filters_dialog import SavedFiltersDialog
 from ostrace.gui.windows.main import MainWindow
 from ostrace.storage.capture import open_capture
 
@@ -270,3 +273,212 @@ class TestSettingTheBar:
         assert bar.process == "dasd"
         assert bar.minimum_level is Level.ERROR
         assert bar.search == "timeout"
+
+
+class TestExcludingFromTheBar:
+    """`≠` inside the field it modifies, rather than a checkbox after three."""
+
+    def test_the_toggles_live_inside_the_fields_they_modify(self, qt_app: object) -> None:
+        """A `Regex` checkbox sitting after three fields does not say which
+        field it applies to, and a bar reading `Process [ ] Subsystem [ ] ≠`
+        has one toggle and two candidates."""
+        del qt_app
+        bar = FilterBar()
+
+        assert bar._process_exclude in bar._process.actions()
+        assert bar._subsystem_exclude in bar._subsystem.actions()
+        assert bar._regex in bar._search.actions()
+
+    def test_every_toggle_says_what_it_is(self, qt_app: object) -> None:
+        """An in-field action has no visible label at all, so anything reading
+        the window gets the action's name or nothing."""
+        del qt_app
+        bar = FilterBar()
+
+        for action, _glyph in bar._toggles:
+            assert action.text(), "an unnamed in-field toggle is unreadable aloud"
+            assert action.toolTip() != action.text(), "the tooltip repeats the name"
+
+    def test_the_flags_reach_the_filter(self, qt_app: object) -> None:
+        del qt_app
+        bar = FilterBar()
+        bar._process.setText("backupd")
+        bar._process_exclude.setChecked(True)
+
+        assert bar.current().process_exclude
+        assert not bar.current().subsystem_exclude
+
+    def test_a_whole_filter_including_its_flags_is_one_signal(self, qt_app: object) -> None:
+        """Seven controls, one rescan. The count moved when the flags were
+        added, which is the point of the bar writing them all together."""
+        del qt_app
+        bar = FilterBar()
+        changes: list[int] = []
+        bar.changed.connect(lambda: changes.append(1))
+        wanted = Filter(
+            minimum_level=Level.ERROR,
+            process="a",
+            subsystem="b",
+            search="c",
+            process_exclude=True,
+            subsystem_exclude=True,
+        )
+
+        bar.set_filter(wanted)
+
+        assert len(changes) == 1
+        assert bar.current() == wanted
+
+
+class TestTheFiltersMenu:
+    """Both halves of going back to a filter, under one button."""
+
+    def test_each_half_says_why_it_is_empty(self, qt_app: object) -> None:
+        """A button that opens a menu with a blank section has been pressed and
+        answered nothing."""
+        del qt_app
+        bar = FilterBar()
+
+        assert bar.recent_entries == [NO_RECENT]
+        assert bar.saved_entries == [NO_SAVED]
+
+    def test_a_named_filter_is_offered_by_its_name(self, qt_app: object) -> None:
+        del qt_app
+        bar = FilterBar()
+
+        bar.set_saved([SavedFilter("watchdog", Filter(process="watchdogd"))])
+
+        assert bar.saved_entries == ["watchdog"]
+
+    def test_choosing_a_named_one_carries_its_terms_not_its_name(self, qt_app: object) -> None:
+        """The window puts a `Filter` in the bar. A menu that emitted the name
+        would make the window look it up again in a list that may have moved
+        while the menu was open."""
+        del qt_app
+        bar = FilterBar()
+        terms = Filter(process="watchdogd")
+        bar.set_saved([SavedFilter("watchdog", terms)])
+        chosen: list[object] = []
+        bar.recent_chosen.connect(chosen.append)
+
+        bar._saved_actions[0].trigger()
+
+        assert chosen == [terms]
+
+    def test_saving_is_offered_but_refused_with_nothing_to_save(self, qt_app: object) -> None:
+        """Present rather than hidden: a row that appears only once you have
+        used the feature is one nobody discovers."""
+        del qt_app
+        bar = FilterBar()
+        rows = {action.text(): action for action in bar._recent_menu.actions()}
+
+        assert not rows["Save current filter…"].isEnabled()
+        assert not rows["Manage saved filters…"].isEnabled()
+
+    def test_saving_turns_on_as_soon_as_there_is_something_to_save(self, qt_app: object) -> None:
+        del qt_app
+        bar = FilterBar()
+
+        bar.set_filter(Filter(process="dasd"))
+
+        rows = {action.text(): action for action in bar._recent_menu.actions()}
+        assert rows["Save current filter…"].isEnabled()
+
+
+class TestCopyingTheFilter:
+    """The half of a shareable filter that needs no parser."""
+
+    def test_it_puts_the_text_form_on_the_clipboard(self, window: MainWindow) -> None:
+        window.filter_bar.set_filter(
+            Filter(minimum_level=Level.ERROR, process="backupd", process_exclude=True)
+        )
+
+        window.copy_filter()
+
+        clipboard = QApplication.clipboard()
+        assert clipboard is not None
+        assert clipboard.text() == "level:error -process:backupd"
+
+    def test_a_window_showing_everything_offers_nothing_to_copy(self, window: MainWindow) -> None:
+        """`as_text` on an empty filter is an empty line, and a menu item that
+        silently empties the clipboard is worse than one that is greyed."""
+        assert not window.action_copy_filter.isEnabled()
+
+        window.filter_bar.set_filter(Filter(process="dasd"))
+
+        assert window.action_copy_filter.isEnabled()
+
+    def test_a_half_typed_pattern_is_not_copied(self, window: MainWindow) -> None:
+        """The model is still on the previous filter, and copying that would
+        hand over the filter the user is leaving rather than the one in front
+        of them."""
+        window.filter_bar._search.setText("[unclosed")
+        window.filter_bar._regex.setChecked(True)
+        clipboard = QApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText("untouched")
+
+        window.copy_filter()
+
+        assert clipboard.text() == "untouched"
+
+
+class TestNamedFiltersInTheWindow:
+    """Kept, offered and written down, without a modal in the test."""
+
+    def test_saving_one_offers_it_and_stores_it(self, window: MainWindow) -> None:
+        entry = SavedFilter("watchdog", Filter(process="watchdogd"))
+
+        window._set_saved(save(window._saved, entry))
+
+        assert window.filter_bar.saved_entries == ["watchdog"]
+        assert WindowSettings().read_saved() == [entry]
+
+    def test_they_survive_a_restart(self, window: MainWindow) -> None:
+        window._set_saved([SavedFilter("watchdog", Filter(process="watchdogd"))])
+
+        reopened = MainWindow()
+
+        assert reopened.filter_bar.saved_entries == ["watchdog"]
+        assert reopened.model.filter.is_empty, "it was offered, not applied"
+
+    def test_one_unreadable_entry_does_not_cost_the_others(self, window: MainWindow) -> None:
+        window._set_saved([SavedFilter("watchdog", Filter(process="watchdogd"))])
+        settings = WindowSettings()
+        stored = settings.store.value("filters/saved")
+        assert isinstance(stored, list)
+        settings.store.setValue("filters/saved", ["{ not json", *stored])
+
+        reopened = MainWindow()
+
+        assert reopened.filter_bar.saved_entries == ["watchdog"]
+
+    def test_the_dialog_removes_one_and_the_window_keeps_the_rest(self, window: MainWindow) -> None:
+        """The dialog owns no settings: it is handed a list and returns one, so
+        what is kept and where stays the window's decision."""
+        keep = SavedFilter("errors", Filter(minimum_level=Level.ERROR))
+        window._set_saved([keep, SavedFilter("watchdog", Filter(process="watchdogd"))])
+        dialog = SavedFiltersDialog(window._saved, window)
+        dialog.list.setCurrentRow(1)
+
+        dialog._remove_selected()
+        window._set_saved(dialog.saved)
+
+        assert window.filter_bar.saved_entries == ["errors"]
+        assert WindowSettings().read_saved() == [keep]
+
+    def test_the_dialog_says_what_a_name_stands_for(self, window: MainWindow) -> None:
+        """Two filters saved under different names are told apart by something
+        other than the name being wrong."""
+        window._set_saved([SavedFilter("watchdog", Filter(process="watchdogd"))])
+        dialog = SavedFiltersDialog(window._saved, window)
+
+        assert dialog.terms.text() == "process:watchdogd"
+
+    def test_nothing_selected_disables_both_verbs(self, window: MainWindow) -> None:
+        """A button that responds to a press by doing nothing is
+        indistinguishable from one that is broken."""
+        dialog = SavedFiltersDialog([], window)
+
+        assert not dialog.rename.isEnabled()
+        assert not dialog.remove.isEnabled()
