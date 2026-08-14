@@ -44,6 +44,13 @@ The ratio itself is not the claim: it moved between 9.1× and 20.1× across thos
 runs, with how much DEBUG the device happened to be emitting. What did not move
 is which tiers arrive.
 
+**This compares two services, not two applications.** Console.app, Xcode's
+device console and `pymobiledevice3 syslog live` all read `os_trace_relay`, the
+same one `ostrace` does, and they see the same records — the difference there is
+the tool, not the data. The comparison above is against the *text* path, which
+is what `idevicesyslog` and the single-file predecessor this project replaces
+were built on.
+
 Separately, 96.8% of records in the reference capture carry a `subsystem` and
 `category` that the text-based pipeline discards — measured between 80% and 97%
 across the captures in `tests/fixtures/` and since.

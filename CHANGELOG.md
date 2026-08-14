@@ -10,7 +10,19 @@ Two things are treated as public API from the start and will be versioned as
 such: the `Record` model and the on-disk export formats documented in
 [docs/formats/](docs/formats/).
 
-## [Unreleased]
+## 0.2.0 - 2026-08-14
+
+A structural release that turned into a feature one. The plan was the god node,
+the module boundaries and the seams that make socket ownership provable in CI —
+eight packages, none of which a user would notice. The GUI redesign's
+nice-to-have tier went in on top of it, and that tier is what this release
+mostly reads as.
+
+`MainWindow` went from 2,155 lines to 1,817 and five controllers came out of it;
+ADRs 0007 to 0009 record their shapes and what was rejected. The measurement the
+whole project rests on — `os_trace_relay` against `syslog_relay` — was taken
+properly for the first time, over one minute from one process, and the README
+carries the chart.
 
 ### Added
 

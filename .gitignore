@@ -8,6 +8,13 @@ build/
 dist/
 *.egg-info/
 
+# Where the release checklist and `release.yml` extract the built sdist to
+# audit the captures inside it. Ignored rather than left untracked because it
+# holds a *second copy* of `tests/fixtures/`, and a stray `git add -A` would
+# commit device captures to a path nothing audits. That is the shape of what
+# withdrew 0.1.0.
+sdist-audit/
+
 # Virtual environments
 .venv/
 venv/
