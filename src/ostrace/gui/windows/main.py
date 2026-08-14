@@ -36,6 +36,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -58,7 +59,7 @@ from ostrace.exporters.base import escape
 from ostrace.gui import icons
 from ostrace.gui.actions import build_actions, build_menus, menu_items
 from ostrace.gui.capture_controller import CaptureController, Lifecycle
-from ostrace.gui.columns import COLUMNS
+from ostrace.gui.columns import COLUMNS, Column
 from ostrace.gui.filters import Filter, SavedFilter, remember, save
 from ostrace.gui.follow import FollowController
 from ostrace.gui.loader import CaptureLoader
@@ -77,6 +78,7 @@ from ostrace.gui.widgets.export_dialog import ExportDialog
 from ostrace.gui.widgets.filter_bar import FilterBar
 from ostrace.gui.widgets.jump_button import JumpButton
 from ostrace.gui.widgets.log_table import LogTable
+from ostrace.gui.widgets.marks_panel import MarksPanel
 from ostrace.gui.widgets.minimap import Minimap
 from ostrace.gui.widgets.saved_filters_dialog import SavedFiltersDialog
 from ostrace.gui.widgets.status_bar import StatusBar
@@ -91,7 +93,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     # Only ever annotations here now that the action factory owns construction.
-    from PySide6.QtGui import QAction, QCloseEvent, QShowEvent
+    from PySide6.QtGui import QCloseEvent, QShowEvent
     from PySide6.QtWidgets import QWidget as QWidgetType
 
     from ostrace.sources.base import LogSource
@@ -177,7 +179,9 @@ class MainWindow(QMainWindow):
     action_close: QAction
     action_export: QAction
     action_copy: QAction
+    action_copy_message: QAction
     action_copy_filter: QAction
+    action_marks_panel: QAction
     action_deselect: QAction
     action_find: QAction
     action_mark: QAction
@@ -257,6 +261,12 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self._build_menus()
         self._build_toolbar()
+        # Here rather than with the rest of the layout, which waits for the
+        # first `showEvent` because a geometry cannot be judged without knowing
+        # what screens exist. Which columns are shown needs no screen, and a
+        # window that is never shown -- every test that builds one -- should
+        # still have the columns the user chose.
+        self._restore_columns(WindowSettings().read_layout().shown_columns)
 
         self._connect_actions()
         self._connect_widgets()
@@ -363,6 +373,16 @@ class MainWindow(QMainWindow):
 
         self.status = StatusBar(self)
         self.setStatusBar(self.status)
+
+        # A dock rather than a third splitter section: it is the one part of
+        # this window that is only sometimes wanted, and a splitter section
+        # takes width from the table whether anybody asked for it or not.
+        # Hidden here rather than left to `restoreState`, which only restores a
+        # dock it has seen before -- so the first run would otherwise open with
+        # it showing.
+        self.marks_panel = MarksPanel(self)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.marks_panel)
+        self.marks_panel.hide()
 
         # Once: the scrollbar belongs to the view, which outlives every
         # model the window will attach to it.
@@ -484,7 +504,9 @@ class MainWindow(QMainWindow):
         self.action_pause.toggled.connect(self.set_paused)
 
         self.action_copy.triggered.connect(self.copy_selection)
+        self.action_copy_message.triggered.connect(self.copy_message)
         self.action_copy_filter.triggered.connect(self.copy_filter)
+        self.action_marks_panel.toggled.connect(lambda on: self.set_marks_visible(visible=on))
         self.action_deselect.triggered.connect(self.deselect)
         self.action_dark_mode.toggled.connect(lambda on: self.toggle_dark_mode(dark=on))
         self.action_find.triggered.connect(self.filter_bar.focus_search)
@@ -536,6 +558,11 @@ class MainWindow(QMainWindow):
         self.filter_bar.recent_chosen.connect(self._on_recent_chosen)
         self.filter_bar.save_requested.connect(self.name_current_filter)
         self.filter_bar.manage_requested.connect(self.manage_saved_filters)
+        self.marks_panel.row_chosen.connect(self.go_to)
+        # The panel can be closed by its own title-bar cross as well as by the
+        # menu item, and a ticked item beside a panel that is gone is the same
+        # split-brain the theme switch had.
+        self.marks_panel.visibilityChanged.connect(self._show_marks_state)
         self.table.customContextMenuRequested.connect(self._on_context_menu)
         # The pane's own way out. `Esc` was the only one, which is a key you
         # have to be told about; a control you can see is not.
@@ -551,6 +578,21 @@ class MainWindow(QMainWindow):
         self.capture_controller.overflowed.connect(self._on_pause_overflow)
         self.capture_controller.buffered.connect(self._on_buffered)
         self.capture_state.connect(self._on_capture_state)
+
+    def set_marks_visible(self, *, visible: bool) -> None:
+        """Show or hide the marks panel."""
+        self.marks_panel.setVisible(visible)
+
+    def _show_marks_state(self, visible: bool) -> None:
+        """Put the tick where the panel is, without that counting as a choice.
+
+        `setChecked` emits `toggled`, which is wired to the verb -- so a panel
+        closed by its own cross would tick the item back on and reopen it. The
+        same shape as `_show_theme_state`, and found the same way.
+        """
+        self.action_marks_panel.blockSignals(True)
+        self.action_marks_panel.setChecked(visible)
+        self.action_marks_panel.blockSignals(False)
 
     def clear_marks(self) -> None:
         """Drop every mark.
@@ -694,6 +736,11 @@ class MainWindow(QMainWindow):
                 state=self.saveState(),
                 split=self._split.saveState(),
                 columns=[self.table.columnWidth(index) for index in range(len(COLUMNS))],
+                shown_columns=[
+                    int(spec.column)
+                    for spec in COLUMNS
+                    if not self.table.isColumnHidden(int(spec.column))
+                ],
                 jump=self._jump,
                 detail_visible=self.detail.isVisible(),
             )
@@ -744,6 +791,74 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         self.menus = build_menus(self.menuBar(), self.actions_by_name, self)
+        self._build_column_menu()
+
+    def _build_column_menu(self) -> None:
+        """A tick per column, under `View ▸ Columns`.
+
+        Generated from `COLUMNS` rather than written out, which is why it is
+        not in the bindings table: the table's promise is that every action it
+        names is in a menu and carries a key, and six column toggles want
+        neither -- six keys for six columns is a keyboard nobody could hold in
+        their head. What names them is the column table, which is where their
+        titles already live.
+
+        A submenu rather than six rows in `View`: that menu was eleven items in
+        one undivided column before the groups were added, and six more would
+        undo the fix.
+        """
+        self.column_menu = QMenu("&Columns", self)
+        self.column_actions: dict[Column, QAction] = {}
+        for spec in COLUMNS:
+            action = QAction(spec.title, self)
+            action.setCheckable(True)
+            action.setChecked(True)
+            # Explicit, like every other action here: the default role is the
+            # text heuristic, and macOS would take `Category` out of this menu
+            # and into the application one if it ever matched.
+            action.setMenuRole(QAction.MenuRole.NoRole)
+            action.toggled.connect(
+                lambda shown, column=spec.column: self.set_column_visible(column, shown=shown)
+            )
+            self.column_menu.addAction(action)
+            self.column_actions[spec.column] = action
+        self.menus["view"].addMenu(self.column_menu)
+
+    def set_column_visible(self, column: Column, *, shown: bool) -> None:
+        """Show or hide one column, refusing to hide the last one.
+
+        A table with every column hidden is a window with nothing in it and no
+        way to see why -- the chooser that emptied it is two clicks away and
+        looks exactly like a table that failed to load. The last tick is
+        therefore disabled rather than merely ignored, so the refusal is
+        visible before the press instead of after it.
+        """
+        self.table.setColumnHidden(int(column), not shown)
+        remaining = [
+            spec.column for spec in COLUMNS if not self.table.isColumnHidden(int(spec.column))
+        ]
+        for spec in COLUMNS:
+            action = self.column_actions[spec.column]
+            action.setEnabled(not (len(remaining) == 1 and spec.column in remaining))
+
+    def _restore_columns(self, shown: list[int] | None) -> None:
+        """Put the chosen columns back, without that counting as a choice.
+
+        `setChecked` emits `toggled`, which is wired to the verb -- so this
+        blocks the signals and applies the hiding itself. The same shape as
+        `_show_theme_state`, and for the same reason: restoring a state is not
+        the user making one.
+        """
+        wanted = set(range(len(COLUMNS)) if shown is None else shown)
+        for spec in COLUMNS:
+            action = self.column_actions[spec.column]
+            action.blockSignals(True)
+            action.setChecked(int(spec.column) in wanted)
+            action.blockSignals(False)
+            self.table.setColumnHidden(int(spec.column), int(spec.column) not in wanted)
+        # Once, after the loop: the guard reads how many are left, and asking
+        # that halfway through would disable a tick the next iteration unhides.
+        self.set_column_visible(Column.MESSAGE, shown=not self.table.isColumnHidden(Column.MESSAGE))
 
     def menu_items(self) -> list[QAction]:
         """Every clickable item in the menu bar, for the menu-role test."""
@@ -816,6 +931,7 @@ class MainWindow(QMainWindow):
             self.model = RecordModel(self.scheme, parent=self)
             self.table.setModel(self.model)
             self.minimap.set_model(self.model)
+            self.marks_panel.set_model(self.model)
             self._connect_selection()
         else:
             self.model.clear()
@@ -840,6 +956,7 @@ class MainWindow(QMainWindow):
         wanted = self._bar_filter()
         if wanted is not None:
             self.model.set_filter(wanted)
+            self.table.message_delegate.set_filter(wanted)
 
     def open_capture(self, path: Path) -> None:
         """Load a capture into the table.
@@ -1680,6 +1797,27 @@ class MainWindow(QMainWindow):
         if clipboard is not None:
             clipboard.setText("\n".join(lines))
 
+    def copy_message(self) -> None:
+        """Copy only the message text of the selected rows.
+
+        The other half of `copy_selection`, and the half people paste into a
+        search engine or a chat: a tab-separated record with a timestamp, a
+        level, a process, a subsystem and a category in front of the sentence
+        is six fields of context around the one thing they wanted to quote.
+
+        Folded by the exporters' own `escape`, exactly as the full copy is.
+        Device messages contain newlines, and two rows copied as four is a
+        paste nobody can tell the shape of.
+        """
+        rows = sorted({index.row() for index in self.table.selectedIndexes()})
+        if not rows:
+            return
+        lines = [escape(self.model.cell_text(row, int(Column.MESSAGE))) for row in rows]
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText("\n".join(lines))
+        self.status.showMessage(f"Copied {len(lines):,} messages")
+
     def copy_filter(self) -> None:
         """Copy the standing filter as one line of text.
 
@@ -1905,6 +2043,16 @@ class MainWindow(QMainWindow):
 
         anchor = self._anchor()
         self.model.set_filter(wanted)
+        # The delegate draws the term where it hit. Given the filter the model
+        # was given, at the same moment, so the highlight cannot be showing the
+        # answer to a question the rows are no longer answering.
+        self.table.message_delegate.set_filter(wanted)
+        # The panel lists *view rows*, and a rescan renumbers every one of them
+        # -- so a filter change with the panel left alone offers rows that have
+        # moved, or rows the filter has just hidden. Not `marks_changed`: which
+        # records are marked has not changed, which is exactly why the model
+        # does not emit it here.
+        self.marks_panel.rebuild()
         self._restore(anchor)
         self._update_counts()
         self._update_banner()

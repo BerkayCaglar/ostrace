@@ -60,6 +60,7 @@ from PySide6.QtCore import (
     QModelIndex,
     QPersistentModelIndex,
     QPoint,
+    QRectF,
     Qt,
     Signal,
 )
@@ -84,8 +85,9 @@ from PySide6.QtWidgets import (
 )
 
 from ostrace.gui.columns import Column, fit_budgets, wanted_widths
+from ostrace.gui.filters import Filter
 from ostrace.gui.fonts import monospace
-from ostrace.gui.theme import Scheme, palette_for, selection_row, token
+from ostrace.gui.theme import Scheme, palette_for, search_hit, selection_row, token
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -217,6 +219,73 @@ class MiddleElidingDelegate(SeverityDelegate):
         option.textElideMode = Qt.TextElideMode.ElideMiddle
 
 
+class MessageDelegate(SeverityDelegate):
+    """Draw the search term highlighted inside the message.
+
+    It answers "why did this row match?" with no new control. The one thing it
+    needed was permission to exist: this class's parent says a Python ``paint``
+    is what the table cannot afford, and the research put the cost at one
+    ``str.find``. Measured on 200,000 rows over 60 repaints of a 1400x900
+    viewport, three delegates interleaved across five rounds -- the shipped one
+    29.64 ms, a ``paint`` that only calls ``super()`` 30.69, and that plus this
+    highlight 30.43. Both statements were true about different quantities:
+    crossing into Python costs about 1 ms **for one column**, where
+    `SeverityDelegate` is set view-wide and would pay it for all six.
+
+    Painted *after* the text, as a wash. Before it, the style's own item
+    background covers it -- so this is the highlighter-pen arrangement rather
+    than a chosen one, and `theme.search_hit` is held to a contrast floor
+    because of it.
+
+    The **elided** text is what is searched, not the model's. A term scrolled
+    off the end of a narrow column is not on screen, and a rectangle drawn at
+    its offset in the full string would land somewhere arbitrary.
+    """
+
+    def __init__(self, parent: QWidget | None = None, *, scheme: Scheme = Scheme.LIGHT) -> None:
+        super().__init__(parent)
+        self._filter = Filter()
+        self._wash = search_hit(scheme)
+
+    def set_filter(self, standing: Filter) -> None:
+        self._filter = standing
+
+    def set_scheme(self, scheme: Scheme) -> None:
+        self._wash = search_hit(scheme)
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: _Index) -> None:
+        super().paint(painter, option, index)
+        if not self._filter.search:
+            # The common case, and the cheap one: no search, no work beyond the
+            # `super()` call this override costs anyway.
+            return
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+        if not isinstance(text, str):
+            return
+        metrics = option.fontMetrics
+        style = option.widget.style()
+        # The style's own text inset, asked for rather than assumed: it differs
+        # between platforms and between styles, and a wash drawn at a guessed
+        # offset is a rectangle beside the word rather than under it.
+        inset = style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin) + 1
+        drawn = metrics.elidedText(
+            text, Qt.TextElideMode.ElideRight, option.rect.width() - 2 * inset
+        )
+        left = option.rect.left() + inset
+        top = option.rect.top()
+        height = option.rect.height()
+        for start, end in self._filter.spans(drawn):
+            painter.fillRect(
+                QRectF(
+                    left + metrics.horizontalAdvance(drawn[:start]),
+                    top,
+                    metrics.horizontalAdvance(drawn[start:end]),
+                    height,
+                ),
+                self._wash,
+            )
+
+
 class LogTable(QTableView):
     """The record table."""
 
@@ -241,6 +310,10 @@ class LogTable(QTableView):
         self.setHorizontalHeader(FastHeader(Qt.Orientation.Horizontal, self))
         self.setItemDelegate(SeverityDelegate(self))
         self.setItemDelegateForColumn(int(Column.PROCESS), MiddleElidingDelegate(self))
+        # One column only. The measurement that allows this at all is in
+        # `MessageDelegate`, and it is a measurement about *one* column.
+        self.message_delegate = MessageDelegate(self, scheme=scheme)
+        self.setItemDelegateForColumn(int(Column.MESSAGE), self.message_delegate)
 
         # Whole rows, extended selection: a log is read by row, and copying a
         # range of rows is the single most common thing done with one.
@@ -329,6 +402,9 @@ class LogTable(QTableView):
         palette.setColor(QPalette.ColorRole.Highlight, selection_row(scheme))
         self.setPalette(palette)
         self.viewport().setPalette(palette)
+        # The search wash is resolved from a token and held, like every other
+        # colour this widget prebuilds, so it has to be rebuilt beside them.
+        self.message_delegate.set_scheme(scheme)
 
     def set_placeholder(self, heading: str, detail: str = "") -> None:
         """What an empty table says about being empty.

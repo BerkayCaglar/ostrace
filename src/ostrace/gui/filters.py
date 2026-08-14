@@ -257,6 +257,23 @@ class Filter:
             return False
         return not (self._pattern is not None and not self._pattern.search(record.message))
 
+    def spans(self, text: str) -> list[tuple[int, int]]:
+        """Where the search term sits in ``text``, for whoever is drawing it.
+
+        Here rather than in the delegate because the pattern is here: a literal
+        search is `re.escape`d at construction, so one `finditer` covers both
+        kinds and the drawing side never has to know which it has.
+
+        Zero-width matches are dropped. A pattern like ``a*`` matches the empty
+        string between every pair of characters, and a highlight of nothing at
+        every position is a row painted solid.
+        """
+        if self._pattern is None:
+            return []
+        return [
+            match.span() for match in self._pattern.finditer(text) if match.end() > match.start()
+        ]
+
     def _matches_subsystem(self, record: Record) -> bool:
         """Match a subsystem by substring, on a record that may not have one.
 

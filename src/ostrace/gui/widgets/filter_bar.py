@@ -21,8 +21,9 @@ from PySide6.QtCore import Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
-    QHBoxLayout,
+    QGridLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QMenu,
     QToolButton,
@@ -37,7 +38,9 @@ from ostrace.model import Level
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-__all__ = ["NO_RECENT", "NO_SAVED", "FilterBar"]
+    from PySide6.QtGui import QResizeEvent
+
+__all__ = ["NO_RECENT", "NO_SAVED", "WRAP_WIDTH", "FilterBar"]
 
 #: What the recent menu says before there is anything in it. Disabled, and
 #: present rather than absent: a button that opens an empty menu has been
@@ -49,6 +52,20 @@ NO_RECENT = "No recent filters"
 #: repeating "saved", because a reader who has just found the section under a
 #: heading reading Saved learns nothing from a row that says the same word.
 NO_SAVED = "No named filters yet"
+
+#: Below this width the bar folds onto two lines.
+#:
+#: Measured on the shipped fonts, as the width where folding first gives the
+#: Search field *more* room than not folding: 900, at 40 characters against 38.
+#: Below it the gap opens fast -- 31 against 21 at 800 px, 27 against 11 at 740
+#: -- and the flat arrangement bottoms out at **9 characters**, which is the
+#: field's own minimum and is not a search box. Folded, Search holds 27 all the
+#: way down, because it has a line to itself.
+#:
+#: The first attempt at this measured two bars that both followed the rule
+#: below, so it compared each arrangement against itself and reported them
+#: identical at every width. The comparison needs one of them pinned.
+WRAP_WIDTH = 900
 
 
 class FilterBar(QWidget):
@@ -80,9 +97,25 @@ class FilterBar(QWidget):
         #: Every in-field toggle with the glyph it draws, so a theme switch can
         #: re-tint them without naming each one and forgetting the next.
         self._toggles: list[tuple[QAction, str]] = []
+        #: The label beside each field, by the field's name. Held because the
+        #: wrap has to re-place both halves of a pair together.
+        self._captions: dict[str, QLabel] = {}
+        self._wrapped = False
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 3, 6, 3)
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(6, 3, 6, 3)
+        # Without this the fold is unreachable. Under the default
+        # `SetDefaultConstraint` a layout imposes its own minimum on the widget,
+        # and the flat arrangement's is 914 px -- *above* `WRAP_WIDTH`. Qt
+        # clamps the bar there, the resize below 900 never arrives, and the
+        # breakpoint is dead code no test can reach. `setMinimumWidth(0)` does
+        # not help: Qt reads a zero minimum as "unset" and the layout's applies
+        # again.
+        #
+        # What is given up is the bar's claim on the *window's* minimum width,
+        # which is precisely the claim that was stopping the window being narrow
+        # enough to need the fold. The fields keep their own minimums.
+        self._grid.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
 
         self._level = QComboBox(self)
         for level in Level:
@@ -92,14 +125,12 @@ class FilterBar(QWidget):
         self._level.setCurrentIndex(0)
         self._level.currentIndexChanged.connect(self.changed)
         self._level.setAccessibleName("Level")
-        level_caption = QLabel("Level", self)
-        level_caption.setBuddy(self._level)
-        layout.addWidget(level_caption)
-        layout.addWidget(self._level)
+        self._level_caption = QLabel("Level", self)
+        self._level_caption.setBuddy(self._level)
 
-        self._process = self._add_field(layout, "Process", "name or pid")
-        self._subsystem = self._add_field(layout, "Subsystem", "com.apple.…")
-        self._search = self._add_field(layout, "Search", "message text", stretch=1)
+        self._process = self._add_field("Process", "name or pid")
+        self._subsystem = self._add_field("Subsystem", "com.apple.…")
+        self._search = self._add_field("Search", "message text")
 
         self._process_exclude = self._add_toggle(
             self._process,
@@ -136,7 +167,7 @@ class FilterBar(QWidget):
         self.recent.setAccessibleName("Recent and saved filters")
         self.recent.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.recent.setMenu(self._recent_menu)
-        layout.addWidget(self.recent)
+        self._lay_out(wrapped=False)
         self._recent: list[Filter] = []
         self._saved: list[SavedFilter] = []
         self._recent_actions: list[QAction] = []
@@ -147,9 +178,7 @@ class FilterBar(QWidget):
         # changes rather than only when a list does.
         self.changed.connect(self._rebuild_menu)
 
-    def _add_field(
-        self, layout: QHBoxLayout, label: str, placeholder: str, *, stretch: int = 0
-    ) -> QLineEdit:
+    def _add_field(self, label: str, placeholder: str) -> QLineEdit:
         field = QLineEdit(self)
         field.setPlaceholderText(placeholder)
         field.setClearButtonEnabled(True)
@@ -162,9 +191,70 @@ class FilterBar(QWidget):
         # whose bridge reads one and not the other.
         caption.setBuddy(field)
         field.setAccessibleName(label)
-        layout.addWidget(caption)
-        layout.addWidget(field, stretch=stretch)
+        self._captions[label] = caption
         return field
+
+    def _lay_out(self, *, wrapped: bool) -> None:
+        """Put every control in the grid, on one row or on two.
+
+        Wrapping rather than scrolling sideways. A bar that scrolls hides
+        controls behind a gesture nobody makes on a form, and the fields it
+        would hide are the two on the right -- Search, which is the one people
+        reach for most.
+
+        Every widget is re-added rather than moved: `QGridLayout` has no move,
+        and `addWidget` on a widget already in the layout reparents it to the
+        new cell. Cheap, and it happens on a resize crossing one width rather
+        than on every resize -- see `resizeEvent`.
+        """
+        self._wrapped = wrapped
+        for index in reversed(range(self._grid.count())):
+            self._grid.takeAt(index)
+
+        row = [
+            (self._level_caption, self._level, 0),
+            (self._captions["Process"], self._process, 0),
+            (self._captions["Subsystem"], self._subsystem, 0),
+            (self._captions["Search"], self._search, 1),
+        ]
+        if wrapped:
+            # Level, Process and Subsystem on the first line; Search and the
+            # menu on the second, where Search gets the whole width. That is
+            # the field whose value is longest and the one a narrow window
+            # squeezes hardest.
+            self._place(row[:3], line=0, tail=None)
+            self._place(row[3:], line=1, tail=self.recent)
+        else:
+            self._place(row, line=0, tail=self.recent)
+
+    def _place(
+        self,
+        controls: list[tuple[QLabel, QWidget, int]],
+        *,
+        line: int,
+        tail: QWidget | None,
+    ) -> None:
+        """One line of caption-and-field pairs, with an optional button after."""
+        column = 0
+        for caption, field, stretch in controls:
+            self._grid.addWidget(caption, line, column)
+            self._grid.addWidget(field, line, column + 1)
+            self._grid.setColumnStretch(column + 1, stretch)
+            column += 2
+        if tail is not None:
+            self._grid.addWidget(tail, line, column)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        """Fold onto two lines below `WRAP_WIDTH`, and unfold above it.
+
+        Guarded on the answer changing rather than on the width, so a drag
+        across the breakpoint rebuilds the layout once and a drag anywhere else
+        rebuilds it never.
+        """
+        super().resizeEvent(event)
+        wrapped = event.size().width() < WRAP_WIDTH
+        if wrapped != self._wrapped:
+            self._lay_out(wrapped=wrapped)
 
     def _add_toggle(self, field: QLineEdit, glyph: str, name: str, tooltip: str) -> QAction:
         """A checkable button inside ``field``, at its trailing edge.

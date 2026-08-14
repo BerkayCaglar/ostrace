@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """What the window remembers between sessions, and what it deliberately does not.
 
-Nine keys across three namespaces. Qt decides where they are kept, per
+Ten keys across three namespaces. Qt decides where they are kept, per
 platform, which is why this is not a decision ``paths`` owns: no file of ours is
 being placed. ``gui.app`` sets the organisation and application names, which is
 what stops Qt filing them under a vendor called "Unknown".
@@ -48,6 +48,7 @@ _STATE = "window/state"
 _SPLIT = "window/split"
 _DETAIL = "window/detail"
 _COLUMNS = "table/columns"
+_SHOWN = "table/shown"
 _JUMP = "table/jump"
 _RECENT = "filters/recent"
 _SAVED = "filters/saved"
@@ -71,6 +72,12 @@ class Layout:
     state: QByteArray | None = None
     split: QByteArray | None = None
     columns: list[int] | None = None
+    #: Which columns are shown, by `Column` value. ``None`` for "all of them",
+    #: which is both the first-run answer and what an unreadable entry falls
+    #: back to: a window that opened with a column missing because a settings
+    #: line was damaged would look like a rendering fault rather than like
+    #: stale settings.
+    shown_columns: list[int] | None = None
     #: The kind the chevrons step through. A way of reading rather than a
     #: property of a capture, so it belongs with the geometry and not with the
     #: filter, which is deliberately not remembered.
@@ -109,6 +116,7 @@ class WindowSettings:
             state=self._bytes(_STATE),
             split=self._bytes(_SPLIT),
             columns=self._columns(),
+            shown_columns=self._shown_columns(),
             jump=self._jump(),
             detail_visible=self.store.value(_DETAIL, defaultValue=True, type=bool) is not False,
         )
@@ -123,6 +131,7 @@ class WindowSettings:
         self.store.setValue(_STATE, layout.state)
         self.store.setValue(_SPLIT, layout.split)
         self.store.setValue(_COLUMNS, layout.columns)
+        self.store.setValue(_SHOWN, layout.shown_columns)
         self.store.setValue(_JUMP, layout.jump.value)
         self.store.setValue(_DETAIL, layout.detail_visible)
 
@@ -144,6 +153,27 @@ class WindowSettings:
             return [int(width) for width in stored]
         except (TypeError, ValueError):
             return None
+
+    def _shown_columns(self) -> list[int] | None:
+        """Which columns to show, or ``None`` for all of them.
+
+        Every rejection ends at "all of them" rather than at a subset, and the
+        rejections are strict on purpose: an unknown column value, or a list
+        that would hide *every* column, gives back a table with nothing in it
+        and no way to see that anything is wrong. Showing a column that was
+        meant to be hidden costs a glance; hiding one that was meant to be
+        shown is a value somebody concludes the device never emitted.
+        """
+        stored = self.store.value(_SHOWN)
+        if not isinstance(stored, list):
+            return None
+        try:
+            shown = [int(value) for value in stored]
+        except (TypeError, ValueError):
+            return None
+        if not shown or any(value not in range(len(COLUMNS)) for value in shown):
+            return None
+        return shown
 
     def _jump(self) -> Find:
         try:

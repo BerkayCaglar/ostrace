@@ -192,6 +192,14 @@ MARK_TINT: dict[Scheme, str] = {scheme: values["mark"] for scheme, values in TOK
 #: what you are looking for.
 _VIEWPORT_FILL_ALPHA = 38
 
+#: How opaque the search wash is: the highest value at which every severity
+#: still clears 4.5:1 against the row it is washed over. Measured, not chosen --
+#: the binding case is `User Action` in the dark scheme, which lands at 4.52 at
+#: 39 and 4.45 at 40, and the first guess of 48 was already through the floor at
+#: 4.17. The wash itself measures 1.26 against the light base and 1.33 against
+#: the dark, which is the visible difference this buys within that ceiling.
+_SEARCH_HIT_ALPHA = 39
+
 
 @dataclass(frozen=True, slots=True)
 class Severity:
@@ -276,6 +284,25 @@ def mark_tint(scheme: Scheme) -> QColor:
 def mark_accent(scheme: Scheme) -> QColor:
     """The mark, where it has to be visible as a thin line rather than a wash."""
     return token("mark-accent", scheme)
+
+
+def search_hit(scheme: Scheme) -> QColor:
+    """The wash drawn over the search term where it appears in a message.
+
+    A wash rather than a background: it is painted *after* the text, in the
+    highlighter-pen arrangement every editor uses, because painting it before
+    means the style's own item background covers it. So it has to be light
+    enough to read the message through -- `test_gui_theme.py` holds it to the
+    same contrast the severities are held to, with the wash composited over the
+    row.
+
+    Borrowed from the mark accent rather than given a colour of its own: a hit
+    and a mark are both "the user is interested in this", and a second amber
+    two shades away from the first is a distinction nobody can name.
+    """
+    wash = QColor(token("mark-accent", scheme))
+    wash.setAlpha(_SEARCH_HIT_ALPHA)
+    return wash
 
 
 def viewport_marker(scheme: Scheme) -> tuple[QColor, QColor]:

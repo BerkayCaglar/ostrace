@@ -22,16 +22,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QWidget
 
+from ostrace.gui.columns import Column
 from ostrace.gui.finding import Band
 from ostrace.gui.theme import Scheme, mark_accent, palette_for, severity_for, viewport_marker
 from ostrace.model import Level
 
 if TYPE_CHECKING:
-    from PySide6.QtGui import QMouseEvent, QPaintEvent, QResizeEvent
+    from PySide6.QtGui import QKeyEvent, QMouseEvent, QPaintEvent, QResizeEvent
 
     from ostrace.gui.models import RecordModel
 
@@ -57,6 +58,16 @@ _MIN_STRIPE = 2
 #: away is worse than none: the reader concludes the strip does not have one.
 _MIN_MARKER = 3
 
+#: How far a page key moves, in bands. Ten is the relationship the table's own
+#: page keys have to its rows: enough that crossing a capture is a handful of
+#: presses, small enough that nothing is skipped over unseen.
+_PAGE_BANDS = 10
+
+#: What the strip says before the span is appended to it.
+_TOOLTIP = (
+    "Errors, gaps and marks across the whole capture, and where you are in it. Click to jump."
+)
+
 
 class Minimap(QWidget):
     """One stripe per band of rows, coloured by what is in it."""
@@ -73,10 +84,11 @@ class Minimap(QWidget):
         #: range. Pushed in rather than pulled, because a widget that reached
         #: for the table would be a strip that only works next to one.
         self._viewport = (0, -1)
-        self.setToolTip(
-            "Errors, gaps and marks across the whole capture, and where you are in it. "
-            "Click to jump."
-        )
+        self.setToolTip(_TOOLTIP)
+        # Reachable by Tab, which is what makes the keys below findable at all:
+        # `NoFocus` is the default for a plain `QWidget`, and a control the
+        # focus ring never lands on is one a keyboard user cannot know is there.
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         # It is a control -- clicking it jumps -- drawn entirely by us, so it
         # has no text, no icon and nothing else an assistive technology could
         # read a purpose out of.
@@ -140,6 +152,9 @@ class Minimap(QWidget):
         if bands != self._bands:
             self._bands = bands
             self.update()
+        # Outside the guard: the span moves with every arriving batch, and the
+        # bands only move when a batch happens to change what a stripe holds.
+        self._refresh_span()
 
     def _band_count(self) -> int:
         return max(1, self.height() // _MIN_STRIPE)
@@ -170,6 +185,35 @@ class Minimap(QWidget):
                     painter.fillRect(0, index * height // len(self._bands), width, stripe, colour)
         self._paint_marker(painter)
 
+    def _refresh_span(self) -> None:
+        """Put the capture's first and last clock readings in the tooltip.
+
+        The research asked for these **drawn at the strip's ends**, as a time
+        axis. Measured, they do not fit: the strip is `_WIDTH_CHARS` wide, which
+        is 12 pixels at the shipped font, and the shortest reading anybody could
+        use -- ``09:14``, no seconds -- needs 27. The full ``09:14:02.118`` needs
+        63. Drawing the axis means widening the strip to five times its width and
+        taking 51 pixels off the Message column of every window, permanently, for
+        two labels.
+
+        So it is a tooltip, which answers the same question -- *when does this
+        strip begin and end* -- at no width at all, on the control people
+        already point at to find out what a stripe is.
+
+        Read through `cell_text` rather than off the record, so the strip and
+        the Time column cannot disagree about how a timestamp reads. That
+        matters more here than it looks: these are in the *device's* offset, and
+        a second spelling of them is a second chance to render them in the
+        host's.
+        """
+        rows = self.model.rowCount() if self.model is not None else 0
+        span = ""
+        if self.model is not None and rows > 0:
+            first = self.model.cell_text(0, int(Column.TIME))
+            last = self.model.cell_text(rows - 1, int(Column.TIME))
+            span = f"\n{first} to {last}."
+        self.setToolTip(f"{_TOOLTIP}{span}")
+
     def _paint_marker(self, painter: QPainter) -> None:
         """Draw where the reader is, over the stripes rather than among them.
 
@@ -194,10 +238,59 @@ class Minimap(QWidget):
         painter.drawRect(0, top, self.width() - 1, bottom - top - 1)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        # Focus on click as well as on Tab. A control that can be driven by the
+        # keyboard but only *reached* by Tab is one nobody discovers has keys.
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
         self._jump(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         self._jump(event)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        """Step through the strip a band at a time.
+
+        A band rather than a row: the strip's unit is the band, and arrow keys
+        that moved by one row would take two hundred thousand presses to cross
+        a full capture while the thing under the cursor never visibly changed.
+        Page keys move ten bands, which is the same relationship the table's own
+        page keys have to its rows.
+
+        Home and End are the ends of the capture, not of the strip, which are
+        the same thing here and would not be if this ever summarised a window.
+        """
+        steps = {
+            Qt.Key.Key_Down: 1,
+            Qt.Key.Key_Up: -1,
+            Qt.Key.Key_PageDown: _PAGE_BANDS,
+            Qt.Key.Key_PageUp: -_PAGE_BANDS,
+        }
+        key = Qt.Key(event.key())
+        if key in steps:
+            self._step_bands(steps[key])
+        elif key is Qt.Key.Key_Home:
+            self.row_requested.emit(0)
+        elif key is Qt.Key.Key_End and self.model is not None:
+            self.row_requested.emit(max(0, self.model.rowCount() - 1))
+        else:
+            super().keyPressEvent(event)
+
+    def _step_bands(self, bands: int) -> None:
+        """Move the viewport ``bands`` bands from where it is now.
+
+        From the *viewport* rather than from a position of its own: the strip
+        holds no cursor, and one that drifted from where the table was actually
+        showing would be a second answer to "where am I" that disagrees with the
+        first.
+        """
+        if self.model is None:
+            return
+        rows = self.model.rowCount()
+        count = len(self._bands) or self._band_count()
+        if rows <= 0 or count <= 0:
+            return
+        first, _last = self._viewport
+        wanted = first + bands * max(1, rows // count)
+        self.row_requested.emit(min(max(wanted, 0), rows - 1))
 
     def _jump(self, event: QMouseEvent) -> None:
         """Ask for the row under the cursor. Dragging scrubs."""

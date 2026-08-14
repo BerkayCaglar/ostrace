@@ -305,8 +305,16 @@ def test_the_menus_outlive_the_method_that_built_them(window: MainWindow) -> Non
     gc.collect()
     assert all(shiboken6.isValid(menu) for menu in window.menus.values())
     # Derived rather than a literal: every binding becomes one item, plus Quit
-    # and About, whose menu roles rather than their keys are the point.
-    assert len(window.menu_items()) == len(BINDINGS) + len(RELOCATED)
+    # and About, whose menu roles rather than their keys are the point, plus one
+    # tick per column.
+    #
+    # The columns are counted from `COLUMNS` rather than added as a number,
+    # because that is the guarantee they carry. The bindings table promises that
+    # no menu item is undocumented and unreachable; six column toggles are
+    # generated from the column table, which names them, so the promise holds by
+    # a second route rather than being weakened. `View ▸ Columns` itself is not
+    # counted -- `menu_items` excludes the entries that open a submenu.
+    assert len(window.menu_items()) == len(BINDINGS) + len(RELOCATED) + len(COLUMNS)
 
 
 def test_pause_and_disconnect_are_separate_actions(window: MainWindow) -> None:
