@@ -87,9 +87,23 @@ removing the rule and running the suite:
 - dropping a thread that outlived the wait instead of parking it;
 - emitting the session path before the thread has really ended;
 - a `stop()` that is not idempotent;
-- a late link notification walking the lifecycle backwards.
+- a late link notification walking the lifecycle backwards;
+- `shutdown()` clearing the parked list whether or not its wait succeeded.
 
-The sixth is the one that does not fail a test. Removing the wait over parked
+The seventh is the one that does not fail a test. Removing the wait over parked
 threads in `shutdown()` **aborts the process** — exit `0xC0000409`, no summary,
 no traceback — which is the failure this decision exists to prevent, arriving
 exactly as documented.
+
+**The sixth was added in 0.2.0, after `shutdown()` was found doing it.** It
+waited on each parked thread and then cleared the list unconditionally, so a
+wait that timed out was treated as a wait that succeeded — and since
+`CaptureThread` has no parent, that list holds the only reference. It is the
+rule two lines above, undone one layer down by the method meant to enforce it.
+The same line released each parked pump regardless, which is this decision
+stated backwards.
+
+Found by CI on macOS, once, on a test whose fixture allows a 20 ms wait. A
+single failure that re-runs green reads as a flake; forcing the wait to zero
+made it deterministic, and `shutdown()` now asks `_reap()` rather than keeping
+a second copy of the rule that disagreed with the first.

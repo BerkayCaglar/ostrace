@@ -49,8 +49,12 @@ Between 0.1.1 and 0.1.2 the work was the GUI backlog: phase 4 shipped a subset o
 three tiers. **The must-have tier is now finished** — the unseen count, the
 minimap's viewport marker, `Go to Time`, the row context menu, recent filters,
 a hideable detail pane, accessible names, `Ctrl+Q`, the Doctor window and the
-reconnect and capture-finished banners. The nice-to-have and later tiers stay
-in [research/gui-redesign/05-interaction.md](research/gui-redesign/05-interaction.md)
+reconnect and capture-finished banners.
+
+**The nice-to-have tier closed in 0.2.0**, in four packages, with one item left
+unbuilt for a reason that is a measurement rather than a preference. What
+remains is the Later tier, in
+[research/gui-redesign/05-interaction.md](research/gui-redesign/05-interaction.md)
 §10; the [changelog](../CHANGELOG.md) is where what shipped is written down.
 
 **All of it is released**, as `v0.1.2`, together with the fixes the 0.2.0

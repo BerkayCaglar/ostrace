@@ -23,7 +23,7 @@ attributed to a tool that shipped the mistake. Nothing here is taste.
 ├────────────────────────────────────────────────────────────────────────┤
 │ ▯ iPhone ▾ │ ▷ Capture  ‖ Pause  ⏏ Disconnect │ 🗀 ⭳ │ ⌃ ⌄            │
 ├────────────────────────────────────────────────────────────────────────┤
-│ Level ▾  Process [____]  Subsystem [____]  Search [____] □ Regex       │
+│ Level ▾  Process [___≠]  Subsystem [___≠]  Search [___.*]  Filters ▾  │
 ├──────────┬───────┬──────────┬────────────┬──────────┬─────────────────┤
 │ Time     │ Level │ Process  │ Subsystem  │ Category │ Message         │
 ├──────────┼───────┼──────────┼────────────┼──────────┼─────────────────┤
@@ -362,13 +362,26 @@ non-monotonic, and there is no tie to break.
 argued for one copy-pasteable text field with history, citing Google's stated
 reason for rewriting Logcat's filters in 2023 — that a dialog-built filter
 cannot be shared. §1's own sketch drew a level combo and three fields, and that
-is what exists: `Level ▾  Process  Subsystem  Search □ Regex`. The two halves of
-this document never agreed with each other.
+is what exists. The two halves of this document never agreed with each other.
 
 The fielded version is defensible for four terms over a fixed schema, and it
 is what a first release can be sure is right. What it gives up is real and is
 the reason to revisit: a filter that cannot be pasted into an issue, and no
-history. The threshold semantics survive either way — Apple's level values are
+history.
+
+> **0.2.0 took both of those back without adding a parser.** The bar is now
+> `Level ▾  Process [___≠]  Subsystem [___≠]  Search [___.*]  Filters ▾`: the
+> `Regex` checkbox moved *inside* the Search field, because a checkbox sitting
+> after three fields does not say which of them it applies to, and the two `≠`
+> toggles went in the same way for the same reason. `Filters ▾` carries the
+> last ten unnamed and the ones you named.
+>
+> The pasteable half is `Edit ▸ Copy Filter`, which writes the filter as one
+> line — `level:error -process:backupd` — spelled in
+> [../formats/filter-text-form.md](../formats/filter-text-form.md). It is
+> **emitted and not parsed**: this release ships the half that costs nothing
+> and leaves the reader, with the rule it must follow written down for whoever
+> adds one. The threshold semantics survive either way — Apple's level values are
 not severity-ordered, so it is a threshold over our own enum, expressed here as
 a combo rather than as `level:`.
 
