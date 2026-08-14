@@ -14,6 +14,38 @@ such: the `Record` model and the on-disk export formats documented in
 
 ### Added
 
+- **`Capture ▸ Capture Options…`**, carrying the four things `ostrace capture`
+  has taken since phase 3a and the viewer had no way to say: stop after a time,
+  stop after a count, fail on the first outage instead of reconnecting, and
+  write the session somewhere you choose. Everything but the last already
+  reached the capture unchanged; `start_capture` had taken a destination since
+  it was written and nothing in the interface ever supplied one.
+
+  Deliberately not remembered between sessions, and that is the same rule the
+  applied filter follows. A duration restored from yesterday would stop today's
+  capture after thirty seconds and look exactly like a device dropping off USB.
+
+- **`F5` scans for devices again.** The device menu has always rescanned when it
+  opens; a phone plugged in afterwards was invisible until something happened to
+  reopen it.
+
+- **The status bar says how large the session has grown**, beside the record
+  count, while a capture is running. `StatusBar.set_volume` has taken this since
+  it was written and no caller supplied it. The retained count is capped and
+  says nothing about the file, which is not — and the file is what somebody is
+  deciding about when they wonder whether to let a capture keep running.
+
+- **The paused notice says how much is waiting behind it.** A pause raises one
+  question — whether the queue is about to hit its limit and start evicting —
+  and the view had no way to answer it. Silent at zero.
+
+- **A capture being read from disk can be stopped.** `CaptureLoader.cancel` has
+  existed since the loader was written and nothing in the interface could reach
+  it: a large capture read from a zero-delay timer keeps the window responsive,
+  which is worse than it sounds, because responsive and unstoppable is a window
+  that answers every press except the one asking it to stop. What was read stays
+  read, and the notice says how far it got.
+
 - **A filter can exclude instead of include.** The Process and Subsystem fields
   each carry a `≠` toggle, which is the case people actually have: one chatty
   daemon to shut up, rather than one process to look at. A record with no

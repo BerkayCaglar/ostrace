@@ -92,6 +92,8 @@ class CaptureController(QObject):
     #: The paused queue overflowed, with how many records were dropped from the
     #: *view*. They are in the session file.
     overflowed = Signal(int)
+    #: How many records are waiting behind a paused view, each tick.
+    buffered = Signal(int)
 
     def __init__(self, model: RecordModel, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -138,18 +140,35 @@ class CaptureController(QObject):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def start(self, source: LogSource, *, destination: Path | None = None) -> None:
+    def start(
+        self,
+        source: LogSource,
+        *,
+        destination: Path | None = None,
+        duration: float | None = None,
+        max_records: int | None = None,
+    ) -> None:
         """Begin capturing from ``source``.
 
         Stops whatever was running first: two captures cannot hold one device,
         and the second would fail on a busy relay rather than replace the first.
+
+        The limits are passed through rather than enforced here. A controller
+        that counted records itself would be a second implementation of
+        something `capture` already does correctly on the one thread that can
+        see the stream -- and it would stop the *view* while the device kept
+        talking, which is the shape of the memory bug this class exists to
+        prevent rather than to reproduce.
         """
         self.stop()
 
-        thread = CaptureThread(source, destination=destination)
+        thread = CaptureThread(
+            source, destination=destination, duration=duration, max_records=max_records
+        )
         pump = Pump(thread.queue, self._model, parent=self)
         pump.rate_changed.connect(self.rate_changed)
         pump.overflowed.connect(self.overflowed)
+        pump.buffered.connect(self.buffered)
         thread.identified.connect(self._on_identified)
         thread.failed.connect(self._on_failed)
         thread.completed.connect(self._on_completed)

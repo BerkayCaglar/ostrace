@@ -52,10 +52,23 @@ class CaptureThread(QThread):
     #: A message fit to show a user.
     failed = Signal(str)
 
-    def __init__(self, source: LogSource, *, destination: Path | None = None) -> None:
+    def __init__(
+        self,
+        source: LogSource,
+        *,
+        destination: Path | None = None,
+        duration: float | None = None,
+        max_records: int | None = None,
+    ) -> None:
         super().__init__()
         self.source = source
         self.destination = destination
+        #: The two limits `ostrace capture` has always taken, carried through
+        #: unchanged. Enforced by `capture` itself -- the duration from a timer
+        #: rather than from record arrival, which is what makes it a limit on a
+        #: quiet device rather than a hang.
+        self.duration = duration
+        self.max_records = max_records
         #: Where the session is being written. Set once, early, by the capture
         #: itself -- a plain attribute rather than a signal, because the reader
         #: is whoever just joined this thread and a queued signal would need an
@@ -100,6 +113,8 @@ class CaptureThread(QThread):
             capture(
                 self.source,
                 destination=self.destination,
+                duration=self.duration,
+                max_records=self.max_records,
                 on_item=self.queue.append,
                 on_open=self._opened,
             )

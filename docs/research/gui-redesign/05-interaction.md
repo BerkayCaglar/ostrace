@@ -1104,18 +1104,24 @@ New:
 Column chooser · ~~negate toggles on Process and Subsystem~~ · ~~in-field regex
 toggle~~ · ~~named saved filters~~ · ~~`Copy filter` text form~~ · search-term
 highlighting inside the Message cell · marks panel · minimap keyboard focus and
-band stepping · minimap time axis · capture options dialog (duration, max
-records, no-reconnect, output) · status-bar bytes-on-disk · `N buffered` in the
-paused banner · export radio list · export header line · reveal-in-folder link ·
-export on a thread · `F2`/`Shift+F2` layout-safe gap keys · `F5` refresh ·
-`Ctrl+Shift+C` copy message · `Ctrl+Shift+B` marks panel · filter bar wrapping at
-narrow widths · loader progress with Cancel.
+band stepping · minimap time axis · ~~capture options dialog (duration, max
+records, no-reconnect, output)~~ · ~~status-bar bytes-on-disk~~ · ~~`N buffered`
+in the paused banner~~ · export radio list · export header line ·
+reveal-in-folder link · export on a thread · `F2`/`Shift+F2` layout-safe gap
+keys · ~~`F5` refresh~~ · `Ctrl+Shift+C` copy message · `Ctrl+Shift+B` marks
+panel · filter bar wrapping at narrow widths · ~~loader progress with Cancel~~.
 
 > **Struck through: shipped.** This tier is being taken in four packages, one
 > pull request each, grouped by the sentence they belong to rather than by the
-> file they touch. The filter bar was the first. The remaining three are the
-> capture options the command line has and the viewer does not, the export
-> dialog, and the View menu — marks, the minimap's keyboard, and the columns.
+> file they touch. The filter bar was the first and the capture options the
+> second. The remaining two are the export dialog, and the View menu — marks,
+> the minimap's keyboard, and the columns.
+>
+> The loader's Cancel is on the capture package rather than on the export one
+> because it is the same sentence: what the window says about work it is in the
+> middle of. `progress with Cancel` in the list above turned out to be Cancel
+> only — the record count was already in the status bar and a second progress
+> readout would have been the same number twice.
 >
 > Two items moved between packages on the way. Search-term highlighting and the
 > bar's narrow-width wrapping were drafted with the filter bar and belong with

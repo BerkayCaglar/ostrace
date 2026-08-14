@@ -105,6 +105,23 @@ BINDINGS: tuple[Binding, ...] = (
         description="Open a session directory or a .jsonl.gz capture",
     ),
     Binding(
+        "refresh_devices",
+        "&Refresh Devices",
+        "F5",
+        menu="capture",
+        group="device",
+        description="Scan again for attached devices",
+    ),
+    Binding(
+        "capture_options",
+        "Capture &Options…",
+        "",
+        unkeyed=True,
+        menu="capture",
+        group="device",
+        description="Stop after a time or a count, choose where the session goes",
+    ),
+    Binding(
         "close",
         "&Close Capture",
         QKeySequence.StandardKey.Close,
