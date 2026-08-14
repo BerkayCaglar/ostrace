@@ -24,7 +24,7 @@ does. Read [formats/](formats/) if you are writing something that consumes an
 | 2 | `analysis/` and `exporters/`, six-column agent bundle | **done** |
 | 3b | CLI: `export` | **done** |
 | 4 | PySide6 GUI | **done**, against [its contract](design/gui.md) |
-| 5 | Release: PyPI via Trusted Publishing | **done** — `v0.1.2`, [on PyPI](https://pypi.org/project/ostrace/) |
+| 5 | Release: PyPI via Trusted Publishing | **done** — `v0.2.0`, [on PyPI](https://pypi.org/project/ostrace/) |
 
 0.1.0 is missing from that row on purpose. It was published and withdrawn the
 next day, over the fixtures its `sdist` carried, and the number will not be
@@ -59,21 +59,25 @@ was not applying, every opened capture staying in memory, a release that never
 audited the artifact it published, and CI running a device test that passed
 without a device.
 
-The next version is 0.2.0, and it is a structural one rather than a feature
-one: the god node, the module boundaries, and the seams that make socket
-ownership provable in CI. Its plan is written down outside this repository,
-beside the design notes.
-
-All of it is on `main` and none of it is released. The window has been
-decomposed into five controllers, the source has grown the seam that lets a
-test watch the second socket, the storage facade decides on its own what a
-capture is, the README states which imports are supported and what the commands
-promise a script, and three ADRs — 0007 to 0009 — record the shapes and what was
-rejected. All of it has been run against a real device, which also produced the
-measurement behind the README's comparison chart: both lockdown services read
-over the same minute, where the legacy one returns the NOTICE tier and above and
-nothing below it. See [research/log-sources-comparison.md](research/log-sources-comparison.md)
+**0.2.0 was planned as a structural release and shipped as a feature one.** The
+structural half is all there: the window decomposed into five controllers, the
+source grown the seam that lets a test watch the second socket, the storage
+facade deciding on its own what a capture is, the README stating which imports
+are supported and what the commands promise a script, and three ADRs — 0007 to
+0009 — recording the shapes and what was rejected. All of it ran against a real
+device, which also produced the measurement behind the comparison chart: both
+lockdown services read over the same minute, where the legacy one returns the
+NOTICE tier and above and nothing below it. See
+[research/log-sources-comparison.md](research/log-sources-comparison.md)
 Finding 1b.
+
+What a user of 0.2.0 actually meets is the redesign's **nice-to-have tier**,
+which closed on top of that work in four packages: the filter bar (exclusion,
+named filters, a filter you can paste), the capture options the command line
+always had, the export dialog, and the View menu — marks, columns, and a strip
+that answers the keyboard. One item of the tier was not built and the reason is
+a measurement, in [research/gui-redesign/05-interaction.md](research/gui-redesign/05-interaction.md)
+§10.
 
 The documentation under `formats/` and `design/` describes contracts, which are
 specified before they are implemented so that the shape is a decision rather

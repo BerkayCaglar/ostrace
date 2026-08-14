@@ -243,18 +243,62 @@ class TestADeviceThatWillNotLetGo:
         controller.shutdown()
 
     def test_shutdown_waits_for_what_was_parked(
-        self, controller: CaptureController, stuck: StuckThread
+        self, controller: CaptureController, stuck: StuckThread, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A `QThread` still running when Python drops its last reference
         aborts the process -- measured here once as exit `0xC0000409` with
-        nothing printed."""
+        nothing printed.
+
+        The wait is widened for this one. The fixture sets 20 ms because what
+        *it* is for is a wait that times out; what this is for is a wait that
+        succeeds, and 20 ms against a thread waking from a 5 ms sleep is a
+        margin the machine can eat. It did: this failed once on a macOS runner
+        and nowhere else, which read as a flake and was two faults at once --
+        a budget that was really a race, and `shutdown` treating the timeout as
+        a success. The second one is `test_shutdown_keeps_what_its_wait_did_not
+        _catch`.
+        """
         controller.stop()
         stuck.let_go()
+        monkeypatch.setattr("ostrace.gui.capture_controller.STOP_TIMEOUT_MS", 30_000)
 
         controller.shutdown()
 
         assert controller._parked == []
         assert not stuck.isRunning()
+
+    def test_shutdown_keeps_what_its_wait_did_not_catch(
+        self, controller: CaptureController, stuck: StuckThread, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A wait that timed out is not a wait that succeeded.
+
+        `shutdown` used to clear the parked list unconditionally, which threw
+        away the last reference to a *running* thread and did the exact thing
+        `_park` exists to prevent -- `CaptureThread` has no parent, so that
+        reference is the only one, and Qt's destructor calls `qFatal` on a
+        running thread. It does not fail a test; it takes the process.
+
+        Caught by CI on macOS, once, where the fixture's 20 ms wait was long
+        enough on every other runner and not on that one. Forced here rather
+        than waited for: at zero the wait cannot succeed, so the assertion is
+        about the branch and not about the timing of the machine running it.
+        """
+        controller.stop()
+        assert controller._parked
+        monkeypatch.setattr("ostrace.gui.capture_controller.STOP_TIMEOUT_MS", 0)
+
+        controller.shutdown()
+
+        assert controller._parked, "a running thread was let go of"
+        assert stuck.isRunning()
+        pump = controller._parked[0][1]
+        assert pump is not None
+        assert pump._timer.isActive(), "the pump went while its thread was still producing"
+
+        stuck.let_go()
+        assert stuck.wait(30_000)
+        controller._reap()
+        assert controller._parked == []
 
     def test_a_parked_capture_that_ends_lets_go_by_itself(
         self, controller: CaptureController, stuck: StuckThread

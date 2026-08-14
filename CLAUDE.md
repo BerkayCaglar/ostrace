@@ -1,23 +1,29 @@
 # ostrace
 
-Cross-platform iOS log viewer, released: 0.1.2 is on PyPI. That covers the
+Cross-platform iOS log viewer, released: 0.2.0 is on PyPI. That covers the
 model, sources and storage (phases 0-1), `analysis/` plus all six exporters
 (phase 2), the command line — `devices`, `capture`, `doctor`, `export`
 (phase 3), the PySide6 viewer in `gui/` (phase 4), and the release machinery
 itself (phase 5).
 
-**`main` is ahead of `v0.1.2`**, and `CHANGELOG.md`'s `## [Unreleased]` section
-says by how much. The gap is worth stating whenever there is one, because a bug
-reproduced against the published package is not necessarily a bug here. The GUI
-redesign's must-have tier is finished and released, and so are the fixes that
-came out of the 0.2.0 analysis.
+**`main` and `v0.2.0` are the same tree.** When that stops being true, say by
+how much and add the sentence back: a bug reproduced against the published
+package is not necessarily a bug here, and `CHANGELOG.md`'s `## [Unreleased]`
+section is where the gap is written down.
 
-The next version is 0.2.0 and it is a structural one: the plan lives outside
-this repository, beside the design notes. **All eight of its packages have
-landed** — P (public presence and application identity), A (contract safety
-nets), B (the source seam), C (GUI mechanics), D (the capture, follow and theme
-controllers), E (the view layer), F (the storage facade) and G (the public
-surface and the paper trail). Nothing structural is outstanding.
+0.2.0 was planned as a structural release and shipped as a feature one. Its
+plan lives outside this repository, beside the design notes, and **all eight of
+its packages landed** — P (public presence and application identity), A
+(contract safety nets), B (the source seam), C (GUI mechanics), D (the capture,
+follow and theme controllers), E (the view layer), F (the storage facade) and G
+(the public surface and the paper trail). Nothing structural is outstanding.
+
+**The GUI redesign's tiers are both closed.** The must-have tier shipped in
+0.1.1 and 0.1.2; the nice-to-have tier went into 0.2.0 in four packages — the
+filter bar, the capture options, the export dialog and the View menu. One item
+of it was not built and the reason is a measurement, recorded in
+`docs/research/gui-redesign/05-interaction.md` §10. What is left is the Later
+tier, which is where a feature for 0.3.0 would come from.
 
 **All of it has now been on hardware**, on 2026-08-12: the eleven device tests,
 a capture and an export end to end, and the viewer driven by hand through a live

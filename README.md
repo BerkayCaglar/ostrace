@@ -44,6 +44,13 @@ The ratio itself is not the claim: it moved between 9.1× and 20.1× across thos
 runs, with how much DEBUG the device happened to be emitting. What did not move
 is which tiers arrive.
 
+**This compares two services, not two applications.** Console.app, Xcode's
+device console and `pymobiledevice3 syslog live` all read `os_trace_relay`, the
+same one `ostrace` does, and they see the same records — the difference there is
+the tool, not the data. The comparison above is against the *text* path, which
+is what `idevicesyslog` and the single-file predecessor this project replaces
+were built on.
+
 Separately, 96.8% of records in the reference capture carry a `subsystem` and
 `category` that the text-based pipeline discards — measured between 80% and 97%
 across the captures in `tests/fixtures/` and since.
@@ -248,8 +255,17 @@ says so. Anything not listed here is internal, `ostrace.gui` included.
     <img alt="The same window on macOS, drawn in the system font, with no menu bar inside it because macOS puts one in the screen menu instead" src="https://raw.githubusercontent.com/BerkayCaglar/ostrace/main/docs/images/viewer-macos-light.png">
   </picture>
 
-  *The same capture and the same code on macOS. The window carries no menu bar
-  of its own: there it belongs to the screen.*
+  *The same capture on macOS. The window carries no menu bar of its own: there
+  it belongs to the screen.*
+
+  This pair is from 0.1.2 and the Windows pair above is from 0.2.0, so the
+  filter bar differs between them: 0.2.0 moved the `Regex` checkbox inside the
+  Search field and put a `≠` in Process and Subsystem. A macOS screenshot has
+  to be rendered on a Mac under the `cocoa` plugin — the offscreen plugin
+  resolves the interface font to Qt's generic `Sans Serif`, which is right
+  about layout and wrong about the one thing anybody looks at a macOS
+  screenshot for — so this one waits for a Mac rather than being regenerated
+  in CI.
 - **Only iOS is supported.** The device layer is written around lockdown and
   `os_trace_relay`.
 

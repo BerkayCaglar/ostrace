@@ -299,8 +299,17 @@ anybody looks at a macOS screenshot for.
 not the ones in the working tree. 0.1.0 was withdrawn over exactly that
 distinction: the working tree was clean and the artifact was not.
 
-Tagging is what publishes. `release.yml` fires on `v*` and goes to PyPI with no
-approval step, so a tag pushed by accident is a release.
+**Tagging is what starts a release, and 0.1.2 put three things between it and
+PyPI.** The trigger is `v[0-9]+.[0-9]+.[0-9]+` rather than `v*`, so a probe tag
+does not fire it. The build job extracts its own `sdist` and audits the captures
+inside it with the built wheel's decoder, refusing outright if it finds no
+captures — an audit that passed by checking nothing is how 0.1.0 happened. And
+`publish` runs in the `pypi` environment, which has a required reviewer, so a
+matching tag builds and audits and then *waits*.
+
+This paragraph used to say the workflow fired on `v*` and published with no
+approval step. All three of those were made false by 0.1.2 and the sentence was
+not. Check what a tag fires before making one, rather than trusting this.
 
 ## Reporting a bug
 

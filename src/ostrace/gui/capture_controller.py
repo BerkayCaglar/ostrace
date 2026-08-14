@@ -235,12 +235,24 @@ class CaptureController(QObject):
         drops its last reference aborts the process -- measured here as exit
         ``0xC0000409`` with nothing printed -- so the last thing this object
         does is give each parked thread one more bounded wait.
+
+        **The wait can fail, and then the thread stays parked.** This used to
+        clear the list unconditionally, which threw away the last reference to a
+        running thread and did the exact thing `_park` exists to prevent: a
+        wait that timed out was treated as a wait that succeeded. It is
+        `_reap` that knows the difference, so this waits and then asks it,
+        rather than keeping a second copy of the rule that disagrees with the
+        first.
+
+        Releasing the pumps unconditionally was the same mistake seen from the
+        other side. A pump let go while its thread is still producing leaves
+        the queue growing with nothing bounding it, which is the rule this file
+        exists to keep, stated backwards.
         """
         self.stop()
-        for thread, pump in self._parked:
+        for thread, _pump in self._parked:
             thread.wait(STOP_TIMEOUT_MS)
-            self._release(pump)
-        self._parked.clear()
+        self._reap()
 
     # ------------------------------------------------------------------
     # Parking
