@@ -24,17 +24,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QComboBox,
+    QButtonGroup,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -45,7 +48,8 @@ from ostrace.exporters import EXPORTERS
 from ostrace.exporters.ai_report import AiReportExporter
 from ostrace.exporters.base import ExportResult
 from ostrace.exporters.notes import export_notes
-from ostrace.paths import check_export_destination, export_path
+from ostrace.paths import check_export_destination, export_path, export_stem
+from ostrace.storage.session import SPOOL_NAME
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QCloseEvent
@@ -129,6 +133,14 @@ class ExportDialog(QDialog):
         self.setWindowTitle("Export snapshot" if running else "Export capture")
 
         layout = QVBoxLayout(self)
+        # What is being exported, before what it will be exported as. A dialog
+        # that names only the format leaves the reader to remember which
+        # capture they opened, and the answer is in the title bar of a window
+        # this one is covering.
+        self.header = QLabel(self._describe(capture), self)
+        self.header.setWordWrap(True)
+        layout.addWidget(self.header)
+
         if running:
             # Said before the export rather than only after it. The user asked
             # for this while a capture was streaming, and what they get is a
@@ -137,21 +149,16 @@ class ExportDialog(QDialog):
             # decision as well as in the notes afterwards.
             preamble = QLabel(
                 "The capture is still recording. This writes out everything on "
-                "disk so far and leaves the capture running.",
+                f"disk so far{self._so_far(capture)} and leaves the capture running.",
                 self,
             )
             preamble.setWordWrap(True)
             layout.addWidget(preamble)
 
+        self._build_formats(layout)
+
         form = QFormLayout()
         layout.addLayout(form)
-
-        self.format_box = QComboBox(self)
-        for name, exporter in sorted(EXPORTERS.items()):
-            self.format_box.addItem(f"{name} — {exporter.description}", name)
-        self.format_box.setCurrentIndex(self.format_box.findData(DEFAULT_FORMAT))
-        self.format_box.currentIndexChanged.connect(self._on_format_changed)
-        form.addRow("Format:", self.format_box)
 
         self.budget = QSpinBox(self)
         self.budget.setRange(0, _MAX_BUDGET)
@@ -182,6 +189,14 @@ class ExportDialog(QDialog):
         self.report.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.report)
 
+        # The answer to "where did it go", which the module docstring worries
+        # about and which the report could only answer by printing a path
+        # somebody then has to retype. Hidden until there is somewhere to go.
+        self.reveal = QPushButton("Show in folder", self)
+        self.reveal.setVisible(False)
+        self.reveal.clicked.connect(self.reveal_export)
+        layout.addWidget(self.reveal)
+
         self.buttons = QDialogButtonBox(self)
         self.export_button = self.buttons.addButton(
             "Export", QDialogButtonBox.ButtonRole.AcceptRole
@@ -193,24 +208,107 @@ class ExportDialog(QDialog):
 
         self._on_format_changed()
 
+    def _build_formats(self, layout: QVBoxLayout) -> None:
+        """One row per format, all six visible at once.
+
+        Six is the count where a list beats a dropdown: the formats *are* the
+        product, their descriptions are already written on the exporters, and a
+        combo hides five of the six behind a click -- so the reader has to open
+        it to discover that anything but the default exists.
+        """
+        self.formats = QButtonGroup(self)
+        for name, exporter in sorted(EXPORTERS.items()):
+            row = QRadioButton(f"{name} — {exporter.description}", self)
+            row.setAccessibleName(name)
+            row.setChecked(name == DEFAULT_FORMAT)
+            # The name lives on the button rather than in a list beside it, so
+            # nothing has to keep two orderings in step.
+            row.setProperty("format", name)
+            self.formats.addButton(row)
+            layout.addWidget(row)
+        self.formats.buttonToggled.connect(self._on_format_toggled)
+
     def _build_destination(self) -> QWidget:
-        """The path field and the button that fills it in."""
+        """The path field and the button that fills it in.
+
+        Beside the field rather than under it. Under, in its own column, it
+        read as a control belonging to something else -- which is what a button
+        below a text box normally is.
+        """
         destination = QWidget(self)
-        chooser = QVBoxLayout(destination)
+        chooser = QHBoxLayout(destination)
         chooser.setContentsMargins(0, 0, 0, 0)
         self.destination = QLineEdit(destination)
+        self.destination.setAccessibleName("Export destination")
         chooser.addWidget(self.destination)
         browse = QPushButton("Choose…", destination)
         browse.clicked.connect(self._choose_destination)
         chooser.addWidget(browse)
         return destination
 
+    def _describe(self, capture: Capture) -> str:
+        """What is being exported, in one line.
+
+        The counts come from a *finalised* sidecar or not at all. A capture
+        still recording has a sidecar written at open, whose counts are zero
+        until it is closed, and a bare spool has no sidecar to ask -- so in both
+        cases the honest header is the capture's name and nothing else. A zero
+        printed beside `records` would be read as a fact about the capture.
+        """
+        name = export_stem(capture.path)
+        meta = capture.meta
+        if meta is None or meta.ended_at is None:
+            return name
+        gaps = "no gaps" if meta.gap_count == 0 else f"{meta.gap_count:,} gaps"
+        return f"{name} · {meta.record_count:,} records · {gaps}"
+
+    @staticmethod
+    def _so_far(capture: Capture) -> str:
+        """How much a snapshot would be, for somebody deciding whether to take one.
+
+        The size on disk rather than a record count. The count is the number
+        anybody would rather have, and getting it means decompressing the whole
+        spool -- on the interface thread, at the moment the dialog opens, for a
+        file that is still growing. The size is one `stat`, it moves with the
+        count, and it is the number that answers "is this worth waiting for".
+
+        Empty rather than a zero when the file cannot be measured: this is a
+        parenthesis in a sentence that reads correctly without it.
+        """
+        try:
+            written = (capture.path / SPOOL_NAME).stat().st_size
+        except OSError:
+            return ""
+        return f" ({written / 1_000_000:,.1f} MB)"
+
     # -- state -----------------------------------------------------------
 
     @property
     def format_name(self) -> str:
-        value = self.format_box.currentData()
+        checked = self.formats.checkedButton()
+        value = checked.property("format") if checked is not None else None
         return value if isinstance(value, str) else DEFAULT_FORMAT
+
+    def choose_format(self, name: str) -> None:
+        """Pick a format by name.
+
+        A method rather than leaving callers to find the right widget and set
+        it. The control has been a combo and is now a list of radios, and the
+        thing that does not change is *which format*: a caller that says the
+        name survives the next rearrangement, where one that pokes the widget
+        has to be rewritten with it.
+        """
+        for button in self.formats.buttons():
+            if button.property("format") == name:
+                button.setChecked(True)
+                return
+        msg = f"unknown format {name!r}"
+        raise KeyError(msg)
+
+    def _on_format_toggled(self, _button: QWidget, checked: bool) -> None:
+        """`buttonToggled` fires twice per change -- off, then on."""
+        if checked:
+            self._on_format_changed()
 
     def _on_format_changed(self) -> None:
         """Only one format has a budget, so only it offers one."""
@@ -218,6 +316,9 @@ class ExportDialog(QDialog):
         self.budget.setVisible(has_budget)
         self.budget_label.setVisible(has_budget)
         self.destination.setText(str(self._default_destination()))
+        # The button says what it will do, so `Enter` on the default path is a
+        # complete answer and nothing has to be read twice to check it.
+        self.export_button.setText(f"Export {self.format_name}")
 
     def _default_destination(self) -> Path:
         """Beside the capture, named after it -- as the CLI does.
@@ -282,8 +383,21 @@ class ExportDialog(QDialog):
     def _set_running(self, *, running: bool) -> None:
         self.progress.setVisible(running)
         self.export_button.setEnabled(not running)
-        self.format_box.setEnabled(not running)
+        for button in self.formats.buttons():
+            button.setEnabled(not running)
         self.destination.setEnabled(not running)
+
+    def reveal_export(self) -> None:
+        """Open the folder the export landed in.
+
+        The folder rather than the file: an agent bundle *is* a directory, and
+        opening the containing folder is the one behaviour that is right for
+        both shapes. `QDesktopServices` is `QtGui`, so this costs no dependency.
+        """
+        if self.result_path is None:  # pragma: no cover - the button is hidden
+            return
+        folder = self.result_path if self.result_path.is_dir() else self.result_path.parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def _on_failed(self, message: str) -> None:
         self._set_running(running=False)
@@ -294,6 +408,7 @@ class ExportDialog(QDialog):
         if not isinstance(outcome, ExportResult):  # pragma: no cover - defensive
             return
         self.result_path = outcome.destination
+        self.reveal.setVisible(True)
         meta = self.capture.meta
         notes = export_notes(
             outcome,
