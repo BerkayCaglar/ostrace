@@ -255,6 +255,22 @@ carries the chart.
 
 ### Fixed
 
+- **Closing the window could take the process down with it.** When a capture
+  refuses to let go, its thread is parked rather than dropped — Qt's destructor
+  calls `qFatal` on a running `QThread`, so dropping it would not report a stuck
+  capture, it would kill the viewer with no message. `shutdown` then gave each
+  parked thread one more bounded wait and cleared the list **whether or not the
+  wait succeeded**, which is that exact drop, one layer down. It now keeps what
+  did not finish.
+
+  The same line released each parked pump unconditionally, which is the rule
+  this area exists to keep stated backwards: a pump let go while its thread is
+  still producing leaves the queue growing with nothing bounding it.
+
+  Found by CI on macOS, once, as what looked like a flake — and it was two
+  faults at once, a test budget that was really a race and a branch that
+  treated a timed-out wait as a successful one.
+
 - **Two records in `ios26-mixed.jsonl.gz` said how long the capture device had
   stood still.** `timeSinceStart,486891.342897` beside `totalDistance,0.000000`
   is 5.6 days in one place; the record before it carries `hasLatLon,1` and a
