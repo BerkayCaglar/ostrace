@@ -29,7 +29,8 @@ pytest.importorskip("PySide6", reason="the gui extra is not installed")
 
 from PySide6.QtCore import QModelIndex, Qt
 
-from ostrace.gui.columns import Column
+from ostrace.analysis.scan import ABSENT
+from ostrace.gui.columns import REPEAT, Column
 from ostrace.gui.filters import Filter
 from ostrace.gui.markers import Eviction, is_marker, is_record
 from ostrace.gui.models import RecordModel
@@ -304,13 +305,25 @@ def test_an_untrimmed_model_has_no_eviction_notice(
 # -- presentation ------------------------------------------------------------
 
 
-def test_a_repeated_process_cell_is_blanked(model: RecordModel) -> None:
+def test_a_repeated_process_cell_carries_the_repeat_marker(model: RecordModel) -> None:
     """What makes a log where one process emits hundreds of consecutive
     records scannable at all."""
     model.append([make_record(i) for i in range(3)])
     assert text(model, 0, Column.PROCESS)
-    assert text(model, 1, Column.PROCESS) == ""
-    assert text(model, 2, Column.PROCESS) == ""
+    assert text(model, 1, Column.PROCESS) == REPEAT
+    assert text(model, 2, Column.PROCESS) == REPEAT
+
+
+def test_the_repeat_marker_is_not_the_absent_placeholder() -> None:
+    """The one thing it cannot be.
+
+    A record with no subsystem already reads ``-``, so spelling a repeat the
+    same way would make "same as above" and "the device sent nothing"
+    indistinguishable -- the confusion the marker exists to remove, arriving
+    from the other side. This is the whole reason the mockup's dash was not
+    taken, so it is asserted rather than left to the comment.
+    """
+    assert REPEAT != ABSENT
 
 
 def test_a_long_run_of_repeats_does_not_exhaust_the_stack(model: RecordModel) -> None:
@@ -325,7 +338,7 @@ def test_a_long_run_of_repeats_does_not_exhaust_the_stack(model: RecordModel) ->
     purpose: at 3 rows the old code passed.
     """
     model.append([make_record(i) for i in range(5_000)])
-    assert text(model, 4_999, Column.PROCESS) == ""
+    assert text(model, 4_999, Column.PROCESS) == REPEAT
     assert text(model, 0, Column.PROCESS) != ""
 
 

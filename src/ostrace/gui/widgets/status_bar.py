@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from ostrace.model import DeviceInfo
 
-__all__ = ["BEHIND", "FOLLOWING", "NOT_FOLLOWING", "StatusBar"]
+__all__ = ["BEHIND", "FOLLOWING", "HITS", "NOT_FOLLOWING", "StatusBar"]
 
 #: Shown before anything has been captured, so the fields have a resting state
 #: rather than appearing from nowhere on the first record.
@@ -42,6 +42,12 @@ NOT_FOLLOWING = "Not following"
 #: far behind they now are".
 BEHIND = "{count:,} behind"
 
+#: The highlight's hit count, said in one place so a test asks for the wording.
+#: "Highlighted" rather than "matches", because the window has two verbs and
+#: "matches" is what the *filter* does -- a bar reading ``1,204 matches`` beside
+#: ``800 of 8,000 shown`` invites the reading that the two numbers disagree.
+HITS = "{count:,} highlighted"
+
 
 class StatusBar(QStatusBar):
     """Independent readouts, each owning one fact."""
@@ -57,6 +63,11 @@ class StatusBar(QStatusBar):
         self._rate = QLabel(_IDLE, self)
         self._device = QLabel(_NO_DEVICE, self)
         self._shown = QLabel("", self)
+        #: What the second verb is finding. Beside `_shown` because they answer
+        #: the same shape of question about the same rows -- how many the filter
+        #: leaves, how many of those carry the marked term -- and reading them
+        #: apart would be reading two aggregates over two sets.
+        self._hits = QLabel("", self)
         self._volume = QLabel("0 records", self)
         self._gaps = QLabel("", self)
 
@@ -88,7 +99,7 @@ class StatusBar(QStatusBar):
         # a transient message is posted on the left, which is what showMessage
         # is for. A readout that a status message can push off the bar is not
         # a readout.
-        for widget in (self._rate, self._device, self._shown, self._volume, self._gaps):
+        for widget in (self._rate, self._device, self._shown, self._hits, self._volume, self._gaps):
             self.addPermanentWidget(widget)
         # Last, so it sits at the end of the bar where the view's own bottom
         # is, which is what it is about -- and the count immediately before it,
@@ -169,6 +180,23 @@ class StatusBar(QStatusBar):
     @property
     def shown_text(self) -> str:
         return self._shown.text()
+
+    def set_hits(self, hits: int, *, highlighting: bool) -> None:
+        """How many shown rows carry the highlighted term.
+
+        Silent when nothing is highlighted, and **spoken at zero when something
+        is** -- which is the gap count's rule rather than `set_shown`'s, and for
+        the gap count's reason. "Nothing highlighted" and "highlighted, no hits"
+        are genuinely different states here: the second one is the answer to
+        *does this ever happen*, and a readout that vanished rather than saying
+        ``0 highlighted`` would leave a reader unable to tell it from a field
+        they had not finished typing into.
+        """
+        self._hits.setText(HITS.format(count=hits) if highlighting else "")
+
+    @property
+    def hits_text(self) -> str:
+        return self._hits.text()
 
     def set_gap_count(self, gaps: int) -> None:
         """Always rendered -- see the module docstring."""

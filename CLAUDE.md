@@ -6,10 +6,9 @@ model, sources and storage (phases 0-1), `analysis/` plus all six exporters
 (phase 3), the PySide6 viewer in `gui/` (phase 4), and the release machinery
 itself (phase 5).
 
-**`main` and `v0.2.0` are the same tree.** When that stops being true, say by
-how much and add the sentence back: a bug reproduced against the published
-package is not necessarily a bug here, and `CHANGELOG.md`'s `## [Unreleased]`
-section is where the gap is written down.
+**`main` is ahead of `v0.2.0`** by the 0.3.0 packages listed below. A bug
+reproduced against the published package is not necessarily a bug here, and
+`CHANGELOG.md`'s `## [Unreleased]` section is where the gap is written down.
 
 0.2.0 was planned as a structural release and shipped as a feature one. Its
 plan lives outside this repository, beside the design notes, and **all eight of
@@ -18,12 +17,23 @@ its packages landed** — P (public presence and application identity), A
 follow and theme controllers), E (the view layer), F (the storage facade) and G
 (the public surface and the paper trail). Nothing structural is outstanding.
 
-**The GUI redesign's tiers are both closed.** The must-have tier shipped in
+**The GUI redesign's first two tiers are closed.** The must-have tier shipped in
 0.1.1 and 0.1.2; the nice-to-have tier went into 0.2.0 in four packages — the
 filter bar, the capture options, the export dialog and the View menu. One item
 of it was not built and the reason is a measurement, recorded in
-`docs/research/gui-redesign/05-interaction.md` §10. What is left is the Later
-tier, which is where a feature for 0.3.0 would come from.
+`docs/research/gui-redesign/05-interaction.md` §10. What is left is the **Later
+tier, which 0.3.0 is now taking**, in packages M (highlight as a second verb,
+the hit gutter, the repeat marker), N (named and persisted marks), O (a strict
+reader for the filter text form, and export-what-the-filter-shows) and P
+(hot-plug device notification). Six of that tier's items are deliberately *not*
+being built and §10 says why for each — the Preferences dialog's own trigger
+condition has not fired, and the time-proportional timeline and minimap hover
+detail both need the per-band model whose alternative measured 282 ms.
+
+**That tier is where staleness shows.** It was written on 2026-08-09 and asked
+for `F3`/`n` to step highlight hits; 0.1.1 bound both keys to the jump-target
+picker afterwards. A backlog can go out of date with nobody editing it, so read
+§10 against the code rather than as a work order.
 
 **All of it has now been on hardware**, on 2026-08-12: the eleven device tests,
 a capture and an export end to end, and the viewer driven by hand through a live
@@ -38,14 +48,17 @@ controllers came out of it — `gui/settings.py`, `gui/actions.py`,
 to 0009 record why they are shaped that way and what deliberately stayed on the
 window.
 
-**It is 2,188 lines now**, which is 33 more than before the refactor started.
-The structural work took out 338 and the four feature packages put 371 back —
-H 85, J 138, K none of it (an export change lands in the dialog), L 148. That is
-not the refactor failing: what came out were *responsibilities*, and what went
-back in is the wiring for four features the window did not have. But the number
-is the number, and a document claiming 1,817 while the file reads 2,188 is the
-kind of stale measurement this repository keeps being bitten by. The next
-package that touches this file should read it before adding to it.
+**It is 2,243 lines now**, which is 88 more than before the refactor started.
+The structural work took out 338, the four 0.2.0 feature packages put 371 back —
+H 85, J 138, K none of it (an export change lands in the dialog), L 148 — and
+0.3.0's package M has added 55 so far. That is not the refactor failing: what
+came out were *responsibilities*, and what goes back in is wiring for features
+the window did not have. But the number is the number, and a document claiming
+1,817 while the file reads 2,243 is the kind of stale measurement this
+repository keeps being bitten by. **Count it with `wc -l`** — PowerShell's
+`Measure-Object -Line` reported 1,973 for the same file, which is how a
+correction ends up being a second error. The next package that touches this file
+should read it before adding to it.
 
 0.1.0 does not exist. It was published and withdrawn the next day over the
 fixtures inside its `sdist`, and the number will not be reused — so there is

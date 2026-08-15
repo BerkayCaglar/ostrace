@@ -24,8 +24,12 @@ splits the work into must-have, nice-to-have and later. 0.1.1 took the
 must-have items that could be done at once, 0.1.2 finished that tier, and
 **0.2.0 closed the nice-to-have tier** in four packages — one item of it
 unbuilt, with a measurement rather than a preference as the reason. What is
-still a backlog here is the Later tier, and the
-[changelog](../../../CHANGELOG.md) records what shipped.
+still a backlog here is the Later tier, which **0.3.0 has begun taking**, and
+the [changelog](../../../CHANGELOG.md) records what shipped.
+
+That tier is where the staleness shows, and §10 now says so where it happened:
+one of its items asked for two keys that had been bound to something else since
+0.1.1, which is a list going out of date without anybody editing it.
 
 Two things were changed on the way in: absolute paths off one machine became
 repository-relative, and the capture device's name became `My iPhone`. A device

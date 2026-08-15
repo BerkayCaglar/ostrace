@@ -84,15 +84,37 @@ from PySide6.QtWidgets import (
     QTableView,
 )
 
-from ostrace.gui.columns import Column, fit_budgets, wanted_widths
-from ostrace.gui.filters import Filter
+from ostrace.gui.columns import COLLAPSING, REPEAT, Column, fit_budgets, wanted_widths
+from ostrace.gui.filters import Filter, Highlight, merge_spans
 from ostrace.gui.fonts import monospace
-from ostrace.gui.theme import Scheme, palette_for, search_hit, selection_row, token
+
+# At run time rather than under `TYPE_CHECKING`: the gutter asks the model a
+# question no `QAbstractItemModel` has, so the view has to be able to tell
+# whether it was given one of ours -- a benchmark's stand-in model is a real
+# thing to be handed, and the honest answer for it is a strip with no hits in
+# it. `gui.models` imports nothing from `gui.widgets`, so this is not a cycle.
+from ostrace.gui.models import RecordModel
+from ostrace.gui.theme import (
+    Scheme,
+    mark_accent,
+    palette_for,
+    search_hit,
+    selection_row,
+    token,
+)
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
 
-__all__ = ["FastHeader", "LogTable", "MiddleElidingDelegate", "SeverityDelegate"]
+__all__ = [
+    "GUTTER_WIDTH",
+    "FastHeader",
+    "HitGutter",
+    "LogTable",
+    "MessageDelegate",
+    "MiddleElidingDelegate",
+    "SeverityDelegate",
+]
 
 _Index = QModelIndex | QPersistentModelIndex
 
@@ -116,6 +138,16 @@ _PLACEHOLDER_GAP = 8
 #: record. Fixed rather than derived, because the header carries the smaller of
 #: the two type sizes and would otherwise shrink below the row it labels.
 _HEADER_HEIGHT = 26
+
+#: How wide the hit gutter is, and therefore what it costs the Message column
+#: for as long as a highlight is set. Three pixels of tick with a pixel either
+#: side: enough to see down a column of forty rows, and small enough that the
+#: precedent this project set against the minimap time axis -- 51 px of Message,
+#: permanently, for two labels -- is not being quietly broken here.
+GUTTER_WIDTH = 5
+
+#: The tick itself, inside `GUTTER_WIDTH`.
+_TICK_WIDTH = 3
 
 
 class FastHeader(QHeaderView):
@@ -172,6 +204,129 @@ class FastHeader(QHeaderView):
         return QStyleOptionHeader.SectionPosition.Middle
 
 
+class HitGutter(QHeaderView):
+    """A strip down the left edge marking the rows a highlight hit.
+
+    **Why it is needed is a measurement, not an intuition.** A hit is drawn as a
+    wash over the term inside the Message cell, and that cell elides -- so a hit
+    past the elision point shows nothing at all, on a row the count includes and
+    the chevrons stop at. Measured over the 8,000 committed fixture messages at
+    the widths this window is read at, with the Message column sized by
+    `fit_budgets`:
+
+    ==============  ==========  ==========  ==========
+    term            1280 px     1600 px     1920 px
+    ==============  ==========  ==========  ==========
+    ``error``          40.5%       31.1%       29.8%
+    ``connection``     34.1%       19.5%       16.8%
+    ``timeout``        44.0%        8.0%        8.0%
+    ``xpc``             5.8%        4.8%        1.9%
+    ``assert``          1.5%        0.4%        0.0%
+    ==============  ==========  ==========  ==========
+
+    That is the fraction of hits elided out of view. At the shipped default
+    width two of the five common terms lose a third of their hits, and **a wider
+    window barely helps the worst of them** -- 40.5% to 29.8% across 640 extra
+    pixels -- because the messages that mention a word late are the long ones.
+    A reader would be told there are 829 hits and be able to find 493.
+
+    This *is* the table's vertical header, which was hidden and is now given a
+    job. A gutter has to be a fixed strip that does not scroll sideways with the
+    content and that stays aligned with the rows, which is the whole of what a
+    vertical header is; drawing one into the viewport instead means either
+    re-deriving row geometry by hand or taking a bar across whatever the
+    horizontal scroll has brought under it.
+
+    ``paintSection`` deliberately never calls ``super()``, and that is the same
+    trap `FastHeader` documents rather than a shortcut: the base implementation
+    asks the selection model whether the whole *row* is selected, per section,
+    on every repaint. Nothing here needs the answer.
+    """
+
+    def __init__(self, parent: QWidget, *, scheme: Scheme = Scheme.LIGHT) -> None:
+        super().__init__(Qt.Orientation.Vertical, parent)
+        self._model: RecordModel | None = None
+        self._tick = mark_accent(scheme)
+        self.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self.setFixedWidth(GUTTER_WIDTH)
+        self.setHighlightSections(False)
+        # It is a readout, not a control: clicking it must not select rows or
+        # start a drag, and it has nothing to say to a keyboard.
+        self.setSectionsClickable(False)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setAccessibleName("Highlight hits")
+
+    def set_model(self, model: RecordModel | None) -> None:
+        """Whose hits to draw. Held concretely, as the minimap holds it."""
+        self._model = model
+        self.update()
+
+    def set_scheme(self, scheme: Scheme) -> None:
+        self._tick = mark_accent(scheme)
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
+        """Fill the strip on the rows that hit, in one pass over what is visible.
+
+        The whole paint, not a ``paintSection`` override, and **not** a
+        ``super()`` call: `QHeaderView`'s own paint builds a style option per
+        section and resolves the selection for each one, which for a *vertical*
+        header over a table selecting whole rows is precisely the quadratic
+        question `FastHeader` exists to stop asking.
+
+        **What it costs is 0.34 ms**, spread 0.065 over nine rounds of 60
+        repaints, timed against the strip's own viewport at 200,000 rows. On the
+        whole table it does not resolve at all: 39.43 ms with no term set,
+        42.60 with a term and the strip hidden, 42.41 with a term and the strip
+        shown -- the two term arms differ by less than their own spread, so the
+        three milliseconds are the wash inside the message and the gutter is
+        inside the noise.
+
+        Getting that took four attempts and each wrong one is a method note.
+        Varying the *filter* between arms changes how many rows the model holds,
+        so the arms stop being about the same table. A fixed arm order within a
+        round is a systematic effect that interleaving across rounds does not
+        remove, because toggling the strip forces a relayout the next arm pays
+        for. ``repaint()`` on a widget with nothing invalidated returns without
+        painting, so a loop of sixty of them paints once and times fifty-nine
+        no-ops -- which is why two runs disagreed about which arm was slowest
+        and one had the gutter *hidden* costing more than the gutter shown. And
+        asking the header itself to repaint measures the frame, not the strip:
+        that arm read 0.001 ms until it was pointed at the viewport.
+
+        The colour is the one the message wash is derived from, at full opacity.
+        One statement -- *the term you asked about is on this row* -- drawn
+        twice, because one of the two places can be elided away, rather than a
+        second colour a reader would have to be taught.
+        """
+        del event
+        model = self._model
+        rows = 0 if model is None else model.rowCount()
+        if model is None or rows == 0:
+            return
+        height = self.viewport().height()
+        first = self.visualIndexAt(0)
+        last = self.visualIndexAt(height - 1)
+        # An invalid index at the top means nothing is on screen; at the bottom
+        # it means the rows ran out before the viewport did, which is the same
+        # fallback `LogTable.visible_rows` takes and for the same reason.
+        if first < 0:
+            return
+        painter = QPainter(self.viewport())
+        for visual in range(first, (rows - 1 if last < 0 else last) + 1):
+            row = self.logicalIndex(visual)
+            if row < 0 or not model.highlight_hit(row):
+                continue
+            painter.fillRect(
+                1,
+                self.sectionViewportPosition(row),
+                _TICK_WIDTH,
+                self.sectionSize(row),
+                self._tick,
+            )
+        painter.end()
+
+
 class SeverityDelegate(QStyledItemDelegate):
     """Keep the level's colour on the row the user selected.
 
@@ -191,10 +346,29 @@ class SeverityDelegate(QStyledItemDelegate):
     ``initStyleOption`` only -- no ``paint`` override. This runs for every
     visible cell on every repaint, and a Python ``paint`` on that path is the
     one thing the table cannot afford.
+
+    It is also where the repeat marker is quietened, for that same reason: this
+    method already crosses into Python for every cell, so a string comparison
+    here is free, where a delegate with a ``paint`` on the three collapsing
+    columns would pay the crossing three more times.
     """
+
+    def __init__(self, parent: QWidget | None = None, *, scheme: Scheme = Scheme.LIGHT) -> None:
+        super().__init__(parent)
+        self._muted = QBrush(token("text-muted", scheme))
+
+    def set_scheme(self, scheme: Scheme) -> None:
+        self._muted = QBrush(token("text-muted", scheme))
 
     def initStyleOption(self, option: QStyleOptionViewItem, index: _Index) -> None:  # noqa: N802
         super().initStyleOption(option, index)
+        if option.text == REPEAT and index.column() in COLLAPSING:
+            # A run of one process is what blanking exists to make scannable, so
+            # putting a character back on every row of it has to cost the eye
+            # nothing. Muted in both roles: a selected repeat is still a repeat.
+            option.palette.setBrush(QPalette.ColorRole.Text, self._muted)
+            option.palette.setBrush(QPalette.ColorRole.HighlightedText, self._muted)
+            return
         foreground = index.data(Qt.ItemDataRole.ForegroundRole)
         if foreground is not None:
             option.palette.setBrush(QPalette.ColorRole.HighlightedText, QBrush(foreground))
@@ -220,7 +394,22 @@ class MiddleElidingDelegate(SeverityDelegate):
 
 
 class MessageDelegate(SeverityDelegate):
-    """Draw the search term highlighted inside the message.
+    """Draw the terms the reader asked about, washed inside the message.
+
+    **Two verbs, one wash.** The filter's search term and the highlight term are
+    drawn in the same colour, and that is a decision rather than an omission:
+    they are the same statement about the row -- *this is the text you asked
+    about* -- and a reader who typed into both fields does not need a legend to
+    tell their own two words apart. A second colour would have to be measured
+    against the contrast floor, sit far enough from the first to be nameable,
+    and then be explained. What distinguishes the highlight is not its colour,
+    it is that it has a gutter tick and a count and the chevrons stop at it.
+
+    The spans are merged before they are drawn. A wash is translucent, so
+    painting the same pixels twice comes out darker than the colour that was
+    held to the floor -- and searching ``err`` while highlighting ``error``
+    overlaps on every single hit, which is what somebody narrowing and then
+    looking within the narrowing actually types.
 
     It answers "why did this row match?" with no new control. The one thing it
     needed was permission to exist: this class's parent says a Python ``paint``
@@ -243,21 +432,26 @@ class MessageDelegate(SeverityDelegate):
     """
 
     def __init__(self, parent: QWidget | None = None, *, scheme: Scheme = Scheme.LIGHT) -> None:
-        super().__init__(parent)
+        super().__init__(parent, scheme=scheme)
         self._filter = Filter()
+        self._highlight = Highlight()
         self._wash = search_hit(scheme)
 
     def set_filter(self, standing: Filter) -> None:
         self._filter = standing
 
+    def set_highlight(self, highlight: Highlight) -> None:
+        self._highlight = highlight
+
     def set_scheme(self, scheme: Scheme) -> None:
+        super().set_scheme(scheme)
         self._wash = search_hit(scheme)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: _Index) -> None:
         super().paint(painter, option, index)
-        if not self._filter.search:
-            # The common case, and the cheap one: no search, no work beyond the
-            # `super()` call this override costs anyway.
+        if not self._filter.search and self._highlight.is_empty:
+            # The common case, and the cheap one: nothing asked about, no work
+            # beyond the `super()` call this override costs anyway.
             return
         text = index.data(Qt.ItemDataRole.DisplayRole)
         if not isinstance(text, str):
@@ -274,7 +468,7 @@ class MessageDelegate(SeverityDelegate):
         left = option.rect.left() + inset
         top = option.rect.top()
         height = option.rect.height()
-        for start, end in self._filter.spans(drawn):
+        for start, end in merge_spans(self._filter.spans(drawn), self._highlight.spans(drawn)):
             painter.fillRect(
                 QRectF(
                     left + metrics.horizontalAdvance(drawn[:start]),
@@ -308,11 +502,17 @@ class LogTable(QTableView):
 
         self.setFont(self._body_font())
         self.setHorizontalHeader(FastHeader(Qt.Orientation.Horizontal, self))
-        self.setItemDelegate(SeverityDelegate(self))
-        self.setItemDelegateForColumn(int(Column.PROCESS), MiddleElidingDelegate(self))
+        # Held rather than only installed: all three resolve colours from the
+        # scheme and have to be told when it changes. The view-wide one was
+        # reachable through `itemDelegate()` and the column ones were not, which
+        # is a distinction nothing here should have to remember.
+        self.severity_delegate = SeverityDelegate(self, scheme=scheme)
+        self.process_delegate = MiddleElidingDelegate(self, scheme=scheme)
         # One column only. The measurement that allows this at all is in
         # `MessageDelegate`, and it is a measurement about *one* column.
         self.message_delegate = MessageDelegate(self, scheme=scheme)
+        self.setItemDelegate(self.severity_delegate)
+        self.setItemDelegateForColumn(int(Column.PROCESS), self.process_delegate)
         self.setItemDelegateForColumn(int(Column.MESSAGE), self.message_delegate)
 
         # Whole rows, extended selection: a log is read by row, and copying a
@@ -347,10 +547,15 @@ class LogTable(QTableView):
         bar.valueChanged.connect(self.viewport_changed)
         bar.rangeChanged.connect(self.viewport_changed)
 
-        vertical = self.verticalHeader()
-        vertical.setVisible(False)
-        vertical.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        vertical.setDefaultSectionSize(
+        # The vertical header is the gutter. It was hidden because a log has no
+        # row numbers worth showing; it is shown, five pixels wide, exactly
+        # while a highlight is set -- see `HitGutter` for the measurement that
+        # says the wash alone is not enough, and `set_highlight` for why the
+        # strip is not simply always there.
+        self.gutter = HitGutter(self, scheme=scheme)
+        self.setVerticalHeader(self.gutter)
+        self.gutter.setVisible(False)
+        self.gutter.setDefaultSectionSize(
             max(_MIN_ROW_HEIGHT, self.fontMetrics().height() + _ROW_PADDING)
         )
 
@@ -402,9 +607,13 @@ class LogTable(QTableView):
         palette.setColor(QPalette.ColorRole.Highlight, selection_row(scheme))
         self.setPalette(palette)
         self.viewport().setPalette(palette)
-        # The search wash is resolved from a token and held, like every other
-        # colour this widget prebuilds, so it has to be rebuilt beside them.
+        # Every colour this widget prebuilds from a token has to be rebuilt
+        # here: the wash, the muted repeat marker in all three delegates, and
+        # the gutter's tick.
+        self.severity_delegate.set_scheme(scheme)
+        self.process_delegate.set_scheme(scheme)
         self.message_delegate.set_scheme(scheme)
+        self.gutter.set_scheme(scheme)
 
     def set_placeholder(self, heading: str, detail: str = "") -> None:
         """What an empty table says about being empty.
@@ -527,8 +736,27 @@ class LogTable(QTableView):
         is set there are none, so the call silently does nothing.
         """
         super().setModel(model)
+        self.gutter.set_model(model if isinstance(model, RecordModel) else None)
         if model is not None:
             self.apply_column_widths()
+
+    def set_highlight(self, highlight: Highlight) -> None:
+        """Draw a term, and show the gutter for exactly as long as there is one.
+
+        The strip is not permanent, and that is the same argument this project
+        used to refuse the minimap's time axis: five pixels off the Message
+        column of every window forever, for an indicator that says nothing at
+        all until somebody types a term, is a cost taken from every reader to
+        serve the moments one of them is hunting.
+
+        Showing and hiding it moves the Message column by five pixels, which the
+        stretched last section absorbs -- no re-fit, so a width the user dragged
+        is not quietly overruled by having used the highlight.
+        """
+        self.message_delegate.set_highlight(highlight)
+        self.gutter.setVisible(not highlight.is_empty)
+        self.gutter.update()
+        self.viewport().update()
 
     def apply_column_widths(self) -> None:
         """Size the columns from the current font.

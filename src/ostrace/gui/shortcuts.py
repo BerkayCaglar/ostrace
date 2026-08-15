@@ -170,6 +170,19 @@ BINDINGS: tuple[Binding, ...] = (
         group="selection",
         description="Jump to the search box",
     ),
+    # `Ctrl+Shift+H` and not `Ctrl+H`, which is the obvious pairing with
+    # `Ctrl+F` and is unusable: Qt maps `Ctrl` onto Command on macOS, where
+    # Command+H is the system Hide Application and an application does not get
+    # to take it. The shifted form is not reserved.
+    # UNVERIFIED-MACOS: the reservation is documented rather than tried here.
+    Binding(
+        "highlight",
+        "&Highlight",
+        "Ctrl+Shift+H",
+        menu="edit",
+        group="selection",
+        description="Jump to the highlight box — mark rows without hiding any",
+    ),
     Binding(
         "deselect",
         "Dese&lect",

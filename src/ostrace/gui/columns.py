@@ -18,9 +18,11 @@ from dataclasses import dataclass
 from enum import IntEnum
 
 __all__ = [
+    "COLLAPSING",
     "COLUMNS",
     "MESSAGE_MINIMUM",
     "MINIMUM_CHARACTERS",
+    "REPEAT",
     "UNTRIMMABLE",
     "Column",
     "column_spec",
@@ -63,6 +65,29 @@ COLUMNS: tuple[Spec, ...] = (
     Spec(Column.CATEGORY, "Category", 18, collapse_repeats=True),
     Spec(Column.MESSAGE, "Message", None),
 )
+
+
+#: What a cell shows in place of a value the row above already carries.
+#:
+#: It used to show nothing at all, and a blank cell in a table is read as a
+#: value the device did not emit. The published mockup asked for a dash here and
+#: a dash is the one character it cannot be: `analysis.scan.ABSENT` is already
+#: ``-``, so a dash would spell "same as above" and "there was nothing" the same
+#: way -- the exact confusion the proposal exists to remove, arriving from the
+#: other direction.
+#:
+#: ASCII, and that is the argument rather than an accident. Measured on the
+#: shipped Windows face (Cascadia Mono, PySide6 6.11.1): the typographic ditto
+#: mark U+3003 advances 13 px against 8 px for ``0``, so it breaks the character
+#: grid every budget in this module is counted in, and whether it resolves at
+#: all on the Mac and Linux faces is a question this project cannot measure.
+#: U+0022 advances exactly one unit and raises no question anywhere.
+REPEAT = '"'
+
+#: The columns that blank a repeat, as plain ints, for the delegate that draws
+#: `REPEAT` quietly. A set rather than a `spec.collapse_repeats` lookup because
+#: it is asked once per cell per repaint, where the lookup builds a `Column`.
+COLLAPSING = frozenset(int(spec.column) for spec in COLUMNS if spec.collapse_repeats)
 
 
 def column_spec(column: Column) -> Spec:

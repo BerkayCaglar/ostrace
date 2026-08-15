@@ -55,8 +55,8 @@ from PySide6.QtCore import (
 
 from ostrace.analysis.scan import ABSENT
 from ostrace.exporters.plaintext import gap_line
-from ostrace.gui.columns import COLUMNS, Column
-from ostrace.gui.filters import Filter
+from ostrace.gui.columns import COLUMNS, REPEAT, Column
+from ostrace.gui.filters import Filter, Highlight
 from ostrace.gui.finding import MATCHERS, Band, Find
 from ostrace.gui.markers import Eviction, is_record, plan_trim, when
 from ostrace.gui.theme import Scheme, Severity, mark_tint, severity_for
@@ -173,6 +173,16 @@ class RecordModel(QAbstractTableModel):
         #: same reason selection anchors on one: a filter change must move a
         #: mark with its record, not leave it on a row number.
         self._marks: set[int] = set()
+        self._highlight = Highlight()
+        #: Visible rows the highlight term hits, by source index -- the same
+        #: handle `_marks` uses, rebased by the same arithmetic on a trim, and
+        #: for the same reason: a row number is renumbered by every rescan.
+        #:
+        #: A set rather than a predicate asked per repaint. The term is a
+        #: regular expression and the alternative is running it over every
+        #: visible cell of every paint, where this runs it once per row per
+        #: change and answers the paint path with a hash lookup.
+        self._hits: set[int] = set()
         #: Minimap summary of the *dense* kind, one entry per `BUCKET_ROWS`
         #: visible rows. Gaps and evictions are rare and are kept exactly
         #: instead -- see `overview`.
@@ -298,6 +308,96 @@ class RecordModel(QAbstractTableModel):
                 self.index(0, 0), self.index(len(self._visible) - 1, len(COLUMNS) - 1)
             )
         self.marks_changed.emit()
+
+    # -- highlighting ----------------------------------------------------
+
+    @property
+    def highlight(self) -> Highlight:
+        return self._highlight
+
+    @property
+    def highlight_hits(self) -> int:
+        """How many shown rows carry the highlighted term.
+
+        The free live aggregate `docs/design/gui.md` §5 asks for: a reader who
+        highlights ``timeout`` learns how often it happens without writing a
+        filter, and watches the number grow while the device keeps talking.
+
+        Shown rows rather than retained ones, because that is the set the number
+        agrees with -- the rows on screen, the stripes on the minimap and the
+        rows the chevrons step through are all this same set, and a count over a
+        different one would be a fourth answer to the same question.
+        """
+        return len(self._hits)
+
+    def highlight_hit(self, view_row: int) -> bool:
+        """Whether a row carries the term. The `Find.HIGHLIGHT` predicate."""
+        return self._visible[view_row] in self._hits
+
+    def set_highlight(self, new: Highlight) -> None:
+        """Mark a term in place, without touching which rows are shown.
+
+        Deliberately **not** a rescan. Nothing about what survives the filter
+        has changed, so the rows stay where they are and the marks stay on them;
+        what changes is what the message cells draw and what the chevrons step
+        to. `dataChanged` over the visible range repaints without invalidating
+        an index, which is what keeps the reader's selection and scroll position
+        where they were -- resetting here would throw both away every time
+        somebody typed a character into a field that removes nothing.
+        """
+        if new == self._highlight:
+            return
+        self._highlight = new
+        self._rebuild_hits()
+        if self._visible:
+            top = self.index(0, 0)
+            self.dataChanged.emit(top, self.index(len(self._visible) - 1, len(COLUMNS) - 1))
+
+    def _rebuild_hits(self) -> None:
+        """Re-test every shown row against the term.
+
+        O(visible), on a human action, which is the precedent `find` and
+        `row_at_time` already set. It costs nothing at all when there is no term
+        -- the common case -- because `Highlight.hits` answers on a null pattern
+        before it looks at the text.
+        """
+        if self._highlight.is_empty:
+            self._hits = set()
+            return
+        hits = self._highlight.hits
+        self._hits = {source for source in self._visible if hits(self._text_of(self._rows[source]))}
+
+    def _extend_hits(self, from_row: int) -> None:
+        """Test rows appended since ``from_row`` and add the ones that carry it."""
+        if self._highlight.is_empty:
+            return
+        hits = self._highlight.hits
+        self._hits.update(
+            source for source in self._visible[from_row:] if hits(self._text_of(self._rows[source]))
+        )
+
+    def _test_hit(self, source: int) -> None:
+        """Re-test one row, in both directions.
+
+        For the eviction notice, which is inserted once and then rewritten in
+        place as more records are dropped: the count is inside the sentence, so
+        a term that matched it a moment ago may not now.
+        """
+        if self._highlight.is_empty:
+            return
+        if self._highlight.hits(self._text_of(self._rows[source])):
+            self._hits.add(source)
+        else:
+            self._hits.discard(source)
+
+    def _text_of(self, row: Row) -> str:
+        """What the Message column of a row reads, marker or record.
+
+        Markers count, for the reason `row_at_time` gives about them: a gap is
+        often exactly what somebody is hunting for, and a term that could match
+        every row except the one explaining the silence would skip the answer.
+        """
+        return row.message if isinstance(row, Record) else self._marker_text(row)
 
     # -- navigation ------------------------------------------------------
 
@@ -481,7 +581,7 @@ class RecordModel(QAbstractTableModel):
             return row.message
 
         value = _field(row, column)
-        return "" if self._repeats_previous(view_row, column, value) else value
+        return REPEAT if self._repeats_previous(view_row, column, value) else value
 
     def _repeats_previous(self, view_row: int, column: Column, value: str) -> bool:
         """Whether the row above holds the same thing in this column.
@@ -569,6 +669,7 @@ class RecordModel(QAbstractTableModel):
             self._rows.extend(batch)
             self._visible.extend(newly_visible)
             self._extend_buckets(start)
+            self._extend_hits(start)
             self.endInsertRows()
         else:
             # Nothing to show, but the items are still retained: a filter hides
@@ -661,10 +762,14 @@ class RecordModel(QAbstractTableModel):
         # nothing is worse than losing it: the user would jump to a row that is
         # not the one they marked.
         self._marks = {mark - plan.offset for mark in self._marks if mark >= plan.drop}
+        # The same arithmetic, and it has to be the same: a hit that outlived
+        # its record would light a row somebody else's message now occupies.
+        self._hits = {hit - plan.offset for hit in self._hits if hit >= plan.drop}
         if plan.notice is not None:
             self._rows.insert(0, plan.notice)
             self._visible.insert(0, 0)
             self._evicted += plan.records
+            self._test_hit(0)
         self._rebuild_buckets()
 
         if plan.gone > 0:
@@ -694,6 +799,9 @@ class RecordModel(QAbstractTableModel):
 
         if self._rows and isinstance(self._rows[0], Eviction):
             self._rows[0] = notice
+            # The count inside the sentence changed, so whether it carries the
+            # term can have changed with it -- in either direction.
+            self._test_hit(0)
             top = self.index(0, 0)
             self.dataChanged.emit(top, self.index(0, len(COLUMNS) - 1))
             return
@@ -702,6 +810,8 @@ class RecordModel(QAbstractTableModel):
         self._rows.insert(0, notice)
         self._visible = [0, *(index + 1 for index in self._visible)]
         self._marks = {mark + 1 for mark in self._marks}
+        self._hits = {hit + 1 for hit in self._hits}
+        self._test_hit(0)
         self._rebuild_buckets()
         self.endInsertRows()
 
@@ -728,9 +838,12 @@ class RecordModel(QAbstractTableModel):
         a view could usefully keep. A trim drops a *prefix*, which is why that
         one brackets removals instead.
 
-        The filter is deliberately not reset. Which filter a fresh model should
-        carry is the caller's policy -- closing clears it, every other door
-        carries it -- and it is stated at those doors rather than assumed here.
+        The filter is deliberately not reset, and neither is the highlight.
+        Which of the two a fresh model should carry is the caller's policy --
+        closing clears them, every other door carries them -- and it is stated
+        at those doors rather than assumed here. The *hits* do go, because they
+        are positions in rows that no longer exist rather than a question the
+        user asked.
         """
         self.beginResetModel()
         self._rows = []
@@ -738,6 +851,7 @@ class RecordModel(QAbstractTableModel):
         self._evicted = 0
         self._gaps = 0
         self._marks = set()
+        self._hits = set()
         self._buckets = []
         self._marker_sources = []
         self.endResetModel()
@@ -763,6 +877,10 @@ class RecordModel(QAbstractTableModel):
     def _rescan(self) -> None:
         self._visible = [index for index, row in enumerate(self._rows) if self._passes(row)]
         self._rebuild_buckets()
+        # After `_visible`, because the hits are a subset of it: a narrowing
+        # filter takes rows away from the highlight as well, and a count that
+        # went on including them would be an aggregate over rows nobody can see.
+        self._rebuild_hits()
 
     def set_scheme(self, scheme: Scheme) -> None:
         """Recolour in place after a theme switch. No row changes."""

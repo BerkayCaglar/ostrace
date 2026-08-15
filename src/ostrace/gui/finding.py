@@ -63,6 +63,7 @@ class Find(StrEnum):
     NOTICE = "notice"
     MARKER = "marker"
     MARK = "mark"
+    HIGHLIGHT = "highlight"
 
     @property
     def label(self) -> str:
@@ -79,6 +80,7 @@ _FIND_LABELS: dict[Find, str] = {
     Find.NOTICE: "Notices and above",
     Find.MARKER: "Gaps",
     Find.MARK: "Marked rows",
+    Find.HIGHLIGHT: "Highlighted rows",
 }
 
 
@@ -102,4 +104,10 @@ MATCHERS: dict[Find, Callable[[RecordModel, int], bool]] = {
     Find.NOTICE: _at_least(Level.NOTICE),
     Find.MARKER: lambda model, row: not isinstance(model.row_at(row), Record),
     Find.MARK: lambda model, row: model.is_marked(row),
+    # The research asked for `F3`/`n` stepping through highlight hits. Both keys
+    # were already taken by the time it could be built -- 0.1.1 pointed the
+    # chevrons at a *chosen* kind and gave them exactly those two -- so the hits
+    # become one more kind rather than a second pair of keys stepping a second
+    # sequence past each other.
+    Find.HIGHLIGHT: lambda model, row: model.highlight_hit(row),
 }

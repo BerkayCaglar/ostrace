@@ -10,6 +10,76 @@ Two things are treated as public API from the start and will be versioned as
 such: the `Record` model and the on-disk export formats documented in
 [docs/formats/](docs/formats/).
 
+## [Unreleased]
+
+### Added
+
+- **Highlight, as a second verb.** `docs/design/gui.md` §5 has promised two of
+  them since before phase 4 — filter removes rows, highlight marks them where
+  they stand, and they compose: narrow to Error, then find `404` inside what is
+  left. Only the first was built. 0.2.0 washed the *filter's* search term inside
+  the Message cell and said plainly that this was the cheap eighty per cent; a
+  single field can only do one of the two things at a time.
+
+  The bar now carries a Highlight field with its own regex toggle, on
+  `Ctrl+Shift+H`. It is a separate value from the filter and travels on a
+  separate signal all the way to the window, because the two cost different
+  things: a filter change re-tests every retained row and moves the reader,
+  where a highlight change repaints forty. Folding them into one signal would
+  make the cheap verb pay for the expensive one on every keystroke.
+
+  Both terms are drawn in the same wash, and their spans are merged before they
+  are painted — a wash is translucent, so painting the same pixels twice comes
+  out darker than the colour that was measured against the contrast floor, and
+  searching `err` while highlighting `error` overlaps on every hit.
+
+- **A hit count in the status bar**, over the rows the filter shows. It speaks
+  at zero when a term is set and is silent when none is: "highlighted, no hits"
+  is the answer to *does this ever happen*, and a readout that vanished instead
+  could not be told from a field somebody had not finished typing into.
+
+- **A gutter down the left edge, marking the rows that hit.** It exists because
+  of a measurement rather than an intuition. The wash is drawn inside the
+  Message cell and that cell elides, so a hit past the elision point shows
+  nothing at all — on a row the count includes and the chevrons stop at. Over
+  the 8,000 committed fixture messages, at the shipped 1280 px default width,
+  **40.5% of `error` hits and 34.1% of `connection` hits are elided out of
+  view**, and a wider window barely helps the worst of them: 40.5% to 29.8%
+  across 640 extra pixels, because the messages that mention a word late are the
+  long ones. A reader would be told there were 829 hits and be able to find 493.
+
+  It is the table's own vertical header, which was hidden and now has a job, and
+  it appears only while a term is set — five pixels off the Message column of
+  every window forever, for a strip that says nothing until somebody types, is
+  the cost this project refused for the minimap time axis.
+
+- **The chevrons can be pointed at the highlight.** The research asked for
+  `F3`/`n` stepping; both keys were already bound to the jump-target picker by
+  the time this could be built, so the hits became one more target rather than a
+  second pair of keys stepping a second sequence past the first.
+
+### Changed
+
+- **A repeated cell now reads `"` rather than nothing.** Blanking a value the
+  row above already carries is what makes a run of one process scannable, and a
+  blank cell in a table is also how "the device sent nothing" looks. The
+  published mockup asked for a dash here, and a dash is the one character it
+  cannot be: a record with no subsystem already reads `-`, so that spelling
+  would introduce the confusion it was proposed to remove, from the other side.
+
+  ASCII, and that is the argument rather than an accident — the typographic
+  ditto mark U+3003 advances 13 px against 8 px for `0` on the shipped Windows
+  face, so it breaks the character grid every column budget is counted in, and
+  whether it resolves at all on the Mac and Linux faces is a question this
+  project cannot measure. The marker is drawn muted, in the delegate method that
+  already crosses into Python for every cell, so it costs nothing new.
+
+- **The filter bar folds at 1150 px rather than 900.** The old number was
+  measured against four controls and there are five now, so the width at which
+  sharing one line stops paying moved with it. Re-measured as the first width
+  where folding gives one of the two free-text fields more room and neither
+  less. On the 1280 px default window the bar still does not fold.
+
 ## 0.2.0 - 2026-08-14
 
 A structural release that turned into a feature one. The plan was the god node,
