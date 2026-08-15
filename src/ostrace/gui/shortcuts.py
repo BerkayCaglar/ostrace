@@ -200,6 +200,19 @@ BINDINGS: tuple[Binding, ...] = (
         group="marks",
         description="Mark the current row, or unmark it",
     ),
+    # Unkeyed on purpose. Marking is one press and naming is the deliberate
+    # second thought about a row already marked; a chord for it would be a key
+    # nobody has spare, on a menu item people reach through the row's own
+    # right-click anyway.
+    Binding(
+        "name_mark",
+        "&Name Mark…",
+        "",
+        unkeyed=True,
+        menu="edit",
+        group="marks",
+        description="Give the current row a name, so the marks panel says what it is",
+    ),
     Binding(
         "clear_marks",
         "Clear &Marks",

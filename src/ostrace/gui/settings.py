@@ -2,19 +2,26 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """What the window remembers between sessions, and what it deliberately does not.
 
-Ten keys across three namespaces. Qt decides where they are kept, per
+Eleven keys across four namespaces. Qt decides where they are kept, per
 platform, which is why this is not a decision ``paths`` owns: no file of ours is
 being placed. ``gui.app`` sets the organisation and application names, which is
 what stops Qt filing them under a vendor called "Unknown".
 
-**Only geometry.** Not the open capture and not the applied filter: a viewer
-that reopened yesterday's file would be guessing, and a filter that survived a
-restart is one the user has to remember they set -- which is the "where did my
-logs go" failure with a longer fuse.
+**Nothing that changes what the window shows on the way up.** Not the open
+capture and not the applied filter: a viewer that reopened yesterday's file
+would be guessing, and a filter that survived a restart is one the user has to
+remember they set -- which is the "where did my logs go" failure with a longer
+fuse.
 
 The recent and saved filters *are* remembered, and that is the same rule rather
 than an exception to it. A filter that is merely **offered** changes nothing
 about what the window shows until somebody picks it.
+
+**So are the marks, per capture**, and that is the same rule again read
+carefully. A restored mark hides nothing and moves nothing; it puts back an
+annotation about a file the user has just chosen to open, which is the one
+moment they are certainly thinking about that file. The rule being kept is
+"do not decide what the reader is looking at", not "forget everything".
 
 Everything read back is treated as untrusted. It was written by some version of
 this program, possibly not this one, and a settings store is also a file a
@@ -28,7 +35,10 @@ can see the screens.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QByteArray, QSettings
@@ -38,9 +48,9 @@ from ostrace.gui.filters import RECENT_KEPT, Filter, SavedFilter
 from ostrace.gui.finding import Find
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
-__all__ = ["Layout", "WindowSettings"]
+__all__ = ["MARKED_CAPTURES", "Layout", "WindowSettings"]
 
 _THEME = "window/theme"
 _GEOMETRY = "window/geometry"
@@ -52,6 +62,39 @@ _SHOWN = "table/shown"
 _JUMP = "table/jump"
 _RECENT = "filters/recent"
 _SAVED = "filters/saved"
+_MARKS = "marks/captures"
+
+#: How many captures keep their marks. One entry per capture ever opened would
+#: grow without bound, and most captures are read once and never again.
+#:
+#: A cap rather than dropping entries whose file has gone: a capture on an
+#: external disk or a network share is missing while the disk is unplugged and
+#: is not gone, and a viewer that answered a temporarily absent path by
+#: discarding the notes made about it would be destroying work on the strength
+#: of a guess. Twenty is the recent-filter argument scaled to a thing kept for
+#: longer: enough to cover a session's worth of captures several times over.
+MARKED_CAPTURES = 20
+
+
+def _capture_key(capture: Path) -> str:
+    """How a capture is named in the store, so that two names cannot disagree.
+
+    ``resolve`` rather than ``str``: the same file reached by its bare name from
+    the directory holding it and by its full path from anywhere else is one
+    capture with one set of notes, and a viewer that filed them separately would
+    appear to lose them depending on how the file was opened. It also settles
+    the separator, which differs by platform in the *stored* string.
+
+    Spelled without an example on purpose. `test_paths.py` refuses a Windows
+    path literal anywhere under the package, prose included, and that bluntness
+    is the point -- a guard that learned an exception for comments is one the
+    next literal hides behind.
+
+    Non-existent paths resolve without complaint, which matters because this is
+    also asked about a capture that has since been deleted -- the answer wanted
+    there is "no marks", not an exception on the way to the window opening.
+    """
+    return str(Path(capture).resolve())
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,3 +279,79 @@ class WindowSettings:
             entry = SavedFilter.from_stored(line)
             if entry is not None:
                 yield entry
+
+    # -- the marks -------------------------------------------------------
+
+    def read_marks(self, capture: Path) -> list[tuple[datetime, str]]:
+        """What was marked in this capture last time, as moments and names.
+
+        Keyed by the capture's path, and stored as one list of entries rather
+        than one settings key per capture: ``/`` is the group separator in
+        ``QSettings``, so a path used as a key would be filed as a tree of
+        directories with a leaf at the end of it, on every platform and
+        differently on each.
+
+        Unreadable entries cost themselves and nothing else, and an unreadable
+        *moment* costs one mark rather than the capture's whole set -- the same
+        rule the recent filters follow, for the same reason.
+        """
+        key = _capture_key(capture)
+        for entry in self._mark_entries():
+            if entry.get("capture") != key:
+                continue
+            stored = entry.get("marks")
+            return list(self._moments(stored)) if isinstance(stored, list) else []
+        return []
+
+    def write_marks(self, capture: Path, marks: Sequence[tuple[datetime, str]]) -> None:
+        """Keep this capture's marks, newest capture first.
+
+        Moved to the front rather than left in place, so the cap drops the
+        capture nobody has opened in longest rather than the one that happened
+        to be stored first. A capture with no marks left is removed rather than
+        stored empty: an entry saying nothing still occupies one of the twenty.
+        """
+        key = _capture_key(capture)
+        kept = [entry for entry in self._mark_entries() if entry.get("capture") != key]
+        if marks:
+            kept.insert(
+                0,
+                {
+                    "capture": key,
+                    "marks": [{"at": moment.isoformat(), "name": name} for moment, name in marks],
+                },
+            )
+        self.store.setValue(_MARKS, [json.dumps(entry) for entry in kept[:MARKED_CAPTURES]])
+
+    def _mark_entries(self) -> list[dict[str, object]]:
+        """Every stored capture's marks, minus anything that will not decode."""
+        stored = self.store.value(_MARKS)
+        if not isinstance(stored, list):
+            return []
+        entries: list[dict[str, object]] = []
+        for line in stored:
+            if not isinstance(line, str):
+                continue
+            try:
+                decoded = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(decoded, dict) and isinstance(decoded.get("capture"), str):
+                entries.append(decoded)
+        return entries
+
+    @staticmethod
+    def _moments(stored: list[object]) -> Iterator[tuple[datetime, str]]:
+        for item in stored:
+            if not isinstance(item, dict):
+                continue
+            try:
+                moment = datetime.fromisoformat(str(item["at"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            # A naive moment is refused rather than assumed to be local. That is
+            # the project's timestamp rule, and it applies to a value read back
+            # off disk exactly as it applies to one read off a device.
+            if moment.tzinfo is None:
+                continue
+            yield moment, str(item.get("name", ""))

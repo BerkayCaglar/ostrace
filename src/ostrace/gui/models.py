@@ -169,10 +169,12 @@ class RecordModel(QAbstractTableModel):
         #: Retained gaps. Maintained on ingestion and on trim rather than
         #: counted on demand: the status bar asks once per pump tick.
         self._gaps = 0
-        #: Source indices the user has marked. Held by source index for the
-        #: same reason selection anchors on one: a filter change must move a
-        #: mark with its record, not leave it on a row number.
-        self._marks: set[int] = set()
+        #: What the user marked, by source index, and what they called it.
+        #: Held by source index for the same reason selection anchors on one: a
+        #: filter change must move a mark with its record, not leave it on a row
+        #: number. The name is ``""`` for the marks nobody named, which is most
+        #: of them -- see `toggle_mark`.
+        self._marks: dict[int, str] = {}
         self._highlight = Highlight()
         #: Visible rows the highlight term hits, by source index -- the same
         #: handle `_marks` uses, rebased by the same arithmetic on a trim, and
@@ -265,13 +267,19 @@ class RecordModel(QAbstractTableModel):
         Marks are held as *source* indices, the same handle selection anchors
         on, so a filter change moves them with the records rather than leaving
         them pointing at whatever now occupies that row number.
+
+        A mark made this way has **no name**, and that is the design rather than
+        a first step towards one: naming is the expensive half and going back is
+        the useful one, which is the same argument the recent-filter list is
+        built on. A viewer that asked for a name before it would remember
+        anything gets asked for nothing.
         """
         source = self._visible[view_row]
         if source in self._marks:
-            self._marks.discard(source)
+            del self._marks[source]
             marked = False
         else:
-            self._marks.add(source)
+            self._marks[source] = ""
             marked = True
         cell = self.index(view_row, 0)
         self.dataChanged.emit(cell, self.index(view_row, len(COLUMNS) - 1))
@@ -280,6 +288,36 @@ class RecordModel(QAbstractTableModel):
 
     def is_marked(self, view_row: int) -> bool:
         return self._visible[view_row] in self._marks
+
+    def mark_name(self, view_row: int) -> str:
+        """What the reader called this row, or ``""`` for an unnamed mark.
+
+        Empty for an unmarked row too. The two are the same answer to the
+        question this is asked -- *what should the panel show here* -- and a
+        caller that needs to tell them apart has `is_marked` beside it.
+        """
+        return self._marks.get(self._visible[view_row], "")
+
+    def set_mark_name(self, view_row: int, name: str) -> None:
+        """Name a row, marking it if it was not marked.
+
+        Naming an unmarked row marks it, rather than refusing: somebody typing a
+        note about a row has said something stronger about it than the key that
+        merely flags one, and making them press two things in order would be
+        asking for the weaker statement first.
+
+        An empty name leaves the mark and clears the note. It does **not**
+        unmark -- clearing the text of a name is a correction, and answering it
+        by throwing the mark away would lose the row as well as the note.
+        """
+        source = self._visible[view_row]
+        stripped = name.strip()
+        if self._marks.get(source, None) == stripped:
+            return
+        self._marks[source] = stripped
+        cell = self.index(view_row, 0)
+        self.dataChanged.emit(cell, self.index(view_row, len(COLUMNS) - 1))
+        self.marks_changed.emit()
 
     def marked_view_rows(self) -> list[int]:
         """Every marked row the filter still shows, in view order.
@@ -298,6 +336,60 @@ class RecordModel(QAbstractTableModel):
     @property
     def marks(self) -> int:
         return len(self._marks)
+
+    def named_marks(self) -> list[tuple[datetime, str]]:
+        """Every mark as a moment and a name, for something that outlives this.
+
+        The *timestamp*, not the source index, because a source index means
+        nothing outside this session: reopening the capture renumbers everything
+        from zero and a trim renumbers it again mid-session. `docs/design/gui.md`
+        §5 records the measurement that makes a timestamp usable here -- across
+        two captures off an `iPhone18,2`, 39,786 records, **every timestamp was
+        unique** -- and identity was chosen over it for *in-session* anchoring
+        only because it needs nothing parsed out of a record. Between sessions
+        there is no identity left to anchor on.
+
+        Marks on an `Eviction` are dropped rather than written out. That row is
+        an artefact of this view's cap, not a moment in the capture, and a
+        restored mark pointing at one would be a note about a notice.
+        """
+        return [
+            (when(self._rows[source]), name)
+            for source, name in sorted(self._marks.items())
+            if not isinstance(self._rows[source], Eviction)
+        ]
+
+    def restore_marks(self, marks: Iterable[tuple[datetime, str]]) -> int:
+        """Put remembered marks back on the rows they were made on.
+
+        Returns how many landed, which is not always all of them: a capture read
+        under a row cap holds its tail, so a mark made near the beginning of a
+        long capture has no row to go back to. Saying how many were found is the
+        honest answer to that, and it is the caller who has somewhere to say it.
+
+        One pass over the retained rows rather than a scan per mark. The first
+        row at a given moment wins; the measurement above says ties do not
+        happen in practice, and a mark landing on a neighbour from the same
+        millisecond is a better failure than refusing to restore it.
+        """
+        if not self._rows:
+            return 0
+        at_moment: dict[datetime, int] = {}
+        for source, row in enumerate(self._rows):
+            at_moment.setdefault(when(row), source)
+        found = 0
+        for moment, name in marks:
+            landed = at_moment.get(moment)
+            if landed is None:
+                continue
+            self._marks[landed] = name
+            found += 1
+        if found and self._visible:
+            self.dataChanged.emit(
+                self.index(0, 0), self.index(len(self._visible) - 1, len(COLUMNS) - 1)
+            )
+            self.marks_changed.emit()
+        return found
 
     def clear_marks(self) -> None:
         if not self._marks:
@@ -761,7 +853,9 @@ class RecordModel(QAbstractTableModel):
         # A mark on an evicted record goes with it. Keeping one that points at
         # nothing is worse than losing it: the user would jump to a row that is
         # not the one they marked.
-        self._marks = {mark - plan.offset for mark in self._marks if mark >= plan.drop}
+        self._marks = {
+            mark - plan.offset: name for mark, name in self._marks.items() if mark >= plan.drop
+        }
         # The same arithmetic, and it has to be the same: a hit that outlived
         # its record would light a row somebody else's message now occupies.
         self._hits = {hit - plan.offset for hit in self._hits if hit >= plan.drop}
@@ -809,7 +903,7 @@ class RecordModel(QAbstractTableModel):
         self.beginInsertRows(QModelIndex(), 0, 0)
         self._rows.insert(0, notice)
         self._visible = [0, *(index + 1 for index in self._visible)]
-        self._marks = {mark + 1 for mark in self._marks}
+        self._marks = {mark + 1: name for mark, name in self._marks.items()}
         self._hits = {hit + 1 for hit in self._hits}
         self._test_hit(0)
         self._rebuild_buckets()
@@ -850,7 +944,7 @@ class RecordModel(QAbstractTableModel):
         self._visible = []
         self._evicted = 0
         self._gaps = 0
-        self._marks = set()
+        self._marks = {}
         self._hits = set()
         self._buckets = []
         self._marker_sources = []
@@ -899,6 +993,15 @@ class RecordModel(QAbstractTableModel):
     def retained(self) -> int:
         """Items held, filtered or not."""
         return len(self._rows)
+
+    @property
+    def row_cap(self) -> int:
+        """How many items this model will hold before it starts dropping them.
+
+        Readable because a window explaining what it could not put back has to
+        say the number rather than name a constant the reader cannot see.
+        """
+        return self._row_cap
 
     @property
     def evicted(self) -> int:

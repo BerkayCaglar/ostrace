@@ -58,6 +58,49 @@ such: the `Record` model and the on-disk export formats documented in
   the time this could be built, so the hits became one more target rather than a
   second pair of keys stepping a second sequence past the first.
 
+- **Marks can be given a name**, under `Edit ▸ Name Mark…` and on the row's own
+  right-click. The marks panel shows the name where there is one, in place of
+  the level, the process and the message head — a name exists precisely because
+  that head was not a good enough label, so showing both would put the worse one
+  back beside it.
+
+  The name sits immediately after the time, and that ordering came from looking
+  at the panel rather than from taste: written last, after two long identifier
+  columns, it was elided away in the narrow dock the panel is designed to be —
+  so the one part of the line the reader wrote themselves was the one part never
+  on screen.
+
+  Marking is still one keypress with nothing asked, and that is deliberate:
+  naming is the expensive half and going back is the useful one, which is the
+  argument the recent-filter list is already built on. Naming an unmarked row
+  marks it, because typing a note about a row says something stronger than the
+  key that merely flags one. Clearing the text clears the note and keeps the
+  mark — emptying it is a correction, and answering that by unmarking would lose
+  the row as well as the note.
+
+  No key. Marking is the press; naming is the deliberate second thought about a
+  row already marked, and it is reached through the menu the right-click already
+  offers.
+
+- **Marks survive closing the capture.** They come back when the same capture is
+  opened again, keyed by its resolved path so that the same file reached by two
+  different path strings is one capture with one set of notes.
+
+  What is stored is the record's **timestamp**, not its position: a position
+  means nothing between sessions, since reopening renumbers everything from zero
+  and a trim renumbers it again mid-session. `docs/design/gui.md` §5 carries the
+  measurement that makes a timestamp usable here — 39,786 records across two
+  captures off an `iPhone18,2`, every timestamp unique.
+
+  A capture longer than the row cap holds its tail, so a mark near its beginning
+  has no row to go back to. The window says how many it put back and why, rather
+  than silently returning four of eleven. A mark on an eviction notice is never
+  written out at all: that row is an artefact of this view's cap, not a moment
+  in the capture. Twenty captures keep their marks, oldest dropped first —
+  capped by capture rather than by mark, because one capture's notes are one
+  piece of work and what grows without bound is how many captures have ever been
+  opened.
+
 ### Changed
 
 - **A repeated cell now reads `"` rather than nothing.** Blanking a value the

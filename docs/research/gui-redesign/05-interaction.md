@@ -770,10 +770,41 @@ Build on it; do not disturb it.
 | **Minimap keyboard focus + band stepping** | §3.4 | NICE |
 | **Minimap time axis** — the first and last timestamp drawn at the strip's ends | two `drawText` calls. §12 forbids *asserting* font metrics under offscreen; drawing is fine | NICE |
 | **Minimap hover tooltip** — "3 errors, 1 gap at 14:22:31" | needs a per-band detail the model does not keep | LATER |
-| **Named marks** ("watchdog fires here") | changes `_marks: set[int]` to a dict; touches trim/rebasing and `test_gui_navigation.py` | LATER |
-| **Marks persisted per capture** | QSettings keyed by capture path; meaningless for a live capture | LATER |
+| ~~**Named marks** ("watchdog fires here")~~ | changes `_marks: set[int]` to a dict; touches trim/rebasing and `test_gui_navigation.py` | **taken in 0.3.0**, and the estimate was right |
+| ~~**Marks persisted per capture**~~ | QSettings keyed by capture path; meaningless for a live capture | **taken in 0.3.0** — see below |
 | **A time-proportional timeline** distinct from the row-proportional minimap | would be *more* honest about a 40-minute gap holding zero rows — but it discards the row-anchored bucket design whose alternative measured 282 ms per rebuild | LATER, with that measurement attached |
 | **Context lines around a match** (`grep -C`) | already deliberately out of scope, `docs/design/gui.md` §13 | LATER |
+
+> **"QSettings keyed by capture path" was the right shape and two words of it
+> were wrong.** *Keyed by* is not available: `/` is the group separator in
+> `QSettings`, so a path used as a key is filed as a tree of directories with a
+> leaf at the end. One list of entries, each carrying its capture, instead.
+>
+> And a *path* is not a key either until it is resolved: the same file opened by
+> its bare name from the directory holding it and by its full path from anywhere
+> else would otherwise be two captures with two sets of notes, which reads as
+> losing them depending on how the file was opened.
+>
+> **What is persisted is a timestamp, not a source index.** A source index means
+> nothing between sessions — reopening renumbers everything from zero, and a
+> trim renumbers it again mid-session. §5.1 records the measurement that makes a
+> timestamp usable: across two captures off an `iPhone18,2`, 39,786 records,
+> every timestamp was unique. In-session anchoring still uses identity, because
+> that needs nothing parsed out of a record; between sessions there is no
+> identity left to anchor on.
+>
+> **"Meaningless for a live capture" is true only until the capture finishes.**
+> A live session becomes a file with a path the moment it is finalised, and
+> `_adopt_session` already hands the window that path — so the rule is not "not
+> for live captures", it is "not until there is somewhere to key them".
+>
+> Two things fall out of the row cap. A capture longer than 200,000 rows holds
+> its tail, so a mark near its beginning has no row to go back to; the restore
+> returns how many landed and the window says so, because a reader who marked
+> eleven things and silently got four back would conclude the feature is broken
+> rather than that the view is bounded. And a mark on an `Eviction` notice is
+> never written out at all — that row is an artefact of the cap, not a moment in
+> the capture.
 
 ### 5.3 One thing to verify rather than fix
 
@@ -1173,8 +1204,8 @@ layout-safe gap keys~~ · ~~`F5` refresh~~ · ~~`Ctrl+Shift+C` copy message~~ ·
 
 A filter query language or even a strict text-form *reader* · ~~full highlight
 as a second verb with hit counts and a gutter indicator~~ · ~~`F3`/`n` hit
-stepping~~ · named marks · marks persisted per capture · minimap hover detail ·
-a time-proportional timeline · export-what-the-filter-shows · hot-plug device
+stepping~~ · ~~named marks~~ · ~~marks persisted per capture~~ · minimap hover
+detail · a time-proportional timeline · export-what-the-filter-shows · hot-plug device
 notification · network capture · per-pane follow · in-row expansion on
 `Right`/`Left` · context lines around a match · a Preferences dialog (and with
 it, the `RELOCATED` / `PreferencesRole` question).

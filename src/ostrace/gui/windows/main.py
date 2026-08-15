@@ -186,6 +186,7 @@ class MainWindow(QMainWindow):
     action_find: QAction
     action_highlight: QAction
     action_mark: QAction
+    action_name_mark: QAction
     action_clear_marks: QAction
     action_top: QAction
     action_bottom: QAction
@@ -523,6 +524,7 @@ class MainWindow(QMainWindow):
         self.action_find.triggered.connect(self.filter_bar.focus_search)
         self.action_highlight.triggered.connect(self.filter_bar.focus_highlight)
         self.action_mark.triggered.connect(self.toggle_mark)
+        self.action_name_mark.triggered.connect(self.name_mark)
         self.action_clear_marks.triggered.connect(self.clear_marks)
         self.action_top.triggered.connect(self.go_to_top)
         self.action_bottom.triggered.connect(self.go_to_bottom)
@@ -667,6 +669,7 @@ class MainWindow(QMainWindow):
         self.capture_controller.shutdown()
         self.minimap.stop()
         self.device_button.stop()
+        self._save_marks()
         self._save_layout()
         super().closeEvent(event)
 
@@ -992,6 +995,11 @@ class MainWindow(QMainWindow):
         captures interleaved by arrival order would be a timeline that never
         happened.
         """
+        # Before anything else, and before `self.capture` is reassigned: the
+        # marks belong to the capture that is being put down, and a save that
+        # ran afterwards would write them against the one being picked up.
+        self._save_marks()
+
         # Cancelling stops it reading; it does not release it. The loader is
         # parented to this window and holds the model it was filling, so an
         # abandoned one keeps a whole retained row set alive. The other half of
@@ -1081,6 +1089,7 @@ class MainWindow(QMainWindow):
             )
             return
 
+        self._save_marks()
         if self._loader is not None:
             self._loader.cancel()
             self._loader.deleteLater()
@@ -1163,7 +1172,48 @@ class MainWindow(QMainWindow):
                 "or the writer was killed. Its last records are missing.",
                 "Dismiss",
             )
+        self._restore_marks()
         self._update_banner()
+
+    def _save_marks(self) -> None:
+        """Keep this capture's marks against its path, for the next time.
+
+        Silent when there is no capture: a live stream that has not written a
+        session yet has nowhere to key them, and marks made on rows in an
+        unnamed window are notes about something that does not exist as a file.
+        `_adopt_session` gives a finished live capture a path, at which point
+        this becomes true of it too.
+        """
+        if self.capture is None:
+            return
+        WindowSettings().write_marks(self.capture.path, self.model.named_marks())
+
+    def _restore_marks(self) -> None:
+        """Put back what was marked in this capture last time.
+
+        After the load, not during it: the marks are resolved against the rows
+        that are actually held, and half a capture is half the rows to find them
+        among.
+
+        Says how many were found only when some were lost, and then says why.
+        A capture longer than the row cap holds its tail, so a mark made near
+        its beginning has no row left to go back to -- and a reader who marked
+        eleven things and silently got four back would reasonably conclude the
+        feature is broken rather than that the view is bounded.
+        """
+        if self.capture is None:
+            return
+        wanted = WindowSettings().read_marks(self.capture.path)
+        if not wanted:
+            return
+        found = self.model.restore_marks(wanted)
+        self.minimap.rebuild()
+        self.marks_panel.rebuild()
+        if found < len(wanted):
+            self.status.showMessage(
+                f"Put back {found:,} of {len(wanted):,} marks. The rest are on records "
+                f"this view has dropped to stay within {self.model.row_cap:,} rows."
+            )
 
     def _on_load_failed(self, message: str) -> None:
         self._on_progress(self._loader.loaded if self._loader else 0)
@@ -1781,6 +1831,30 @@ class MainWindow(QMainWindow):
             self.model.toggle_mark(current.row())
             self.minimap.rebuild()
 
+    def name_mark(self) -> None:
+        """Ask what this row is, and keep the answer with the mark.
+
+        Pre-filled with whatever the mark is called already, so the prompt is a
+        correction as well as a first naming — and cancelling changes nothing,
+        where an empty box accepted would silently rename it to nothing.
+
+        Naming an unmarked row marks it. Somebody typing a note about a row has
+        said something stronger than the key that merely flags one, and making
+        them press two things in a fixed order would be asking for the weaker
+        statement first.
+        """
+        current = self.table.currentIndex()
+        if not current.isValid():
+            self.status.showMessage("Select a row first, and it can be named")
+            return
+        name, chosen = QInputDialog.getText(
+            self, "Name mark", "What is this row?", text=self.model.mark_name(current.row())
+        )
+        if not chosen:
+            return
+        self.model.set_mark_name(current.row(), name)
+        self.minimap.rebuild()
+
     def step_row(self, delta: int) -> None:
         """Move the selection without needing the table to have focus.
 
@@ -2024,6 +2098,7 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
         menu.addAction(self.action_copy)
         menu.addAction(self.action_mark)
+        menu.addAction(self.action_name_mark)
         menu.addSeparator()
         menu.addAction(self.action_go_time)
         return menu
