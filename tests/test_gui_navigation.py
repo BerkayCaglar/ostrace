@@ -22,7 +22,7 @@ pytest.importorskip("PySide6", reason="the gui extra is not installed")
 from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtWidgets import QAbstractSlider, QApplication
 
-from ostrace.gui.columns import Column
+from ostrace.gui.columns import REPEAT, Column
 from ostrace.gui.filters import Filter
 from ostrace.gui.markers import when
 from ostrace.gui.models import Find, RecordModel
@@ -293,8 +293,8 @@ def test_copying_a_row_fills_in_the_blanked_repeats(qt_app: object) -> None:
     window = MainWindow()
     window.model.append([make_record(i) for i in range(3)])
 
-    # The second row's process cell is blanked in the table.
-    assert window.model.data(window.model.index(1, int(Column.PROCESS))) == ""
+    # The second row's process cell carries the repeat marker in the table.
+    assert window.model.data(window.model.index(1, int(Column.PROCESS))) == REPEAT
 
     window.table.selectRow(1)
     window.copy_selection()

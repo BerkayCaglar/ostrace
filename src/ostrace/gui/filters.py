@@ -27,7 +27,16 @@ if TYPE_CHECKING:
 
     from ostrace.model import Record
 
-__all__ = ["RECENT_KEPT", "Filter", "SavedFilter", "forget", "remember", "save"]
+__all__ = [
+    "RECENT_KEPT",
+    "Filter",
+    "Highlight",
+    "SavedFilter",
+    "forget",
+    "merge_spans",
+    "remember",
+    "save",
+]
 
 #: How many filters back the recent list goes. Ten is about a session's worth
 #: of narrowing and short enough to read without scrolling a menu, which is the
@@ -46,6 +55,66 @@ def _quote(value: str) -> str:
         return value
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
+
+
+def _compile(text: str, *, regex: bool) -> re.Pattern[str] | None:
+    """One term's pattern, or ``None`` when there is no term.
+
+    Shared by the two verbs because they compile the same way and must fail the
+    same way: a literal is `re.escape`d so that one `finditer` serves both
+    kinds, and a half-written pattern raises here rather than becoming a term
+    that quietly matches nothing.
+    """
+    if not text:
+        return None
+    try:
+        return re.compile(text if regex else re.escape(text), re.I)
+    except re.error as exc:
+        msg = f"invalid regular expression: {exc}"
+        raise ValueError(msg) from exc
+
+
+def _spans(pattern: re.Pattern[str] | None, text: str) -> list[tuple[int, int]]:
+    """Where a pattern sits in ``text``, for whoever is drawing it.
+
+    Zero-width matches are dropped. A pattern like ``a*`` matches the empty
+    string between every pair of characters, and a highlight of nothing at every
+    position is a row painted solid.
+    """
+    if pattern is None:
+        return []
+    return [match.span() for match in pattern.finditer(text) if match.end() > match.start()]
+
+
+def merge_spans(
+    left: Sequence[tuple[int, int]], right: Sequence[tuple[int, int]]
+) -> Sequence[tuple[int, int]]:
+    """Two sets of ranges as one, overlaps folded together, in order.
+
+    The two verbs are drawn in one wash, and a wash is translucent: painting the
+    same pixels twice makes them darker than the colour that was held to a
+    contrast floor. Searching for ``err`` while highlighting ``error`` overlaps
+    on every hit, which is not a corner case -- it is what somebody narrowing
+    and then looking within the narrowing actually types.
+
+    Two arguments rather than one already-joined sequence, so that the ordinary
+    case can be handed back untouched. This runs per visible message cell per
+    repaint and only one of the two fields is usually filled in; building a
+    joined list and sorting it there would be two allocations and a sort to
+    arrive at the list that came in. Both sides are already ordered and
+    non-overlapping within themselves, `finditer` being what produced them.
+    """
+    if not left:
+        return right
+    if not right:
+        return left
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted([*left, *right]):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,14 +149,7 @@ class Filter:
     _pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if not self.search:
-            return
-        try:
-            pattern = re.compile(self.search if self.regex else re.escape(self.search), re.I)
-        except re.error as exc:
-            msg = f"invalid regular expression: {exc}"
-            raise ValueError(msg) from exc
-        object.__setattr__(self, "_pattern", pattern)
+        object.__setattr__(self, "_pattern", _compile(self.search, regex=self.regex))
 
     @property
     def is_empty(self) -> bool:
@@ -263,16 +325,8 @@ class Filter:
         Here rather than in the delegate because the pattern is here: a literal
         search is `re.escape`d at construction, so one `finditer` covers both
         kinds and the drawing side never has to know which it has.
-
-        Zero-width matches are dropped. A pattern like ``a*`` matches the empty
-        string between every pair of characters, and a highlight of nothing at
-        every position is a row painted solid.
         """
-        if self._pattern is None:
-            return []
-        return [
-            match.span() for match in self._pattern.finditer(text) if match.end() > match.start()
-        ]
+        return _spans(self._pattern, text)
 
     def _matches_subsystem(self, record: Record) -> bool:
         """Match a subsystem by substring, on a record that may not have one.
@@ -296,6 +350,54 @@ class Filter:
         if needle.isdigit():
             return record.pid == int(needle)
         return needle in record.process.casefold()
+
+
+@dataclass(frozen=True, slots=True)
+class Highlight:
+    """A term marked where it stands, rather than one that removes rows.
+
+    The second of the two verbs `docs/design/gui.md` §5 has asked for since
+    before phase 4, and the reason they are two rather than one: they *compose*.
+    Narrow to Error, then find ``404`` within what is left. A single field can
+    only do one of those at a time, which is why 0.2.0's wash over the *filter's*
+    search term was described as the cheap eighty per cent rather than as the
+    feature.
+
+    Its own value rather than two more fields on `Filter`, because `Filter`
+    equality is what decides whether the model rescans the whole capture.
+    Changing what is highlighted must not do that: nothing about which rows
+    survive has changed, and a rescan at 200,000 rows to repaint forty is the
+    cost this separation exists to refuse.
+    """
+
+    text: str = ""
+    regex: bool = False
+
+    #: Compiled once, for the same reason `Filter` compiles once: this is asked
+    #: about every visible row on every repaint.
+    _pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_pattern", _compile(self.text, regex=self.regex))
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.text
+
+    def hits(self, text: str) -> bool:
+        """Whether ``text`` carries the term at all.
+
+        Separate from `spans` and not written in terms of it: the counter and
+        the jump target ask only whether there is a hit, and `search` stops at
+        the first one where `finditer` builds a list of all of them. On a
+        message that mentions a term twenty times that is nineteen match objects
+        nobody reads.
+        """
+        return self._pattern is not None and self._pattern.search(text) is not None
+
+    def spans(self, text: str) -> list[tuple[int, int]]:
+        """Where the term sits in ``text``, for whoever is drawing it."""
+        return _spans(self._pattern, text)
 
 
 @dataclass(frozen=True, slots=True)

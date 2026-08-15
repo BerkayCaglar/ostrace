@@ -320,6 +320,33 @@ Two refinements worth taking: a **gutter indicator**, so a highlight hit is
 visible when the message column is truncated, and a **per-term hit count**,
 which turns highlight into a free live aggregate.
 
+> **Both verbs exist as of 0.3.0, and both refinements went in with the
+> second.** Phase 4 built only the filter; 0.2.0 washed the *filter's* search
+> term inside the Message cell and said in the same breath that this was the
+> cheap eighty per cent, because one field cannot narrow and mark at the same
+> time.
+>
+> The two are separate values and travel on separate signals, because they cost
+> different things — a filter change re-tests every retained row and moves the
+> reader, a highlight change repaints forty — and because `Filter` equality is
+> what decides whether the model rescans. Changing what is marked must not do
+> that.
+>
+> **They share one wash.** Two colours would have to be measured against the
+> contrast floor, sit far enough apart to be nameable, and then be explained;
+> what distinguishes the highlight is that it has a gutter tick, a count, and
+> chevrons that stop at it. Their spans are merged before drawing, because a
+> translucent wash painted twice is darker than the colour that was held to the
+> floor.
+>
+> **The gutter indicator's premise was measured rather than assumed.** Over the
+> 8,000 committed fixture messages, the fraction of hits elided out of the
+> Message column: `error` 40.5% at 1280 px and 29.8% at 1920, `connection` 34.1%
+> and 16.8%, `timeout` 44.0% and 8.0%, `xpc` 5.8% and 1.9%, `assert` 1.5% and
+> 0.0%. A third of the hits on the commonest terms are invisible at the default
+> width, and widening the window barely moves the worst of them, because the
+> messages that mention a word late are the long ones.
+
 **Filtering is incremental.** Each arriving batch tests only the new records
 and appends matching indices — O(batch). Only a filter *change* rescans.
 

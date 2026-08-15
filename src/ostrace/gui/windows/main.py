@@ -60,7 +60,7 @@ from ostrace.gui import icons
 from ostrace.gui.actions import build_actions, build_menus, menu_items
 from ostrace.gui.capture_controller import CaptureController, Lifecycle
 from ostrace.gui.columns import COLUMNS, Column
-from ostrace.gui.filters import Filter, SavedFilter, remember, save
+from ostrace.gui.filters import Filter, Highlight, SavedFilter, remember, save
 from ostrace.gui.follow import FollowController
 from ostrace.gui.loader import CaptureLoader
 from ostrace.gui.markers import when
@@ -184,6 +184,7 @@ class MainWindow(QMainWindow):
     action_marks_panel: QAction
     action_deselect: QAction
     action_find: QAction
+    action_highlight: QAction
     action_mark: QAction
     action_clear_marks: QAction
     action_top: QAction
@@ -241,6 +242,16 @@ class MainWindow(QMainWindow):
         self._filter_debounce.setSingleShot(True)
         self._filter_debounce.setInterval(_FILTER_DEBOUNCE_MS)
         self._filter_debounce.timeout.connect(self._apply_filter)
+
+        #: Its own timer on the same interval, not a share of the filter's. The
+        #: two verbs are typed independently and a keystroke in one must not
+        #: postpone the other: one debounce restarted by both fields would let
+        #: somebody typing a highlight hold a half-finished filter off the table
+        #: indefinitely.
+        self._highlight_debounce = QTimer(self)
+        self._highlight_debounce.setSingleShot(True)
+        self._highlight_debounce.setInterval(_FILTER_DEBOUNCE_MS)
+        self._highlight_debounce.timeout.connect(self._apply_highlight)
 
         #: The last few filters, newest first, and the timer that decides one
         #: has been used rather than typed through. See `_remember_filter`.
@@ -510,6 +521,7 @@ class MainWindow(QMainWindow):
         self.action_deselect.triggered.connect(self.deselect)
         self.action_dark_mode.toggled.connect(lambda on: self.toggle_dark_mode(dark=on))
         self.action_find.triggered.connect(self.filter_bar.focus_search)
+        self.action_highlight.triggered.connect(self.filter_bar.focus_highlight)
         self.action_mark.triggered.connect(self.toggle_mark)
         self.action_clear_marks.triggered.connect(self.clear_marks)
         self.action_top.triggered.connect(self.go_to_top)
@@ -555,6 +567,7 @@ class MainWindow(QMainWindow):
         is a different errand from "what does this menu item do".
         """
         self.filter_bar.changed.connect(self._on_filter_changed)
+        self.filter_bar.highlight_changed.connect(self._highlight_debounce.start)
         self.filter_bar.recent_chosen.connect(self._on_recent_chosen)
         self.filter_bar.save_requested.connect(self.name_current_filter)
         self.filter_bar.manage_requested.connect(self.manage_saved_filters)
@@ -948,15 +961,28 @@ class MainWindow(QMainWindow):
 
         if not keep_filter:
             self.filter_bar.clear()
+            # The highlight goes with it, and only here. This is the one door
+            # that empties the window rather than pointing it somewhere else,
+            # and a term marked in yesterday's capture is not a question about
+            # an empty one.
+            self.filter_bar.clear_highlight()
             # Stated here rather than assumed inside `clear`, which empties the
             # rows and leaves the filter alone: which filter an emptied model
             # should carry is this method's policy, and it differs by door.
             self.model.set_filter(Filter())
+            self.model.set_highlight(Highlight())
+            self.table.set_highlight(Highlight())
             return
         wanted = self._bar_filter()
         if wanted is not None:
             self.model.set_filter(wanted)
             self.table.message_delegate.set_filter(wanted)
+        # Carried across every other door, for the reason the filter is: the
+        # term somebody is hunting is usually the question they are taking to
+        # the next capture.
+        marked = self.filter_bar.current_highlight()
+        self.model.set_highlight(marked)
+        self.table.set_highlight(marked)
 
     def open_capture(self, path: Path) -> None:
         """Load a capture into the table.
@@ -2036,6 +2062,30 @@ class MainWindow(QMainWindow):
             self.banner.show_message(str(exc), "Dismiss")
             return None
 
+    def _apply_highlight(self) -> None:
+        """Mark a term in place, without disturbing what is on screen.
+
+        No anchor and no restore, deliberately: `RecordModel.set_highlight`
+        repaints rather than resetting, so the reader's selection and scroll
+        position are still valid afterwards and there is nothing to put back.
+        Taking an anchor here would be doing the expensive half of a filter
+        change for a verb that does not change which rows exist.
+        """
+        try:
+            wanted = self.filter_bar.current_highlight()
+        except ValueError as exc:
+            self.banner.show_message(str(exc), "Dismiss")
+            return
+        self.model.set_highlight(wanted)
+        self.table.set_highlight(wanted)
+        self._update_hits()
+
+    def _update_hits(self) -> None:
+        """Refresh the hit readout. Cheap: the model keeps the count."""
+        self.status.set_hits(
+            self.model.highlight_hits, highlighting=not self.model.highlight.is_empty
+        )
+
     def _apply_filter(self) -> None:
         wanted = self._bar_filter()
         if wanted is None:
@@ -2062,6 +2112,11 @@ class MainWindow(QMainWindow):
         self.status.set_volume(self.model.retained, self._bytes_on_disk())
         self.status.set_gap_count(self.model.gaps)
         self.status.set_shown(self.model.rowCount(), self.model.retained)
+        # Here too, and not only where the highlight is edited: a narrowing
+        # filter takes rows away from the term, and a live capture brings more
+        # of them in. The count is a reading of the rows on screen, so it has to
+        # be refreshed wherever those change rather than only where it was set.
+        self._update_hits()
 
     def _bytes_on_disk(self) -> int | None:
         """How large the session has grown, or ``None`` if there is not one.

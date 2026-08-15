@@ -31,13 +31,14 @@ from PySide6.QtWidgets import (
 )
 
 from ostrace.gui import icons
-from ostrace.gui.filters import Filter, SavedFilter
+from ostrace.gui.filters import Filter, Highlight, SavedFilter
 from ostrace.gui.theme import Scheme
 from ostrace.model import Level
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from PySide6.QtCore import SignalInstance
     from PySide6.QtGui import QResizeEvent
 
 __all__ = ["NO_RECENT", "NO_SAVED", "WRAP_WIDTH", "FilterBar"]
@@ -55,17 +56,25 @@ NO_SAVED = "No named filters yet"
 
 #: Below this width the bar folds onto two lines.
 #:
-#: Measured on the shipped fonts, as the width where folding first gives the
-#: Search field *more* room than not folding: 900, at 40 characters against 38.
-#: Below it the gap opens fast -- 31 against 21 at 800 px, 27 against 11 at 740
-#: -- and the flat arrangement bottoms out at **9 characters**, which is the
-#: field's own minimum and is not a search box. Folded, Search holds 27 all the
-#: way down, because it has a line to itself.
+#: Measured on the shipped fonts as the first width at which folding gives one
+#: of the two free-text fields *more* room than not folding and neither of them
+#: less: **1150**, where flat holds Search at 28 characters and Highlight at 27
+#: against 28 and 28 folded. Below it the gap opens fast -- 23 against 26 at
+#: 1100, 12 against 20 at 960 -- and the flat arrangement bottoms out at **2
+#: characters**, which is not a text field at all. Folded, both hold 20 down to
+#: 800 px, because they share a line with nothing that narrows.
 #:
-#: The first attempt at this measured two bars that both followed the rule
-#: below, so it compared each arrangement against itself and reported them
-#: identical at every width. The comparison needs one of them pinned.
-WRAP_WIDTH = 900
+#: **It was 900 and that number was right for four controls.** Adding the
+#: Highlight field puts five on the flat line, so the width at which sharing one
+#: line stops paying moves up with it; re-measuring rather than keeping the
+#: constant is the difference between a breakpoint and a leftover. On the 1280 px
+#: default window the bar still does not fold.
+#:
+#: The first attempt at this measurement, on the four-control bar, resized two
+#: bars that both followed the rule below -- so it compared each arrangement
+#: against itself and reported them identical at every width. The comparison
+#: needs one of them pinned, which is what the re-measurement did too.
+WRAP_WIDTH = 1150
 
 
 class FilterBar(QWidget):
@@ -80,6 +89,12 @@ class FilterBar(QWidget):
     """
 
     changed = Signal()
+    #: The highlight term was edited. Separate from `changed` all the way to the
+    #: window, because the two verbs cost different things: a filter change
+    #: rescans every retained row and moves the reader, and a highlight change
+    #: repaints forty. Folding them into one signal would make the cheap one pay
+    #: for the expensive one on every keystroke.
+    highlight_changed = Signal()
     #: One of the offered filters was chosen, recent or named. Carries the
     #: `Filter` itself, so the window never has to map a menu position back
     #: onto a list that may have moved underneath it while the menu was open.
@@ -131,6 +146,13 @@ class FilterBar(QWidget):
         self._process = self._add_field("Process", "name or pid")
         self._subsystem = self._add_field("Subsystem", "com.apple.…")
         self._search = self._add_field("Search", "message text")
+        #: The second verb. On its own signal, because it must not cost a
+        #: rescan: `changed` is debounced and then re-tests every retained row,
+        #: and nothing about which rows survive has changed when a highlight
+        #: does.
+        self._highlight = self._add_field(
+            "Highlight", "mark, do not hide", signal=self.highlight_changed
+        )
 
         self._process_exclude = self._add_toggle(
             self._process,
@@ -152,6 +174,13 @@ class FilterBar(QWidget):
             "regex",
             "Regular expression",
             "Read the search text as a regular expression rather than literally",
+        )
+        self._highlight_regex = self._add_toggle(
+            self._highlight,
+            "regex",
+            "Regular expression",
+            "Read the highlight text as a regular expression rather than literally",
+            signal=self.highlight_changed,
         )
 
         #: Both halves of going back to a filter, under one button. The last
@@ -178,11 +207,13 @@ class FilterBar(QWidget):
         # changes rather than only when a list does.
         self.changed.connect(self._rebuild_menu)
 
-    def _add_field(self, label: str, placeholder: str) -> QLineEdit:
+    def _add_field(
+        self, label: str, placeholder: str, *, signal: SignalInstance | None = None
+    ) -> QLineEdit:
         field = QLineEdit(self)
         field.setPlaceholderText(placeholder)
         field.setClearButtonEnabled(True)
-        field.textChanged.connect(self.changed)
+        field.textChanged.connect(self.changed if signal is None else signal)
         caption = QLabel(label, self)
         # A `QLabel` beside a field is a label to somebody looking at it and
         # nothing at all to anything reading the window: the association has to
@@ -216,11 +247,12 @@ class FilterBar(QWidget):
             (self._captions["Process"], self._process, 0),
             (self._captions["Subsystem"], self._subsystem, 0),
             (self._captions["Search"], self._search, 1),
+            (self._captions["Highlight"], self._highlight, 1),
         ]
         if wrapped:
-            # Level, Process and Subsystem on the first line; Search and the
-            # menu on the second, where Search gets the whole width. That is
-            # the field whose value is longest and the one a narrow window
+            # The three that narrow on the first line; the two that carry
+            # free text on the second, sharing it, with the menu after them.
+            # Those two hold the longest values and are what a narrow window
             # squeezes hardest.
             self._place(row[:3], line=0, tail=None)
             self._place(row[3:], line=1, tail=self.recent)
@@ -256,7 +288,15 @@ class FilterBar(QWidget):
         if wrapped != self._wrapped:
             self._lay_out(wrapped=wrapped)
 
-    def _add_toggle(self, field: QLineEdit, glyph: str, name: str, tooltip: str) -> QAction:
+    def _add_toggle(
+        self,
+        field: QLineEdit,
+        glyph: str,
+        name: str,
+        tooltip: str,
+        *,
+        signal: SignalInstance | None = None,
+    ) -> QAction:
         """A checkable button inside ``field``, at its trailing edge.
 
         The name is the accessible name as well as the tooltip's first line:
@@ -272,7 +312,7 @@ class FilterBar(QWidget):
         action.setCheckable(True)
         action.setToolTip(tooltip)
         action.setIcon(icons.icon(glyph, self._scheme, ratio=self.devicePixelRatioF()))
-        action.toggled.connect(self.changed)
+        action.toggled.connect(self.changed if signal is None else signal)
         field.addAction(action, QLineEdit.ActionPosition.TrailingPosition)
         self._toggles.append((action, glyph))
         return action
@@ -306,6 +346,14 @@ class FilterBar(QWidget):
         return self._regex.isChecked()
 
     @property
+    def highlight(self) -> str:
+        return self._highlight.text()
+
+    @property
+    def highlight_regex(self) -> bool:
+        return self._highlight_regex.isChecked()
+
+    @property
     def process_exclude(self) -> bool:
         return self._process_exclude.isChecked()
 
@@ -333,6 +381,18 @@ class FilterBar(QWidget):
             process_exclude=self.process_exclude,
             subsystem_exclude=self.subsystem_exclude,
         )
+
+    def current_highlight(self) -> Highlight:
+        """What the bar is marking in place.
+
+        Raises ``ValueError`` for a half-typed pattern, exactly as `current`
+        does, and the caller answers it the same way: keep the previous
+        highlight and say why. It matters less here than it does for the filter
+        -- an unusable highlight marks nothing where an unusable filter empties
+        the table -- but the two fields look the same and behaving differently
+        would make the pair unlearnable.
+        """
+        return Highlight(text=self.highlight, regex=self.highlight_regex)
 
     @property
     def is_empty(self) -> bool:
@@ -435,8 +495,24 @@ class FilterBar(QWidget):
         return [action.text() for action in self._saved_actions]
 
     def clear(self) -> None:
-        """Reset to showing everything. Wired to the banner's way out."""
+        """Reset to showing everything. Wired to the banner's way out.
+
+        The highlight is deliberately left alone. This is the way back from a
+        filter that hides every row, and a highlight hides nothing -- taking it
+        away here would answer a question nobody asked, on the one press
+        somebody makes when they cannot see their log.
+        """
         self._set_fields(Filter())
+
+    def clear_highlight(self) -> None:
+        """Drop the marked term. For the doors that empty the window entirely."""
+        self._highlight.clear()
+        self._highlight_regex.setChecked(False)
+
+    def focus_highlight(self) -> None:
+        """Put the cursor in the highlight box and select what is there."""
+        self._highlight.setFocus()
+        self._highlight.selectAll()
 
     def set_process(self, process: str) -> None:
         """Narrow by process, leaving every other term alone.

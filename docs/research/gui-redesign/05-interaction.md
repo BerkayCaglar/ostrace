@@ -689,6 +689,13 @@ marks them in place — and phase 4 built only the first. The full version (a
 second field, per-term hit count, gutter indicator, `F3`/`n` stepping) is real
 work and a second control on an already-busy bar. **LATER.**
 
+> **Taken in 0.3.0.** "A second control on an already-busy bar" was the right
+> worry and it had a measurable answer: the fifth control moves the fold
+> breakpoint from 900 px to **1150**, re-measured the same way it was first
+> measured, and the 1280 px default window still does not fold. §10 carries the
+> rest, including what the gutter indicator this section's estimate did not
+> cover turned out to be worth.
+
 The cheap 80% for this release: **draw the current search term highlighted inside
 the Message cell of the rows that survive the filter.** It answers "why did this
 row match?" with no new control, and the per-row cost is one `str.find` on a
@@ -1164,13 +1171,50 @@ layout-safe gap keys~~ · ~~`F5` refresh~~ · ~~`Ctrl+Shift+C` copy message~~ ·
 
 ### Later
 
-A filter query language or even a strict text-form *reader* · full highlight as a
-second verb with hit counts and a gutter indicator · `F3`/`n` hit stepping ·
-named marks · marks persisted per capture · minimap hover detail · a
-time-proportional timeline · export-what-the-filter-shows · hot-plug device
+A filter query language or even a strict text-form *reader* · ~~full highlight
+as a second verb with hit counts and a gutter indicator~~ · ~~`F3`/`n` hit
+stepping~~ · named marks · marks persisted per capture · minimap hover detail ·
+a time-proportional timeline · export-what-the-filter-shows · hot-plug device
 notification · network capture · per-pane follow · in-row expansion on
 `Right`/`Left` · context lines around a match · a Preferences dialog (and with
 it, the `RELOCATED` / `PreferencesRole` question).
+
+> **The second verb was taken out of this tier in 0.3.0**, with its hit count
+> and its gutter indicator. Two things about it were written here before the
+> code existed and turned out differently.
+>
+> **`F3`/`n` was not available and should not have been asked for.** Both keys
+> were bound to the jump-target picker in 0.1.1 — *after* this document was
+> written, which is how a list can go stale without anybody editing it. Hits
+> became one more `Find` member instead, so the existing chevrons step them and
+> no second sequence runs past the first.
+>
+> **The gutter indicator's premise was checked before it was built.** §4.6 says
+> the wash answers "why did this row match?", and it cannot when the term is
+> past the Message column's elision point. Measured over the 8,000 committed
+> fixture messages, the fraction of hits elided out of view at 1280 / 1600 /
+> 1920 px: `error` 40.5 / 31.1 / 29.8%, `connection` 34.1 / 19.5 / 16.8%,
+> `timeout` 44.0 / 8.0 / 8.0%, `xpc` 5.8 / 4.8 / 1.9%, `assert` 1.5 / 0.4 /
+> 0.0%. At the shipped default width a third of the hits on the commonest terms
+> show nothing, and 640 more pixels move `error` by ten points — the messages
+> that mention a word late are the long ones, so a wider window is not the
+> answer. The strip is the table's own hidden vertical header, five pixels wide,
+> and it appears only while a term is set: the minimap time axis was refused for
+> costing 51 px permanently, and a permanent strip that says nothing until
+> somebody types would be the same trade at a tenth the size.
+>
+> **What it costs is 0.34 ms**, spread 0.065 over nine rounds of 60 repaints at
+> 200,000 rows, timed against the strip's own viewport. On the whole table it
+> does not resolve: 39.43 ms with no term, 42.60 with a term and the strip
+> hidden, 42.41 with a term and the strip shown. Four attempts were needed to
+> get that, and the three wrong ones are all method: varying the *filter*
+> between arms changes how many rows the model holds, so the arms stop being
+> about one table; a fixed arm order within a round is a systematic effect
+> interleaving across rounds does not remove, because toggling the strip forces
+> a relayout the next arm pays for; and `repaint()` on a widget with nothing
+> invalidated paints nothing, so sixty of them time one paint and fifty-nine
+> no-ops — which is why two runs disagreed about which arm was slowest and one
+> reported the gutter *hidden* costing more than the gutter shown.
 
 ---
 
