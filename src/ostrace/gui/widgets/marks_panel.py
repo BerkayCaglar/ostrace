@@ -95,11 +95,30 @@ class MarksPanel(QDockWidget):
             item.setData(Qt.ItemDataRole.UserRole, row)
 
     def _describe(self, row: int) -> str:
-        """One line: when, how bad, from what, and the start of what it said."""
+        """When it happened, then what it is.
+
+        The reader's own name for the mark where they gave it one, and the level,
+        the process and the head of the message where they did not. Replacing
+        rather than appending: a name exists precisely because the message head
+        was not a good enough label, so showing both would put the worse one back
+        beside it.
+
+        **The name comes second, right after the time, and that is a picture
+        rather than a preference.** It was written last, after the level and the
+        process, and a rendered panel showed why that is wrong: the dock is
+        narrow by design and the two identifier columns are long, so the line
+        elided at ``backupd(CoreServices)[456…`` and the name — the whole reason
+        for naming anything — was the one part never on screen. Time is short and
+        fixed-width and is what locates a row in the log; everything after it is
+        the label, and the label is what a reader is scanning for.
+        """
         model = self._model
         if model is None:  # pragma: no cover - rows come from a model
             return ""
         time = model.cell_text(row, int(Column.TIME))
+        name = model.mark_name(row)
+        if name:
+            return f"{time}  {name}"
         level = model.cell_text(row, int(Column.LEVEL))
         process = model.cell_text(row, int(Column.PROCESS))
         message = model.cell_text(row, int(Column.MESSAGE))

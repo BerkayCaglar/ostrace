@@ -48,10 +48,10 @@ controllers came out of it — `gui/settings.py`, `gui/actions.py`,
 to 0009 record why they are shaped that way and what deliberately stayed on the
 window.
 
-**It is 2,243 lines now**, which is 88 more than before the refactor started.
+**It is 2,318 lines now**, which is 163 more than before the refactor started.
 The structural work took out 338, the four 0.2.0 feature packages put 371 back —
 H 85, J 138, K none of it (an export change lands in the dialog), L 148 — and
-0.3.0's package M has added 55 so far. That is not the refactor failing: what
+0.3.0 has added 130 so far, M 55 and N 75. That is not the refactor failing: what
 came out were *responsibilities*, and what goes back in is wiring for features
 the window did not have. But the number is the number, and a document claiming
 1,817 while the file reads 2,243 is the kind of stale measurement this
