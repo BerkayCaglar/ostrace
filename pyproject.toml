@@ -80,10 +80,10 @@ ostrace-gui = "ostrace.gui:main"
 
 [dependency-groups]
 dev = [
-    "mypy==2.3.0",
+    "mypy==2.3.1",
     "pytest>=8.3",
     "pytest-cov>=6.0",
-    "ruff==0.16.1",
+    "ruff==0.16.5",
     # Static analysis for the workflows themselves. Worth having because the
     # CI configuration is the part of this repository with real privilege: it
     # holds an OIDC identity that can publish to PyPI, which no Python file here
