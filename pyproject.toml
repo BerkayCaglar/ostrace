@@ -46,7 +46,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
-    "pymobiledevice3>=10.3,<11",
+    "pymobiledevice3>=10.3,<12",
     "platformdirs>=4.2",
 ]
 
